@@ -154,11 +154,31 @@ export function readSpeechState(ctx) {
 /**
  * Ask the speech service to prepare the selected local provider (SenseVoice), downloading
  * its model if it has not been fetched yet. Progress is observed through readSpeechState.
+ *
+ * Robustness: when the speech capability is not loaded at all (the voice-input bundle is
+ * disabled), this first enables that bundle programmatically and waits for its provider
+ * to register, then starts the model download — so one click installs and downloads.
+ *
  * @param ctx - Host context.
  * @returns the state after the request was armed.
  */
-export function prepareSpeech(ctx) {
-  const speech = ctx.get('speechToText')
+export async function prepareSpeech(ctx) {
+  let speech = ctx.get('speechToText')
+  if (speech === undefined) {
+    const manager = ctx.get('pluginManager')
+    if (manager !== undefined && typeof manager.setBundleEnabled === 'function') {
+      try {
+        await manager.setBundleEnabled('@deepseek-ai/dsh-experimental-voice-input-bundle', true)
+      } catch (error) {
+        return { ready: false, phase: 'failed', message: error instanceof Error ? error.message : String(error), providerId: '' }
+      }
+      // The bundle applies live; give its provider a moment to register.
+      for (let attempt = 0; attempt < 40 && speech === undefined; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+        speech = ctx.get('speechToText')
+      }
+    }
+  }
   const state = readSpeechState(ctx)
   if (speech === undefined || state.providerId === '') return state
   try {

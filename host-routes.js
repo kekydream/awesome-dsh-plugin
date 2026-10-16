@@ -80,10 +80,14 @@ import {
 
 /**
  * Create the HTTP handler for all /meeting-room routes.
+ *
+ * Note: this factory itself is synchronous — it only returns the (async) handler closure.
+ * The caller registers the returned function directly, so it must not be a promise.
+ *
  * @param ctx - Host context owned by this plugin's fiber.
  * @returns an async function suitable for webServer.register.
  */
-export async function createHandler(ctx) {
+export function createHandler(ctx) {
   /**
    * Serve one meeting-room request.
    * @param req - Incoming request.
@@ -877,8 +881,10 @@ export async function createHandler(ctx) {
 
       if (method === 'POST' && route === '/speech/prepare') {
         // Download (or resume) the SenseVoice model directly; the browser half polls
-        // /speech to show progress.
-        sendJson(res, 200, prepareSpeech(ctx))
+        // /speech to show progress. When the voice-input bundle is disabled this also
+        // enables it first, so the one click installs and downloads.
+        const state = await prepareSpeech(ctx)
+        sendJson(res, 200, state)
         return
       }
 

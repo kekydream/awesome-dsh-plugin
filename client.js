@@ -277,6 +277,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       setupPrepareFailed: '下载失败，请重试',
       setupPrepareHint: '点「现在下载模型」可提前把发言人模型与手写模型下载到本机；转写模型由「语音输入」在首次转写时下载。',
       speechPrepareHint: '语音识别模型尚未下载。点击下方按钮即可在本机下载 SenseVoice 模型，下载完成后就能开始录制。',
+      speechUnavailableHint: '语音输入功能尚未启用。点击「立即下载模型」会自动启用语音输入功能并下载语音识别模型。',
       speechPrepareAction: '开始下载模型',
       speechDownloading: '正在下载语音模型…（可关闭此面板，后台继续）',
       speechRequiredFirst: '请先下载语音识别模型，下载完成后才能开始录制。',
@@ -478,6 +479,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       setupPrepareFailed: 'Download failed, retry',
       setupPrepareHint: 'Download the speaker and handwriting models now; the transcription model downloads on first transcription via Voice input.',
       speechPrepareHint: 'The speech recognition model has not been downloaded. Click the button below to download the SenseVoice model on this machine, then start recording.',
+      speechUnavailableHint: 'Voice input is not enabled yet. Clicking "Download now" will enable the voice-input feature and download the speech recognition model.',
       speechPrepareAction: 'Download model now',
       speechDownloading: 'Downloading the speech model\u2026 (safe to close this panel; it continues in the background)',
       speechRequiredFirst: 'Download the speech recognition model first; recording starts only after it is ready.',
@@ -1006,8 +1008,12 @@ registerProcessor('meeting-capture', MeetingCapture)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const value = await response.json()
-      if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+      const text = await response.text()
+      let value = {}
+      if (text !== '') {
+        try { value = JSON.parse(text) } catch { value = {} }
+      }
+      if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : `请求失败 (${response.status})`)
       return value
     }
 
@@ -1018,8 +1024,12 @@ registerProcessor('meeting-capture', MeetingCapture)
      */
     async function get(route) {
       const response = await fetch(`/meeting-room${route}`)
-      const value = await response.json()
-      if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+      const text = await response.text()
+      let value = {}
+      if (text !== '') {
+        try { value = JSON.parse(text) } catch { value = {} }
+      }
+      if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : `请求失败 (${response.status})`)
       return value
     }
 
@@ -1207,7 +1217,14 @@ registerProcessor('meeting-capture', MeetingCapture)
             const s = await readSpeechState()
             setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy })
             if (s.ready) { setShowSpeechDialog(false); return }
-            if (s.phase === 'failed' || Date.now() >= dl || !s.busy) {
+            // Only 'failed' is terminal: 'unprepared'/'unavailable' mean the voice bundle
+            // is still being enabled or the download has not started yet — keep polling.
+            if (s.phase === 'failed') {
+              setSpeech({ ready: false, phase: 'failed', requesting: false })
+              setError(typeof s.message === 'string' && s.message !== '' ? s.message : t('setupPrepareFailed'))
+              return
+            }
+            if (Date.now() >= dl) {
               setSpeech({ ready: false, phase: 'failed', requesting: false })
               setError(t('setupPrepareFailed'))
               return
@@ -2489,8 +2506,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         ]),
         openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
         note === '' ? null : h('p', { key: 'note', style: styles.note }, note),
-        speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [h('p', { style: styles.subtitle }, speech.requesting ? t('speechDownloading') : t('speechPrepareHint')), h('div', { style: styles.row }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')), typeof props.openVoiceInputBundle === 'function' && !speech.requesting ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null])]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
-        showSpeechDialog ? h('div', { key: 'sd', style: styles.setupOverlay, role: 'dialog', 'aria-modal': 'true' }, [h('div', { style: styles.setupCard }, [h('h2', { style: styles.setupTitle }, t('speechDialogTitle')), h('p', { style: styles.subtitle }, t('speechDialogBody')), speech.requesting ? h('p', { style: styles.status }, t('speechDownloading')) : null, h('div', { style: styles.setupFoot }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechDialogDownload')), h('button', { key: 'cn', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => setShowSpeechDialog(false) }, t('speechDialogCancel'))])])]) : null,
+        speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [h('p', { style: styles.subtitle }, speech.requesting ? t('speechDownloading') : speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechPrepareHint')), h('div', { style: styles.row }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')), typeof props.openVoiceInputBundle === 'function' && !speech.requesting ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null])]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        showSpeechDialog ? h('div', { key: 'sd', style: styles.setupOverlay, role: 'dialog', 'aria-modal': 'true' }, [h('div', { style: styles.setupCard }, [h('h2', { style: styles.setupTitle }, t('speechDialogTitle')), h('p', { style: styles.subtitle }, speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechDialogBody')), speech.requesting ? h('p', { style: styles.status }, t('speechDownloading')) : null, h('div', { style: styles.setupFoot }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechDialogDownload')), h('button', { key: 'cn', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => setShowSpeechDialog(false) }, t('speechDialogCancel'))])])]) : null,
         ]),
       ]))
     }
@@ -3627,8 +3644,9 @@ registerProcessor('meeting-capture', MeetingCapture)
         const reply = await get('/speech')
         const phase = typeof reply.phase === 'string' ? reply.phase : 'unavailable'
         const ready = reply.ready === true || phase === 'ready'
-        return { ready, phase, busy: SPEECH_BUSY.includes(phase) }
-      } catch { return { ready: true, phase: 'unavailable', busy: false } }
+        const message = typeof reply.message === 'string' ? reply.message : ''
+        return { ready, phase, busy: SPEECH_BUSY.includes(phase), message }
+      } catch { return { ready: true, phase: 'unavailable', busy: false, message: '' } }
     }
     function SetupNotice(props) {
       const [preparing, setPreparing] = React.useState(false)
