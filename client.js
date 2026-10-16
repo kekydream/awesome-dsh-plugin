@@ -263,6 +263,30 @@ registerProcessor('meeting-capture', MeetingCapture)
       documents: '会议文档',
       openDocument: '查看',
       inkPrompt: '这是一张会议手写笔记的图片。请识别其中的文字，然后用 meeting_note_write 把识别结果写回本场会议（作为草稿）。字迹不清的部分请如实标注，不要猜测。',
+      setupTitle: '首次使用会联网下载模型',
+      setupBody: '以下功能在第一次用到时需要联网下载本地模型（音频始终不出本机）：',
+      setupTranscribe: '语音转写（SenseVoice，本机识别）',
+      setupSpeaker: '发言人分离（3D-Speaker CAM++，约 28 MB）',
+      setupHandwriting: '手写识别（DAMO 行识别，约 77 MB）',
+      setupNote: '模型下载后校验大小与校验和；若下载源全部不可达，对应功能会明确报错，其余功能不受影响。',
+      setupDismiss: '知道了',
+      setupDetails: '查看详情',
+      setupPrepare: '现在下载模型',
+      setupPreparing: '正在下载模型…',
+      setupPrepared: '模型已就绪',
+      setupPrepareFailed: '下载失败，请重试',
+      setupPrepareHint: '点「现在下载模型」可提前把发言人模型与手写模型下载到本机；转写模型由「语音输入」在首次转写时下载。',
+      speechPrepareHint: '语音识别模型尚未下载。点击下方按钮即可在本机下载 SenseVoice 模型，下载完成后就能开始录制。',
+      speechPrepareAction: '开始下载模型',
+      speechDownloading: '正在下载语音模型…（可关闭此面板，后台继续）',
+      speechRequiredFirst: '请先下载语音识别模型，下载完成后才能开始录制。',
+      speechDialogTitle: '需要先下载语音识别模型',
+      speechDialogBody: '没有语音识别模型就无法把录音转成文字，此时开始录制没有意义。请先下载模型，就绪后再开始录制。',
+      speechDialogDownload: '立即下载模型',
+      speechDialogCancel: '暂不录制',
+      prepareInPanel: '下载本地模型',
+      preparingInPanel: '正在下载模型…',
+      preparedInPanel: '模型已就绪',
     }
 
     const en = {
@@ -440,6 +464,30 @@ registerProcessor('meeting-capture', MeetingCapture)
       documents: 'Meeting documents',
       openDocument: 'Open',
       inkPrompt: 'This image is a handwritten meeting note. Read the text in it, then call meeting_note_write to store the result on this meeting as a draft. Mark anything illegible honestly instead of guessing.',
+      setupTitle: 'Models download on first use',
+      setupBody: 'These features download their local models the first time you use them (audio never leaves this machine):',
+      setupTranscribe: 'Speech transcription (SenseVoice, on-device)',
+      setupSpeaker: 'Speaker diarization (3D-Speaker CAM++, ~28 MB)',
+      setupHandwriting: 'Handwriting recognition (DAMO line model, ~77 MB)',
+      setupNote: 'Downloads are verified by size and checksum. If every download source is unreachable, that feature reports a clear error while the others keep working.',
+      setupDismiss: 'Got it',
+      setupDetails: 'View details',
+      setupPrepare: 'Download models now',
+      setupPreparing: 'Downloading models\u2026',
+      setupPrepared: 'Models ready',
+      setupPrepareFailed: 'Download failed, retry',
+      setupPrepareHint: 'Download the speaker and handwriting models now; the transcription model downloads on first transcription via Voice input.',
+      speechPrepareHint: 'The speech recognition model has not been downloaded. Click the button below to download the SenseVoice model on this machine, then start recording.',
+      speechPrepareAction: 'Download model now',
+      speechDownloading: 'Downloading the speech model\u2026 (safe to close this panel; it continues in the background)',
+      speechRequiredFirst: 'Download the speech recognition model first; recording starts only after it is ready.',
+      speechDialogTitle: 'Download the speech model first',
+      speechDialogBody: 'Without the speech model your recording cannot be transcribed, so starting now would be meaningless. Download the model, then start recording.',
+      speechDialogDownload: 'Download now',
+      speechDialogCancel: 'Not now',
+      prepareInPanel: 'Download local models',
+      preparingInPanel: 'Downloading models\u2026',
+      preparedInPanel: 'Models ready',
     }
 
     const styles = {
@@ -571,6 +619,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabBody: { minHeight: '384px', display: 'flex', flexDirection: 'column', gap: '8px' },
       hintLines: { display: 'block', fontSize: '11px', opacity: 0.65, lineHeight: 1.6, whiteSpace: 'pre-line' },
       termsArea: { width: '100%', flex: 1, minHeight: '320px', padding: '6px', borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px', resize: 'vertical', boxSizing: 'border-box' },
+      setupOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
+      setupCard: { background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '12px', padding: '18px 20px', maxWidth: '460px', width: 'calc(100% - 40px)', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' },
+      setupTitle: { margin: 0, fontSize: '16px', fontWeight: 600 },
+      setupFeature: { fontSize: '13px', lineHeight: 1.6 },
+      setupFoot: { display: 'flex', gap: '8px', justifyContent: 'flex-end' },
     }
 
     /**
@@ -1124,6 +1177,49 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [note, setNote] = React.useState('')
       const [termsText, setTermsText] = React.useState(readTerms)
       const [speaker, setSpeaker] = React.useState({ phase: 'unprepared', message: '' })
+      const [speech, setSpeech] = React.useState({ ready: true, phase: 'checking', requesting: false })
+      const [showSpeechDialog, setShowSpeechDialog] = React.useState(false)
+
+      // Check transcription readiness on mount; follow any in-progress download.
+      React.useEffect(() => {
+        let live = true
+        void (async () => {
+          let s = await readSpeechState()
+          if (!live) return
+          setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy })
+          while (live && s.busy) {
+            await new Promise((r) => setTimeout(r, 1500))
+            if (!live) return
+            s = await readSpeechState()
+            if (live) setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy })
+          }
+        })()
+        return () => { live = false }
+      }, [])
+
+      const prepareSpeech = React.useCallback(async () => {
+        setSpeech((c) => ({ ...c, requesting: true }))
+        setError('')
+        try {
+          await post('/speech/prepare', {})
+          const dl = Date.now() + 600000
+          for (;;) {
+            const s = await readSpeechState()
+            setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy })
+            if (s.ready) { setShowSpeechDialog(false); return }
+            if (s.phase === 'failed' || Date.now() >= dl || !s.busy) {
+              setSpeech({ ready: false, phase: 'failed', requesting: false })
+              setError(t('setupPrepareFailed'))
+              return
+            }
+            await new Promise((r) => setTimeout(r, 1500))
+          }
+        } catch (e) {
+          setSpeech((c) => ({ ...c, requesting: false }))
+          setError(e instanceof Error ? e.message : String(e))
+        }
+      }, [t])
+
       const [points, setPoints] = React.useState([])
       const [tasks, setTasks] = React.useState([])
       const [notes, setNotes] = React.useState([])
@@ -1138,7 +1234,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [documents, setDocuments] = React.useState([])
       const [openDocument, setOpenDocument] = React.useState(null)
       /** Which kind of meeting content the panel is showing. */
-      const [bodyTab, setBodyTab] = React.useState('points')
+      const [bodyTab, setBodyTab] = React.useState('transcript')
       /** Whether the occasional actions are unfolded. */
       const [moreOpen, setMoreOpen] = React.useState(false)
       /** Whether the speaker-naming fields are unfolded. */
@@ -1800,8 +1896,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
           if (Array.isArray(reply.labels)) setLabels(reply.labels)
           if (reply.speaker !== undefined) setSpeaker({ phase: reply.speaker.phase, message: reply.speaker.message ?? '' })
-        } catch (failure) {
-          setError(failure instanceof Error ? failure.message : String(failure))
+        } catch (failure) { const msg = failure instanceof Error ? failure.message : String(failure); setError(msg); if (msg.indexOf('\u8bed\u97f3\u6a21\u578b\u5c1a\u672a\u4e0b\u8f7d') !== -1) setSpeech((c) => ({ ...c, ready: false }))
         } finally {
           active.inflight = false
           if (recorder.active === active) setPhase(active.stopping ? 'transcribing' : 'recording')
@@ -1813,6 +1908,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const start = React.useCallback(async () => {
         setError('')
         setNote('')
+        if (speech.ready !== true) { setShowSpeechDialog(true); return }
         setPhase('starting')
         try {
           const created = await post('/start', { sessionId, terms: termsText })
@@ -1824,9 +1920,8 @@ registerProcessor('meeting-capture', MeetingCapture)
             audio = new AudioContext()
           }
           await audio.resume()
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true },
-          })
+          let stream
+          try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) } catch (micErr) { const nm = micErr && typeof micErr.name === 'string' ? micErr.name : ''; if (nm === 'NotAllowedError' || nm === 'PermissionDeniedError') throw new Error('\u65e0\u6cd5\u8bbf\u95ee\u9ea6\u514b\u98ce\uff1a\u8bf7\u5728\u7cfb\u7edf\u8bbe\u7f6e\u91cc\u5141\u8bb8 DeepSeek Harness \u4f7f\u7528\u9ea6\u514b\u98ce'); if (nm === 'NotFoundError') throw new Error('\u6ca1\u6709\u68c0\u6d4b\u5230\u9ea6\u514b\u98ce\u8bbe\u5907'); throw new Error('\u65e0\u6cd5\u542f\u52a8\u9ea6\u514b\u98ce: ' + (micErr instanceof Error ? micErr.message : String(micErr))) }
           const url = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }))
           await audio.audioWorklet.addModule(url)
           const source = audio.createMediaStreamSource(stream)
@@ -1869,7 +1964,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           setPhase('idle')
           setError(failure instanceof Error ? failure.message : String(failure))
         }
-      }, [flush, release, sessionId, termsText])
+      }, [flush, release, sessionId, termsText, speech.ready])
 
       /** Stop capture, drain the remaining audio, then finalize the meeting. */
       const stop = React.useCallback(async () => {
@@ -2394,7 +2489,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         ]),
         openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
         note === '' ? null : h('p', { key: 'note', style: styles.note }, note),
-        error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [h('p', { style: styles.subtitle }, speech.requesting ? t('speechDownloading') : t('speechPrepareHint')), h('div', { style: styles.row }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')), typeof props.openVoiceInputBundle === 'function' && !speech.requesting ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null])]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        showSpeechDialog ? h('div', { key: 'sd', style: styles.setupOverlay, role: 'dialog', 'aria-modal': 'true' }, [h('div', { style: styles.setupCard }, [h('h2', { style: styles.setupTitle }, t('speechDialogTitle')), h('p', { style: styles.subtitle }, t('speechDialogBody')), speech.requesting ? h('p', { style: styles.status }, t('speechDownloading')) : null, h('div', { style: styles.setupFoot }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechDialogDownload')), h('button', { key: 'cn', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => setShowSpeechDialog(false) }, t('speechDialogCancel'))])])]) : null,
         ]),
       ]))
     }
@@ -3525,6 +3621,54 @@ registerProcessor('meeting-capture', MeetingCapture)
       ]))
     }
 
+    const SPEECH_BUSY = ['downloading', 'checking', 'loading', 'waking']
+    async function readSpeechState() {
+      try {
+        const reply = await get('/speech')
+        const phase = typeof reply.phase === 'string' ? reply.phase : 'unavailable'
+        const ready = reply.ready === true || phase === 'ready'
+        return { ready, phase, busy: SPEECH_BUSY.includes(phase) }
+      } catch { return { ready: true, phase: 'unavailable', busy: false } }
+    }
+    function SetupNotice(props) {
+      const [preparing, setPreparing] = React.useState(false)
+      const [done, setDone] = React.useState(false)
+      const [failure, setFailure] = React.useState('')
+      async function prepare() {
+        if (preparing) return
+        setPreparing(true); setDone(false); setFailure('')
+        try {
+          await post('/prepare', {})
+          const deadline = Date.now() + 240000
+          for (;;) {
+            const reply = await get('/prepare')
+            const sp = typeof reply.speaker?.phase === 'string' ? reply.speaker.phase : ''
+            const hw = typeof reply.handwriting?.phase === 'string' ? reply.handwriting.phase : ''
+            if (sp === 'failed' || hw === 'failed') { setFailure([reply.speaker?.message, reply.handwriting?.message].filter(Boolean).join('; ') || props.t('setupPrepareFailed')); break }
+            if (sp !== 'downloading' && sp !== 'unprepared' && hw !== 'downloading' && hw !== 'unprepared') { setDone(true); break }
+            if (Date.now() >= deadline) { setFailure(props.t('setupPrepareFailed')); break }
+            await new Promise((r) => setTimeout(r, 1500))
+          }
+        } catch (e) { setFailure(e instanceof Error ? e.message : String(e)) }
+        finally { setPreparing(false) }
+      }
+      const status = failure ? h('span', { style: styles.error }, failure) : done ? h('span', { style: styles.status }, props.t('setupPrepared')) : preparing ? h('span', { style: styles.status }, props.t('setupPreparing')) : null
+      return h('div', { style: styles.setupOverlay, role: 'dialog', 'aria-modal': 'true' }, [h('div', { style: styles.setupCard }, [
+        h('h2', { style: styles.setupTitle }, props.t('setupTitle')),
+        h('p', { style: styles.subtitle }, props.t('setupBody')),
+        h('div', { style: styles.setupFeature }, '\u00b7 ' + props.t('setupTranscribe')),
+        h('div', { style: styles.setupFeature }, '\u00b7 ' + props.t('setupSpeaker')),
+        h('div', { style: styles.setupFeature }, '\u00b7 ' + props.t('setupHandwriting')),
+        h('p', { style: styles.note }, props.t('setupNote')),
+        h('p', { style: styles.note }, props.t('setupPrepareHint')),
+        status,
+        h('div', { style: styles.setupFoot }, [
+          h('button', { key: 'p', type: 'button', style: styles.button, disabled: preparing, onClick: () => { void prepare() } }, props.t('setupPrepare')),
+          h('button', { key: 'd', type: 'button', style: styles.button, onClick: () => props.onOpenDetails() }, props.t('setupDetails')),
+          h('button', { key: 'x', type: 'button', style: styles.button, onClick: () => props.onDismiss() }, props.t('setupDismiss')),
+        ]),
+      ])])
+    }
     return {
       inject: ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'layout', 'sessions'],
       apply(ctx) {
@@ -3664,7 +3808,7 @@ registerProcessor('meeting-capture', MeetingCapture)
 
         ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab', key: TAB_ID, locale: NS,
-          inject: () => ({ askNote, askText }),
+          inject: () => ({ askNote, askText, openVoiceInputBundle: () => { if (readRailCollapsed() === true) ctx.layout.toggleSidebar(); const nav = ctx.get('pluginNavigation'); if (nav) nav.openBundle('@deepseek-ai/dsh-experimental-voice-input-bundle'); else ctx.layout.selectPanel('plugins') } }),
         }, MeetingPanel))
         ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab.title', key: TAB_ID,
@@ -3712,6 +3856,13 @@ registerProcessor('meeting-capture', MeetingCapture)
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
           name: 'sidebar.panellist', id: PANEL_ID, order: 20, locale: NS, label: () => t('hubTitle'),
         }, MeetingPanelIcon))
+        try {
+          ctx.slots.inject('plugins.bundle.activation', () => ctx.slots.register({ name: 'plugins.bundle.activation', key: 'dsh-meeting-room', locale: NS }, SetupNotice))
+        } catch (error) {
+          // The activation guidance slot is declared by the plugin manager; if it is
+          // ever unavailable, the rest of the plugin must still load.
+          console.warn('meeting-room: could not register the bundle activation notice', error)
+        }
       },
     }
   },
