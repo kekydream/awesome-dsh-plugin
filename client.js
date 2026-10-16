@@ -1,0 +1,3718 @@
+/**
+ * Browser half of the meeting-room plugin.
+ *
+ * 本插件由博尔塔拉融媒体中心媒体传播与认知重点实验室制作。
+ * 制作人：杨道泉　邮箱：kekydream@qq.com
+ * Copyright (c) 博尔塔拉融媒体中心媒体传播与认知重点实验室
+ *
+ * Loaded through the client module table, so it must be a lazy CommonJS factory and
+ * may `require` only the shared platform modules.
+ *
+ * M1: the recording panel lives in the session's right sidebar, opened from a button in
+ * the session header. The session id arrives as a slot prop and travels to the host half
+ * with the recording, which is what lets `meeting_read` answer for the right meeting.
+ *
+ * Capture: microphone → inline AudioWorklet → 16 kHz mono PCM16 → cues endpointed at
+ * pauses → same-origin HTTP → local SenseVoice. The terminology list fixes what the
+ * local model reliably gets wrong, and composes a correction request for the agent.
+ */
+window.__ModuleLoader__.load({
+  id: 'dsh-meeting-room',
+  factory(require) {
+    const React = require('react')
+    const h = React.createElement
+
+    /** Locale namespace owned by this plugin. */
+    const NS = 'meetingRoom'
+
+    /** Tab implementation identity; the body and title register under it. */
+    const TAB_ID = 'dsh-meeting-room'
+
+    /** Tab type discriminator used by `sidebarRight.openTab`. */
+    const TAB_KIND = 'meeting-room'
+
+    /** Route prefix owned by the host half. */
+    const PREFIX = '/meeting-room'
+
+    /** Main-panel key and left-sidebar row id; the row id addresses this page. */
+    const PANEL_ID = 'meeting-room'
+
+    /** Browser-storage key holding the terminology list between meetings. */
+    const TERMS_KEY = 'dsh-meeting-room.terms'
+
+    /** Target sample rate for the speech provider. */
+    const TARGET_RATE = 16000
+
+    /** Shortest audio a cue may hold; below this a pause is not treated as an endpoint. */
+    const MIN_CHUNK_SECONDS = 1.2
+
+    /**
+     * Hard ceiling per request; a speaker who never pauses still gets periodic cues. The
+     * recognizer is request/response, so this ceiling — not a partial hypothesis — is what
+     * decides how live the transcript feels during a long uninterrupted sentence.
+     */
+    const MAX_CHUNK_SECONDS = 5
+
+    /** Block RMS under which the microphone hears room noise rather than speech. */
+    const SILENCE_RMS = 0.012
+
+    /** Silence that must accumulate before a cue is closed. */
+    const SILENCE_HOLD_SECONDS = 0.5
+
+    /**
+     * Worklet source, installed from a Blob URL so the client bundle needs no asset.
+     * It accumulates render quanta and posts ~128 ms blocks to keep messaging cheap.
+     */
+    const WORKLET_SOURCE = `
+class MeetingCapture extends AudioWorkletProcessor {
+  constructor() {
+    super()
+    this.buffer = new Float32Array(2048)
+    this.filled = 0
+  }
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0]
+    if (channel) {
+      for (let i = 0; i < channel.length; i++) {
+        this.buffer[this.filled++] = channel[i]
+        if (this.filled === this.buffer.length) {
+          this.port.postMessage(this.buffer.slice(0))
+          this.filled = 0
+        }
+      }
+    }
+    return true
+  }
+}
+registerProcessor('meeting-capture', MeetingCapture)
+`
+
+    const zh = {
+      title: '会议记录',
+      open: '会议记录',
+      start: '开始记录',
+      stop: '停止记录',
+      idle: '未开始',
+      starting: '正在启动麦克风…',
+      transcribing: '识别中…',
+      elapsed: '已记录',
+      empty: '还没有内容。开始后对着麦克风说话。',
+      terms: '会议术语（人名 / 公司 / 项目 / 专业词）',
+      termsHint: '每行一条，三种写法：① 错词=正确词 → 直接替换，例如 romi中心=罗米中心；② 只写一个词 → 同音订正，例如 陈一鸣（听到 沉一明 也会改成它）；③ 前面加 * → 连单字也按同音订正，例如 *李（单字容易误替换，只在对某个姓氏有把握时用）。订正不改动原始转写，鼠标停在句子上可看原文。',
+      exportFile: '保存为文件（SRT + Markdown）',
+      copySrt: '复制 SRT',
+      copy: '复制全文',
+      copyForFix: '复制纠错请求',
+      copied: '已复制',
+      saved: '已保存',
+      error: '出错',
+      hubTitle: '会议管理',
+      hubIntro: '会议实录保存在本机；录制在会话里进行（标题栏的「会议记录」按钮 → 右侧栏面板）。',
+      hubCurrent: '当前会话',
+      hubNoSession: '还没有打开的会话。',
+      hubSessionOpen: '会话已在前台 —— 点标题栏的「会议记录」开始录制。',
+      hubSessionBackground: '当前会话不在前台 —— 切回会话后即可开始录制。',
+      hubHowTo: '录制在会话作用域进行：它需要会话身份，才能让 Agent 用 meeting_read 读到这场实录。',
+      hubRecords: '历史实录（本机 meetings 目录）',
+      hubRefresh: '刷新',
+      hubEmpty: '还没有导出的实录。录完一场并点「保存为文件」后就会出现在这里。',
+      hubSend: '发送到新对话',
+      hubSendHint: '新建一个对话，把这场会议的实录放进去，确认后发送',
+      hubOpenSession: '打开对话',
+      hubReveal: '定位文件',
+      hubNoMeeting: '这条记录没有对应的会议',
+      hubNoWorkspace: '当前界面不支持新建对话',
+      hubClose: '关闭',
+      speaker: '发言人',
+      speakerEnable: '准备发言人识别',
+      speakerDownloading: '正在下载声纹模型…',
+      speakerReady: '发言人识别已启用',
+      speakerFailed: '发言人识别不可用',
+      speakerOff: '发言人识别未启用（准备约需下载 27 MB）',
+      points: '要点',
+      tasks: '工作安排',
+      refresh: '刷新要点/任务',
+      point_decision: '决定',
+      point_point: '要点',
+      point_risk: '风险',
+      point_question: '待定',
+      taskDraft: '待确认',
+      taskConfirmed: '已确认',
+      noAnalysis: '还没有要点或工作安排。点下面的按钮在本地生成。',
+      generate: '生成要点与任务（本地）',
+      extractEmpty: '没有识别出明显的要点或行动项。可在会话里直接对 Agent 说「读一下这场会议，给我要点和行动项」来精修。',
+      noMeeting: '这个会话还没有会议记录。点「开始记录」录一场，再来生成要点与任务。',
+      seekHint: '点击跳到这一句',
+      agentDone: '已更新',
+      follow: '跟随播放',
+      hubNoText: '这段录音没有对应的文字实录。',
+      segments: '句',
+      remove: '删除',
+      ownerPh: '负责人',
+      duePh: '时间',
+      originRule: '规则',
+      originAgent: 'AI',
+      ink: '手写笔记',
+      inkHint: '用笔或鼠标在下面书写；Windows 触屏笔的橡皮端会被识别为橡皮。',
+      inkPen: '笔',
+      inkErase: '橡皮',
+      inkUndo: '撤销',
+      inkClear: '清空',
+      inkSave: '保存为笔记',
+      inkSaved: '笔记已保存',
+      inkClose: '收起手写板',
+      inkRecognize: '发送到对话（较慢）',
+      inkLocal: '识别为文字',
+      inkLocalEmpty: '没有识别出文字，写大一点再试',
+      inkLasso: '圈选',
+      clearEntry: '清除',
+      inkLassoHint: '轻点一个字即可选中；长按画布可直接开始圈选',
+      inkSelection: '识别选中',
+      inkToTask: '转为任务',
+      inkToTaskDone: '已转为待确认任务',
+      needSession: '这需要一个会话：请先在某个对话里打开会议记录面板',
+      roleLabel: '我的角色',
+      speakingNow: '正在说',
+      roleHost: '主持人',
+      roleAttendee: '参会人',
+      roleObserver: '旁听',
+      roleHint: '复盘时会按这个角色组织内容',
+      review: '复盘会议',
+      push: '同步任务',
+      pushDone: '已推送到机器人',
+      robotSettings: '机器人设置',
+      robotHint: '填入钉钉 / 企业微信机器人的 Webhook 地址，留空表示不推送；只推送【已确认】的任务。地址保存在本机。',
+      robotSave: '保存地址',
+      robotSaved: '已保存',
+      robotNone: '未配置',
+      more: '更多',
+      robotAppHint: '私发（工作通知）与通讯录同步都需要钉钉企业内部应用：AppKey / AppSecret / AgentId，且应用已开通对应权限。',
+      pushMode: '推送方式',
+      pushModeGroup: '群机器人',
+      pushModeWork: '工作通知',
+      pushModeBoth: '两者都发',
+      peopleTitle: '人员（姓名 / 手机号 / 钉钉UserId）',
+      peopleHint: '手机号用于群机器人 @人；UserId 用于私发工作通知。任务负责人按姓名匹配这里的人。名册是全机共享的。',
+      phonePh: '手机号',
+      userIdPh: 'UserId',
+      peopleUnit: '人',
+      hubTabRecords: '会议记录',
+      hubTabTerms: '会议术语',
+      hubTabSettings: '机器人设置',
+      hubTabPeople: '人员管理',
+      panelTabTranscript: '会议实录',
+      panelTabSpeakers: '发言人',
+      secretKept: 'AppSecret（已保存，留空不变）',
+      readDepartments: '读取部门',
+      allOrganization: '全部组织',
+      syncFromDingtalk: '从钉钉同步',
+      peopleSynced: '同步完成',
+      peopleAdded: '新增',
+      hubWorking: '处理中…',
+      editEntry: '修改',
+      saveEntry: '保存',
+      cancelEntry: '取消',
+      taskTitlePh: '事项',
+      dueUnset: '未定',
+      dueToday: '今天 18:00',
+      dueTomorrowMorning: '明天 09:00',
+      dueTomorrow: '明天 18:00',
+      dueFriday: '本周五 18:00',
+      dueMonday: '下周一 09:00',
+      dueMonthEnd: '本月底 18:00',
+      dueCustom: '自定义…',
+      pointTextPh: '要点内容',
+      pointTextRequired: '要点内容不能为空',
+      priorityHigh: '高',
+      priorityNormal: '普通',
+      priorityLow: '低',
+      speakerNames: '发言人姓名',
+      openNames: '填写姓名',
+      speakerNameHint: '给识别到的发言人填上真实姓名；标签不变，会终重聚类后姓名会跟着声音走。留空则显示 S1、S2。',
+      speakerNamePlaceholder: '姓名',
+      reviewSending: '已把实录发给对话，Agent 正在复盘',
+      reviewNoSession: '复盘需要登录并打开一个对话',
+      reviewPrompt: '以下是一场会议的完整实录（本机语音识别，可能含错字）。请以「{role}」的身份复盘这场会议，并输出一份可直接存档的 Markdown 文档。\n\n【角色关注点】{focus}\n\n【输出要求】\n1. 只依据实录内容，不要编造未出现的信息；\n2. 人名、术语若可能有识别错误，请保守处理并标注不确定；\n3. 结构：# 会议复盘（{role}视角）→ 会议概要 → 关键结论 → {section} → 待确认信息；\n4. 能执行的信息要具体到人和时间。\n5. 写完正文后，调用 meeting_save_document 把这份文档存进本场会议（kind=review，title=会议复盘（{role}视角），markdown=完整正文），这样用户可以随时在会议面板里打开。\n\n【会议实录】\n{transcript}',
+      roleHostFocus: '会议目标是否达成；每个议题推进到哪一步；形成了哪些明确决议；谁承诺了什么、什么时候交付；哪些事项悬而未决、卡在谁那里；下次会议应先解决什么。',
+      roleAttendeeFocus: '我需要为什么负责、什么时候交付；别人对我提出了什么要求；关键决议如何影响我的工作；我必须跟进或确认什么；我可能漏听或误解了什么。',
+      roleObserverFocus: '会议的整体脉络与推进逻辑；达成了哪些关键结论；各方的主要立场与分歧；有哪些值得记录的信息。',
+      roleHostSection: '决议与未决事项',
+      roleAttendeeSection: '我的行动项',
+      roleObserverSection: '关键信息',
+      minutes: '生成纪要',
+      minutesDocx: '导出 Word',
+      minutesDocxDone: 'Word 已写入导出目录',
+      revise: '二次纠错',
+      revisePrompt: '本场会议已经结束。请先调用 meeting_read 读取这场会议的完整实录（每段都带 #编号），再以会议上下文为依据做一次统一订正：同一个人名/公司名/术语前后一致；明显听错的同音词改成正确写法；明显的错字修正。然后用 meeting_revise 提交订正，corrections 每一项写 {id, text}——id 用实录里的 #编号，text 给该段订正后的完整文本。只订正上下文能支撑的地方，不要编造内容，拿不准的保持原样。完成后用一段话说明改了哪些地方。',
+      reviseSending: '已请 Agent 做会终二次纠错，完成后实录会自动更新',
+      minutesDone: '纪要已写入导出目录',
+      minutesEmpty: '这场会议还没有内容可以成文',
+      inkSystem: '系统手写输入',
+      inkStore: '存为笔记',
+      inkSystemHint: '此功能依赖 Windows 自带的手写面板，先在系统里开启：\n① 设置 → 时间和语言 → 语言和区域 → 中文(简体) → 语言选项 → 安装「手写」\n② 设置 → 蓝牙和设备 → 触摸键盘 → 打开「未连接键盘时显示触摸键盘」\n③ 设置 → 蓝牙和设备 → 笔和 Windows Ink → 手写 → 打开识别\n开启后点下面的按钮重试；本环境是 Electron，也可能仍然唤不出，那就直接在此输入。',
+      inkSystemOpen: '唤起系统手写面板',
+      tabInk: '手写板',
+      tabSystem: '系统手写',
+      tabTerms: '会议术语',
+      notesToggle: '笔记',
+      helpToggle: '使用说明',
+      helpBody: '【手写板】\n· 「笔」「橡皮」「撤销」「清空」是书写工具。\n· 淡蓝色虚线框是自动发现的一个个字：轻点某个字就能选中它，不必画圈。\n· 长按画布约 0.6 秒可直接开始圈选，继续拖动即可圈住一片内容。\n· 选中或识别出文字后，下方出现同一排动作：「识别选中」只读圈住的字；「转为任务」把文字直接建成待确认任务；「清除」清空选择与识别结果。\n· 「识别为文字」按行识别整页：本地模型、离线、约 43 毫秒一行，多行会自动分行，识别完下方直接给出「转为任务」。\n· 「保存为图片」把整页存成 PNG 进会议记录。\n· 「发送到对话」交给 Agent 识别，较慢且需要登录。\n\n【系统手写】\n· 用 Windows 自带手写面板输入文字，再点「存为笔记」。\n· 需要系统先开启手写功能：设置 → 时间和语言 → 语言和区域 → 中文(简体) → 语言选项 → 安装「手写」。\n· 本环境是 Electron，可能唤不出系统面板；那就直接在这个输入框里打字。\n\n【会议术语】\n· 每行一条。写成「错词=正确词」可在转写里自动替换；只写词则作为热词。\n· 内容会自动保存到本场会议。\n\n【没有开始录音也能用】\n· 写笔记、识别、转任务都不需要先点「开始记录」；第一次写入时会自动建一条会议记录，之后录音会并入同一条。',
+      inkRecognizing: '已请求识别，Agent 完成后会显示',
+      inkRecognizeFailed: '识别请求失败',
+      inkNote: '笔记文字',
+      documents: '会议文档',
+      openDocument: '查看',
+      inkPrompt: '这是一张会议手写笔记的图片。请识别其中的文字，然后用 meeting_note_write 把识别结果写回本场会议（作为草稿）。字迹不清的部分请如实标注，不要猜测。',
+    }
+
+    const en = {
+      title: 'Meeting notes',
+      open: 'Meeting notes',
+      start: 'Start',
+      stop: 'Stop',
+      idle: 'Idle',
+      starting: 'Starting the microphone…',
+      transcribing: 'Transcribing…',
+      elapsed: 'Recorded',
+      empty: 'Nothing yet. Start, then speak into the microphone.',
+      terms: 'Meeting terms (people, companies, projects, jargon)',
+      termsHint: 'One per line, three forms: (1) wrong=right replaces literally, e.g. romi=Romie; (2) a bare word fixes same-sound mishearings, e.g. 陈一鸣 also corrects 沉一明; (3) a leading * also matches single characters by sound, e.g. *李 — use it only for a surname you are sure about, because one syllable can rewrite the wrong character. Corrections never overwrite the recognition; hover a line to see the original.',
+      exportFile: 'Save files (SRT + Markdown)',
+      copySrt: 'Copy SRT',
+      copy: 'Copy transcript',
+      copyForFix: 'Copy correction request',
+      copied: 'Copied',
+      saved: 'Saved',
+      error: 'Error',
+      hubTitle: 'Meeting management',
+      hubIntro: 'Records stay on this machine; recording happens inside a session (the "Meeting notes" button in the session header opens the sidebar panel).',
+      hubCurrent: 'Current session',
+      hubNoSession: 'No session is open.',
+      hubSessionOpen: 'The session is in the foreground — open the header button to start recording.',
+      hubSessionBackground: 'The session is in the background — switch back to it to start recording.',
+      hubHowTo: 'Recording runs in the session scope: the session identity is what lets the agent read this meeting through meeting_read.',
+      hubRecords: 'Past records (this machine\'s meetings directory)',
+      hubRefresh: 'Refresh',
+      hubEmpty: 'No record has been exported yet. Finish a meeting and choose "Save files" to see it here.',
+      hubSend: 'Send to new chat',
+      hubSendHint: 'Open a new conversation with this meeting\'s transcript, ready to send',
+      hubOpenSession: 'Open chat',
+      hubReveal: 'Show file',
+      hubNoMeeting: 'This record has no meeting behind it',
+      hubNoWorkspace: 'This shell cannot start a new conversation',
+      hubClose: 'Close',
+      speaker: 'Speaker',
+      speakerEnable: 'Prepare speaker labels',
+      speakerDownloading: 'Downloading the voice model…',
+      speakerReady: 'Speaker labels are on',
+      speakerFailed: 'Speaker labels are unavailable',
+      speakerOff: 'Speaker labels are off (about 27 MB to prepare)',
+      points: 'Key points',
+      tasks: 'Work assignments',
+      refresh: 'Refresh points and tasks',
+      point_decision: 'Decision',
+      point_point: 'Point',
+      point_risk: 'Risk',
+      point_question: 'Open question',
+      taskDraft: 'Draft',
+      taskConfirmed: 'Confirmed',
+      noAnalysis: 'No points or assignments yet. Use the button below to extract them locally.',
+      generate: 'Extract points and tasks (local)',
+      extractEmpty: 'No obvious points or assignments were found. Ask the agent in the conversation to refine, e.g. "read this meeting and give me the key points and action items".',
+      noMeeting: 'This session has no meeting yet. Start a recording first, then extract the points and tasks.',
+      seekHint: 'Click to jump to this cue',
+      agentDone: 'Updated',
+      follow: 'Follow playback',
+      hubNoText: 'This recording has no matching transcript.',
+      segments: 'cues',
+      remove: 'Delete',
+      ownerPh: 'Owner',
+      duePh: 'Due',
+      originRule: 'Rule',
+      originAgent: 'AI',
+      ink: 'Handwritten note',
+      inkHint: 'Write below with the pen or the mouse; the Windows pen eraser end is read as an eraser.',
+      inkPen: 'Pen',
+      inkErase: 'Eraser',
+      inkUndo: 'Undo',
+      inkClear: 'Clear',
+      inkSave: 'Save as note',
+      inkSaved: 'Note saved',
+      inkClose: 'Hide the pad',
+      inkRecognize: 'Send to the conversation (slow)',
+      inkLocal: 'Recognize as text',
+      inkLocalEmpty: 'Nothing was recognized; write larger and retry',
+      inkLasso: 'Lasso',
+      clearEntry: 'Clear',
+      inkLassoHint: 'Tap a character to select it; long-press the pad to start a lasso',
+      inkSelection: 'Recognize selection',
+      inkToTask: 'To task',
+      inkToTaskDone: 'Added as a draft task',
+      needSession: 'This needs a session: open the meeting panel from a conversation first',
+      roleLabel: 'My role',
+      speakingNow: 'speaking',
+      roleHost: 'Host',
+      roleAttendee: 'Attendee',
+      roleObserver: 'Observer',
+      roleHint: 'Reviews are organised around this role',
+      review: 'Review the meeting',
+      push: 'Push tasks',
+      pushDone: 'Pushed to the group robot',
+      robotSettings: 'Robot settings',
+      robotHint: 'Paste the DingTalk / WeCom robot webhook addresses; leave one empty to skip it. Only confirmed tasks are pushed, and the addresses stay on this machine.',
+      robotSave: 'Save addresses',
+      robotSaved: 'Saved',
+      robotNone: 'not configured',
+      robotAppHint: 'Both private delivery (work notification) and contact sync need a DingTalk internal app: AppKey, AppSecret and AgentId, with the matching permissions granted.',
+      pushMode: 'Delivery',
+      pushModeGroup: 'Group robot',
+      pushModeWork: 'Work notice',
+      pushModeBoth: 'Both',
+      peopleTitle: 'People (name / mobile / DingTalk UserId)',
+      peopleHint: 'The mobile is what a group robot mentions; the UserId is what a private work notification addresses. A task owner matches a person by name. The roster is shared by every meeting.',
+      phonePh: 'Mobile',
+      userIdPh: 'UserId',
+      peopleUnit: 'people',
+      hubTabRecords: 'Records',
+      hubTabTerms: 'Terms',
+      hubTabSettings: 'Robot settings',
+      hubTabPeople: 'People',
+      panelTabTranscript: 'Transcript',
+      panelTabSpeakers: 'Speakers',
+      secretKept: 'AppSecret (saved; leave empty to keep)',
+      readDepartments: 'Read departments',
+      allOrganization: 'Whole organization',
+      syncFromDingtalk: 'Sync from DingTalk',
+      peopleSynced: 'Sync finished',
+      peopleAdded: 'added',
+      hubWorking: 'Working…',
+      editEntry: 'Edit',
+      saveEntry: 'Save',
+      cancelEntry: 'Cancel',
+      taskTitlePh: 'Assignment',
+      dueUnset: 'Unset',
+      dueToday: 'Today 18:00',
+      dueTomorrowMorning: 'Tomorrow 09:00',
+      dueTomorrow: 'Tomorrow 18:00',
+      dueFriday: 'This Friday 18:00',
+      dueMonday: 'Next Monday 09:00',
+      dueMonthEnd: 'End of month 18:00',
+      dueCustom: 'Custom…',
+      pointTextPh: 'Key point',
+      pointTextRequired: 'A key point needs text',
+      priorityHigh: 'High',
+      priorityNormal: 'Normal',
+      priorityLow: 'Low',
+      more: 'More',
+      speakerNames: 'Speaker names',
+      openNames: 'Name them',
+      speakerNameHint: 'Give each recognized voice a real name. The label stays the same, and names follow the voice through the end-of-meeting re-clustering; empty shows S1, S2.',
+      speakerNamePlaceholder: 'Name',
+      reviewSending: 'Transcript sent to the conversation; the agent is reviewing it',
+      reviewNoSession: 'Reviewing needs a signed-in conversation',
+      reviewPrompt: 'Below is the full transcript of a meeting (recognized locally, so it may contain errors). Review this meeting as the 「{role}」 and produce a Markdown document ready to archive.\n\n[Role focus] {focus}\n\n[Requirements]\n1. Use only the transcript; never invent details that are not there.\n2. Treat names and terms that may be misrecognized conservatively and mark uncertainty.\n3. Structure: # Meeting review ({role} view) → summary → key conclusions → {section} → uncertain items.\n4. Make actionable points specific about who and when.\n5. After writing the document, call meeting_save_document to store it in this meeting (kind=review, title=Meeting review ({role} view), markdown=the full text), so the user can open it from the meeting panel later.\n\n[Transcript]\n{transcript}',
+      roleHostFocus: 'whether the goals were met; how far each topic advanced; which decisions were made; who committed to what and by when; what is unresolved and with whom; what the next meeting should settle first.',
+      roleAttendeeFocus: 'what I own and when it is due; what others asked of me; how the decisions affect my work; what I must follow up or confirm; what I may have misheard.',
+      roleObserverFocus: 'the overall arc of the meeting; which conclusions were reached; the positions and disagreements of each side; what is worth recording.',
+      roleHostSection: 'Decisions and open items',
+      roleAttendeeSection: 'My action items',
+      roleObserverSection: 'Key information',
+      minutes: 'Generate minutes',
+      minutesDocx: 'Export Word',
+      minutesDocxDone: 'Word written to the export directory',
+      revise: 'Second-pass correction',
+      revisePrompt: 'This meeting has finished. First call meeting_read to read the full transcript (each cue carries a #id), then make one consistent correction pass using the meeting context: the same person, company and terminology written the same way; words clearly misheard as homophones fixed; obvious misrecognitions repaired. Then submit the corrections with meeting_revise, where each entry is {id, text} — the id from the transcript and the full corrected text for that cue. Correct only what the context supports, never invent content, and leave anything uncertain as it is. Finish with a short note saying what you changed.',
+      reviseSending: 'The agent is making the second correction pass; the transcript updates when it finishes',
+      minutesDone: 'Minutes written to the export directory',
+      minutesEmpty: 'This meeting has nothing to write up yet',
+      inkSystem: 'System handwriting input',
+      inkStore: 'Store as note',
+      inkSystemHint: 'This needs the Windows handwriting panel; enable it first:\n1) Settings → Time & language → Language & region → Chinese → Language options → install "Handwriting"\n2) Settings → Bluetooth & devices → Touch keyboard → show it when no keyboard is attached\n3) Settings → Bluetooth & devices → Pen & Windows Ink → Handwriting → turn recognition on\nThen retry below. Electron may still refuse to show it, in which case type here.',
+      tabInk: 'Pad',
+      tabSystem: 'System input',
+      tabTerms: 'Terms',
+      notesToggle: 'Notes',
+      helpToggle: 'Help',
+      helpBody: '【Handwriting pad】\n· Pen, eraser, undo and clear are the drawing tools.\n· Faint dashed boxes are characters found from the ink alone: tap one to select it, no lasso needed.\n· Long-press the pad for about 0.6 s to start a lasso, then drag to circle an area.\n· A selection or a recognized result shows one action row: "Recognize selection" reads only the circled characters, "To task" turns the text straight into a draft task, and "Clear" empties both.\n· "Recognize as text" reads the page line by line locally, offline, about 43 ms per line, splitting lines automatically, and offers "To task" right below.\n· "Save as image" stores the page as a PNG in the meeting record.\n· "Send to the conversation" asks the agent instead; it is slower and needs a signed-in session.\n\n【System handwriting】\n· Type with the Windows handwriting panel, then store it as a note.\n· Windows must have handwriting installed: Settings → Time & language → Language & region → Chinese (Simplified) → Language options → install Handwriting.\n· This Electron shell may not summon the system panel; the text box here always works.\n\n【Meeting terms】\n· One entry per line. Write "wrong=right" to replace it in transcripts; a bare word is a hint.\n· Entries save automatically.\n\n【Works without recording】\n· Notes, recognition and tasks need no recording; the first write creates the meeting record, and a later recording joins it.',
+      inkRecognizing: 'Recognition requested; the result appears when the agent finishes',
+      inkRecognizeFailed: 'Recognition request failed',
+      inkNote: 'Note text',
+      documents: 'Meeting documents',
+      openDocument: 'Open',
+      inkPrompt: 'This image is a handwritten meeting note. Read the text in it, then call meeting_note_write to store the result on this meeting as a draft. Mark anything illegible honestly instead of guessing.',
+    }
+
+    const styles = {
+      panel: {
+        padding: '12px 14px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        // The panel owns the only scrollbar; the head inside it sticks, so everything pinned
+        // there — buttons, player, the content tabs and the note pad — stays put.
+        overflowY: 'auto',
+        minHeight: 0,
+        boxSizing: 'border-box',
+      },
+      /** Buttons, status, player and the content tabs: the part that never scrolls away. */
+      panelHead: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        position: 'sticky',
+        top: 0,
+        zIndex: 7,
+        // The right sidebar shell paints nothing of its own, so the application base colour is
+        // exactly what sits behind the panel: an opaque head blends in and still hides the
+        // rows scrolling underneath it.
+        background: 'var(--dsw-alias-bg-base)',
+        borderBottom: '1px solid var(--dsw-alias-border-l1)',
+        padding: '4px 2px',
+      },
+      /** The trailing content: grouped so the panel's scroll and the head stay separate. */
+      panelScroll: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        minHeight: 0,
+      },
+      subtitle: { margin: 0, fontSize: '12px', opacity: 0.7, lineHeight: 1.5 },
+      row: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' },
+      button: { padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' },
+      headerButton: { padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' },
+      status: { fontSize: '12px', opacity: 0.8 },
+      label: { display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '2px' },
+      hint: { display: 'block', fontSize: '11px', opacity: 0.6, marginBottom: '4px', lineHeight: 1.5 },
+      taskEdit: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        flexWrap: 'wrap',
+        padding: '6px 8px',
+        borderRadius: '6px',
+        border: '1px solid rgba(64,132,255,0.45)',
+        background: 'rgba(64,132,255,0.08)',
+      },
+      inlineWide: { flex: 1, minWidth: '120px', padding: '3px 6px', fontSize: '12px' },
+      /** One assignment, always editable: a larger title and its inline controls. */
+      taskRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        flexWrap: 'wrap',
+        padding: '6px 8px',
+        borderRadius: '6px',
+        border: '1px solid rgba(127,127,127,0.22)',
+      },
+      taskRowDraft: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        flexWrap: 'wrap',
+        padding: '6px 8px',
+        borderRadius: '6px',
+        border: '1px dashed rgba(127,127,127,0.45)',
+      },
+      taskTitleInput: {
+        flex: 1,
+        minWidth: '160px',
+        padding: '4px 6px',
+        border: 'none',
+        borderRadius: '4px',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        fontSize: '15px',
+        fontWeight: 600,
+      },
+      recognized: { flex: 1, minWidth: '80px', fontSize: '12px', opacity: 0.9 },
+      help: {
+        display: 'block',
+        whiteSpace: 'pre-line',
+        fontSize: '11.5px',
+        lineHeight: 1.7,
+        padding: '8px 10px',
+        marginTop: '6px',
+        border: '1px solid rgba(64,132,255,0.35)',
+        borderRadius: '6px',
+        background: 'rgba(64,132,255,0.08)',
+        maxHeight: '260px',
+        overflowY: 'auto',
+      },
+      textarea: { width: '100%', minHeight: '56px', padding: '6px', borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px', resize: 'vertical', boxSizing: 'border-box' },
+      list: { display: 'flex', flexDirection: 'column', gap: '6px' },
+      segment: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', cursor: 'pointer' },
+      segmentActive: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', cursor: 'pointer', background: 'rgba(127,127,127,0.18)', fontWeight: 600 },
+      stamp: { opacity: 0.55, fontVariantNumeric: 'tabular-nums', minWidth: '38px' },
+      chip: { padding: '0 6px', borderRadius: '10px', border: '1px solid rgba(127,127,127,0.4)', fontSize: '11px', alignSelf: 'center' },
+      empty: { margin: 0, fontSize: '12px', opacity: 0.6 },
+      error: { margin: 0, fontSize: '12px', color: '#c0392b' },
+      note: { margin: 0, fontSize: '11px', opacity: 0.7, wordBreak: 'break-all' },
+      actions: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
+      hub: { padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '860px' },
+      hubTitle: { margin: 0, fontSize: '18px', fontWeight: 600 },
+      hubCard: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderRadius: '8px', border: '1px solid rgba(127,127,127,0.25)' },
+      hubList: { display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '260px', overflowY: 'auto' },
+      hubRow: { display: 'flex', alignItems: 'baseline', gap: '10px', justifyContent: 'space-between' },
+      linkButton: { padding: 0, border: 'none', background: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit' },
+      pre: { margin: 0, maxHeight: '320px', overflow: 'auto', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
+      audio: { width: '100%' },
+      player: { display: 'flex', flexDirection: 'column', gap: '8px' },
+      playerList: { display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '360px', overflowY: 'auto' },
+      buttonActive: { padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', background: 'rgba(127,127,127,0.3)' },
+      inlineInput: { padding: '2px 6px', borderRadius: '4px', fontSize: '12px', width: '72px', fontFamily: 'inherit', boxSizing: 'border-box' },
+      smallButton: { padding: '1px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' },
+      taskDone: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', opacity: 0.55 },
+      ink: { display: 'block', width: '100%', height: '320px', touchAction: 'none', border: '1px dashed rgba(127,127,127,0.45)', borderRadius: '8px', cursor: 'crosshair' },
+      inkShot: { maxWidth: '100%', borderRadius: '8px', border: '1px solid rgba(127,127,127,0.25)' },
+      tabs: { display: 'flex', gap: '4px', borderBottom: '1px solid rgba(127,127,127,0.25)', paddingBottom: '2px' },
+      tab: { padding: '4px 10px', border: 'none', background: 'none', color: 'inherit', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', borderRadius: '6px 6px 0 0', opacity: 0.7 },
+      tabActive: { padding: '4px 10px', border: 'none', background: 'rgba(127,127,127,0.22)', color: 'inherit', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', borderRadius: '6px 6px 0 0', fontWeight: 600 },
+      tabBody: { minHeight: '384px', display: 'flex', flexDirection: 'column', gap: '8px' },
+      hintLines: { display: 'block', fontSize: '11px', opacity: 0.65, lineHeight: 1.6, whiteSpace: 'pre-line' },
+      termsArea: { width: '100%', flex: 1, minHeight: '320px', padding: '6px', borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px', resize: 'vertical', boxSizing: 'border-box' },
+    }
+
+    /**
+     * Render seconds as m:ss.
+     * @param seconds - Offset in seconds.
+     * @returns the clock text.
+     */
+    function clock(seconds) {
+      const total = Math.max(0, Math.round(seconds))
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+    }
+
+    /**
+     * Encode bytes as base64 for the JSON carrier.
+     * @param bytes - Source bytes.
+     * @returns base64 text without a data URL prefix.
+     */
+    function base64(bytes) {
+      let text = ''
+      for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192))
+      return btoa(text)
+    }
+
+    /**
+     * Measure one captured block's loudness.
+     * @param block - Float samples of one worklet message.
+     * @returns the root-mean-square amplitude.
+     */
+    function blockRms(block) {
+      let sum = 0
+      for (let i = 0; i < block.length; i++) sum += block[i] * block[i]
+      return block.length === 0 ? 0 : Math.sqrt(sum / block.length)
+    }
+
+    /**
+     * Decide whether the buffered audio has reached a cue boundary.
+     * @param active - Capture session.
+     * @returns whether the buffered audio should be sent now.
+     */
+    function shouldFlush(active) {
+      const rate = active.audio.sampleRate
+      if (active.frames >= rate * MAX_CHUNK_SECONDS) return true
+      return active.frames >= rate * MIN_CHUNK_SECONDS && active.silenceFrames >= rate * SILENCE_HOLD_SECONDS
+    }
+
+    /**
+     * Box-filter down to the target rate and quantize to little-endian PCM16.
+     * @param samples - Captured float samples.
+     * @param sourceRate - Sample rate of the capture context.
+     * @returns PCM16 bytes at TARGET_RATE.
+     */
+    function toPcm16(samples, sourceRate) {
+      const ratio = sourceRate / TARGET_RATE
+      const frames = Math.floor(samples.length / ratio)
+      const bytes = new Uint8Array(frames * 2)
+      const view = new DataView(bytes.buffer)
+      for (let i = 0; i < frames; i++) {
+        const start = Math.floor(i * ratio)
+        const end = Math.min(samples.length, Math.floor((i + 1) * ratio))
+        let sum = 0
+        for (let j = start; j < end; j++) sum += samples[j]
+        const value = Math.max(-1, Math.min(1, end > start ? sum / (end - start) : 0))
+        view.setInt16(i * 2, Math.round(value * (value < 0 ? 32768 : 32767)), true)
+      }
+      return bytes
+    }
+
+    /**
+     * Render seconds as an SRT timecode.
+     * @param seconds - Offset in seconds.
+     * @returns HH:MM:SS,mmm.
+     */
+    function timecode(seconds) {
+      const ms = Math.max(0, Math.round(seconds * 1000))
+      const pad = (value, width) => String(value).padStart(width, '0')
+      const hours = Math.floor(ms / 3600000)
+      const minutes = Math.floor(ms / 60000) % 60
+      const secs = Math.floor(ms / 1000) % 60
+      return `${pad(hours, 2)}:${pad(minutes, 2)}:${pad(secs, 2)},${pad(ms % 1000, 3)}`
+    }
+
+    /**
+     * Render an absolute local timestamp.
+     * @param at - Epoch milliseconds.
+     * @returns `YYYY-MM-DD HH:MM:SS` in local time.
+     */
+    function absoluteOf(at) {
+      const date = new Date(at)
+      const pad = (value) => String(value).padStart(2, '0')
+      const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+      const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+      return `${day} ${time}`
+    }
+
+    /**
+     * Render a local date and time for file names.
+     * @param at - Epoch milliseconds.
+     * @returns `YYYY-MM-DD_HH-MM-SS` in local time.
+     */
+    function stampOf(at) {
+      const date = new Date(at)
+      const pad = (value) => String(value).padStart(2, '0')
+      const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+      const time = `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`
+      return `${day}_${time}`
+    }
+
+    /**
+     * Split the terminology text into plain terms and literal replacement rules.
+     * @param text - One entry per line; `wrong=right` lines become rules.
+     * @returns the term list and the replacement pairs.
+     */
+    function parseTerms(text) {
+      const terms = []
+      const rules = []
+      for (const raw of text.split('\n')) {
+        const line = raw.trim()
+        if (line === '' || line.startsWith('#')) continue
+        const parts = line.split(/=|=>|→/)
+        if (parts.length >= 2) {
+          const from = parts[0].trim()
+          const to = parts.slice(1).join('=').trim()
+          if (from !== '' && to !== '') rules.push([from, to])
+          else if (from !== '') terms.push(from)
+          continue
+        }
+        terms.push(line)
+      }
+      return { terms, rules }
+    }
+
+    /**
+     * Apply the literal replacement rules to the transcript for display and export.
+     * The stored transcript keeps the recognizer's own output; these are the user's edits.
+     * @param segments - Timed transcript segments as recognized.
+     * @param rules - Replacement pairs.
+     * @returns the segments with replacements applied.
+     */
+    function applyRules(segments, rules) {
+      if (rules.length === 0) return segments
+      return segments.map((segment) => {
+        let text = seenOf(segment)
+        for (const [from, to] of rules) text = text.split(from).join(to)
+        // The recognition stays in `text`; a replacement only ever fills `revised`.
+        return text === segment.text ? segment : { ...segment, revised: text }
+      })
+    }
+
+    /**
+     * The text a reader sees for one cue: the correction when there is one, else the
+     * recognition as it came back.
+     * @param segment - Timed transcript segment.
+     * @returns the text to display.
+     */
+    function seenOf(segment) {
+      return typeof segment.revised === 'string' ? segment.revised : segment.text
+    }
+
+    /**
+     * Render the transcript as SubRip subtitles — the meeting record's timeline format.
+     * @param segments - Timed transcript segments.
+     * @returns the SRT document.
+     */
+    function srtOf(segments) {
+      return segments.map((segment, index) => [
+        String(index + 1),
+        `${timecode(segment.start)} --> ${timecode(segment.end)}`,
+        `${speakerPrefixOf(segment)}${seenOf(segment)}`,
+        '',
+      ].join('\n')).join('\n')
+    }
+
+    /**
+     * Render one cue's speaker as a text prefix.
+     * @param segment - Timed transcript segment.
+     * @returns `S1: ` when the cue carries a speaker, else an empty string.
+     */
+    function speakerPrefixOf(segment) {
+      return typeof segment.speaker === 'string' && segment.speaker !== '' ? `${segment.speaker}: ` : ''
+    }
+
+    /**
+     * Parse a SubRip document into timed cues. A `S1: ` prefix becomes the cue's speaker.
+     * @param srtText - The SRT document exported earlier.
+     * @returns segments in time order.
+     */
+    function parseSrt(srtText) {
+      const toSeconds = (h, m, s, ms) => Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000
+      const segments = []
+      const blocks = srtText.replace(/\r\n?/gu, '\n').split(/\n{2,}/u)
+      for (const block of blocks) {
+        const lines = block.split('\n').filter((line) => line.trim() !== '')
+        let timing = -1
+        for (let i = 0; i < lines.length; i++) if (lines[i].includes('-->')) { timing = i; break }
+        if (timing < 0) continue
+        const match = lines[timing].match(/(\d{1,2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2}),(\d{3})/u)
+        if (match === null) continue
+        const text = lines.slice(timing + 1).join(' ')
+        const speakerMatch = text.match(/^(S\d+):\s*/u)
+        segments.push({
+          id: `s${segments.length + 1}`,
+          start: toSeconds(match[1], match[2], match[3], match[4]),
+          end: toSeconds(match[5], match[6], match[7], match[8]),
+          speaker: speakerMatch === null ? '' : speakerMatch[1],
+          text: speakerMatch === null ? text : text.slice(speakerMatch[0].length),
+        })
+      }
+      return segments
+    }
+
+    /**
+     * Render a recording with its transcript kept in step, like a lyric sheet: the cue
+     * under the playhead highlights and scrolls into view, and clicking a cue seeks there.
+     * Pure presentation over the native audio element; no external library.
+     * @param props - src, segments, t, and whether a recording is present.
+     * @returns the synchronized player.
+     */
+    function SyncedTranscriptPlayer(props) {
+      const t = props.t
+      const [playhead, setPlayhead] = React.useState(0)
+      const [playing, setPlaying] = React.useState(false)
+      const [follow, setFollow] = React.useState(true)
+      const audio = React.useRef(null)
+      const rows = React.useRef([])
+
+      const activeIndex = React.useMemo(() => {
+        let index = -1
+        for (let i = 0; i < props.segments.length; i++) if (props.segments[i].start <= playhead) index = i
+        return index
+      }, [playhead, props.segments])
+
+      React.useEffect(() => {
+        if (!playing || !follow || activeIndex < 0) return
+        const row = rows.current[activeIndex]
+        if (row !== null && row !== undefined) row.scrollIntoView({ block: 'nearest' })
+      }, [activeIndex, follow, playing])
+
+      const seekTo = React.useCallback((seconds) => {
+        const element = audio.current
+        if (element === null) return
+        element.currentTime = seconds
+        setPlayhead(seconds)
+      }, [])
+
+      return h('div', { style: styles.player }, [
+        props.src === ''
+          ? null
+          : h('audio', {
+            key: 'audio',
+            ref: audio,
+            controls: true,
+            preload: 'none',
+            style: styles.audio,
+            src: props.src,
+            onTimeUpdate: (event) => setPlayhead(event.currentTarget.currentTime),
+            onPlay: () => setPlaying(true),
+            onPause: () => setPlaying(false),
+            onEnded: () => setPlaying(false),
+          }),
+        h('div', { key: 'meta', style: styles.row }, [
+          h('button', {
+            key: 'follow',
+            type: 'button',
+            style: follow ? styles.buttonActive : styles.button,
+            onClick: () => setFollow((value) => !value),
+          }, t('follow')),
+          h('span', { key: 'count', style: styles.status }, `${props.segments.length} ${t('segments')}`),
+        ]),
+        h('div', { key: 'list', style: styles.playerList }, props.segments.map((segment, index) => h('div', {
+          key: segment.id,
+          ref: (element) => { rows.current[index] = element },
+          style: index === activeIndex ? styles.segmentActive : styles.segment,
+          title: t('seekHint'),
+          onClick: () => { if (props.src !== '') seekTo(segment.start) },
+        }, [
+          h('span', { key: 'time', style: styles.stamp }, clock(segment.start)),
+          segment.speaker === '' ? null : h('span', { key: 'speaker', style: styles.chip }, segment.speaker),
+          h('span', {
+            key: 'text',
+            // A corrected cue shows the recognition it replaced, so nothing is hidden.
+            title: seenOf(segment) === segment.text ? undefined : segment.text,
+          }, seenOf(segment)),
+          // Only where there is a meeting to write to: the hub previews finished records and
+          // passes no handler.
+          props.onToTask === undefined ? null : h('button', {
+            key: 'toTask',
+            type: 'button',
+            style: styles.smallButton,
+            onClick: (event) => {
+              // The row itself seeks the player; making an assignment must not also seek.
+              event.stopPropagation()
+              props.onToTask(seenOf(segment))
+            },
+          }, t('inkToTask')),
+        ]))),
+      ])
+    }
+
+    /**
+     * Render the transcript as a readable Markdown document.
+     * @param segments - Timed transcript segments.
+     * @param startedAt - Meeting start in epoch milliseconds.
+     * @param terms - Meeting terminology to record alongside the transcript.
+     * @returns the Markdown document.
+     */
+    function markdownOf(segments, startedAt, terms, points = [], tasks = []) {
+      const end = segments.length === 0 ? 0 : segments[segments.length - 1].end
+      const lines = [
+        '# 会议实录',
+        '',
+        `- 开始时间：${absoluteOf(startedAt)}`,
+        `- 时长：${clock(end)}`,
+        `- 段落数：${segments.length}`,
+        '',
+      ]
+      if (terms.length > 0) {
+        lines.push('## 术语表', '')
+        for (const term of terms) lines.push(`- ${term}`)
+        lines.push('')
+      }
+      if (points.length > 0) {
+        lines.push('## 要点', '')
+        for (const point of points) lines.push(`- **${point.kind}**　${point.text}`)
+        lines.push('')
+      }
+      if (tasks.length > 0) {
+        lines.push('## 工作安排', '')
+        for (const task of tasks) {
+          const owner = task.owner === '' ? '未定负责人' : task.owner
+          const due = task.due === '' ? '未定时间' : task.due
+          // The checkbox mirrors the human confirmation state, not the extractor's guess.
+          lines.push(`- [${task.status === 'confirmed' ? 'x' : ' '}] ${task.title}　—　${owner}　·　${due}　·　${task.priority}　·　${task.status}`)
+        }
+        lines.push('')
+      }
+      lines.push('## 逐句记录', '')
+      // Every line carries its own wall-clock time, so a record read out of context
+      // still says when it was said; the SRT keeps relative timecodes as the format requires.
+      for (const segment of segments) {
+        lines.push(`- **${absoluteOf(startedAt + segment.start * 1000)}**　${speakerPrefixOf(segment)}${seenOf(segment)}`)
+      }
+      lines.push('')
+      return lines.join('\n')
+    }
+
+    /**
+     * Compose the end-of-meeting correction request: the term list plus the record,
+     * ready to paste into a conversation with the agent.
+     * @param srt - The SRT record.
+     * @param terms - Meeting terminology.
+     * @returns the prompt text.
+     */
+    function correctionPromptOf(srt, terms) {
+      const list = terms.length === 0 ? '（未提供）' : terms.join('、')
+      return [
+        '以下是我用本地语音模型转写的会议实录（SRT 格式）。',
+        '',
+        `术语表（人名 / 公司 / 项目 / 专业词）：${list}`,
+        '',
+        '请按上下文订正错别字，尤其是人名与术语；保持 SRT 的时间轴与编号不变。输出两部分：',
+        '1. 修订后的完整 SRT；',
+        '2. 改动对照表（原文 → 改为 → 依据）。',
+        '',
+        '实录：',
+        '```srt',
+        srt.trimEnd(),
+        '```',
+      ].join('\n')
+    }
+
+    /**
+     * POST JSON to the host half and decode the JSON reply.
+     * @param route - Route under the plugin prefix.
+     * @param body - JSON-serializable body.
+     * @returns the decoded reply.
+     */
+    async function post(route, body) {
+      const response = await fetch(`/meeting-room${route}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const value = await response.json()
+      if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+      return value
+    }
+
+    /**
+     * GET JSON from the host half and decode the JSON reply.
+     * @param route - Route under the plugin prefix, query string included.
+     * @returns the decoded reply.
+     */
+    async function get(route) {
+      const response = await fetch(`/meeting-room${route}`)
+      const value = await response.json()
+      if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+      return value
+    }
+
+    /** Priorities a task may carry, in the order the picker shows them. */
+    const TASK_PRIORITY_VALUES = ['high', 'normal', 'low']
+
+    /** Locale keys for the three review roles. */
+    const ROLE_LABEL_KEYS = { host: 'roleHost', attendee: 'roleAttendee', observer: 'roleObserver' }
+
+    /** Locale keys for task priorities. */
+    const PRIORITY_KEYS = { high: 'priorityHigh', normal: 'priorityNormal', low: 'priorityLow' }
+
+    /** Point kinds a reader can choose between when editing. */
+    const POINT_KIND_VALUES = ['decision', 'point', 'risk', 'question']
+
+    /** Id of the datalist that offers this meeting's speaker names as owners. */
+    const OWNER_LIST_ID = 'meeting-room-owners'
+
+    /** Delivery choices for confirmed assignments, and their locale keys. */
+    const PUSH_MODE_VALUES = ['group', 'work', 'both']
+    const PUSH_MODE_KEYS = { group: 'pushModeGroup', work: 'pushModeWork', both: 'pushModeBoth' }
+
+    /** Hub sections, in the order a user meets them. */
+    const HUB_TAB_VALUES = ['records', 'terms', 'settings', 'people']
+    const HUB_TAB_KEYS = { records: 'hubTabRecords', terms: 'hubTabTerms', settings: 'hubTabSettings', people: 'hubTabPeople' }
+
+    /** Panel body sections: the record first, then what was read out of it. */
+    const BODY_TAB_VALUES = ['transcript', 'points', 'tasks', 'names']
+    const BODY_TAB_KEYS = { transcript: 'panelTabTranscript', points: 'points', tasks: 'tasks', names: 'panelTabSpeakers' }
+
+    /** The sentinel that switches the due field from a quick choice to a free picker. */
+    const CUSTOM_DUE = '__custom__'
+
+    /**
+     * Quick due choices, computed against today so the list stays meaningful: choosing one
+     * resolves its date immediately instead of asking for one.
+     * @returns one entry per choice, unset first.
+     */
+    function duePresets() {
+      const now = new Date()
+      const pad = (value) => String(value).padStart(2, '0')
+      const stamp = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+      const at = (days, hour) => stamp(new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, hour, 0))
+      const weekday = now.getDay()
+      // `|| 7` keeps "this Friday" pointing forward when today already is Friday.
+      const friday = (5 - weekday + 7) % 7 || 7
+      const monday = (8 - weekday) % 7 || 7
+      return [
+        { value: '', key: 'dueUnset' },
+        { value: at(0, 18), key: 'dueToday' },
+        { value: at(1, 9), key: 'dueTomorrowMorning' },
+        { value: at(1, 18), key: 'dueTomorrow' },
+        { value: at(friday, 18), key: 'dueFriday' },
+        { value: at(monday, 9), key: 'dueMonday' },
+        { value: stamp(new Date(now.getFullYear(), now.getMonth() + 1, 0, 18, 0)), key: 'dueMonthEnd' },
+      ]
+    }
+
+    /**
+     * Turn a stored due date into the value a datetime picker needs. Anything the picker
+     * cannot represent — free text such as 周五 — falls back to today at 18:00, which is the
+     * default the user sees already selected.
+     * @param due - The stored due text.
+     * @returns a `YYYY-MM-DDTHH:mm` value.
+     */
+    function dueDraftOf(due) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/u.exec(String(due ?? '').trim())
+      if (match !== null) return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}`
+      const now = new Date()
+      const pad = (value) => String(value).padStart(2, '0')
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T18:00`
+    }
+
+    /**
+     * Names to offer as task owners or speaker names: everyone on the roster plus every voice
+     * already named, so one person is not typed twice.
+     * @param speakers - Voice label to name map.
+     * @param people - Meeting roster.
+     * @returns unique names, roster first.
+     */
+    function ownerSuggestions(speakers, people) {
+      const names = []
+      for (const person of people) {
+        if (typeof person.name === 'string' && person.name !== '' && !names.includes(person.name)) names.push(person.name)
+      }
+      for (const name of Object.values(speakers)) {
+        if (typeof name === 'string' && name !== '' && !names.includes(name)) names.push(name)
+      }
+      return names
+    }
+
+    /**
+     * Read the stored terminology list, tolerating storage being unavailable.
+     * @returns the stored text, or an empty string.
+     */
+    function readTerms() {
+      try {
+        return localStorage.getItem(TERMS_KEY) ?? ''
+      } catch {
+        return ''
+      }
+    }
+
+    /**
+     * Render the meeting controls, the terminology list, and the live transcript.
+     * @param props - Session-scoped slot props plus this namespace's copy.
+     * @returns the meeting panel.
+     */
+    /**
+     * Recording state shared by every panel. The capture lives here rather than inside a
+     * component, so switching the main panel, closing the dock, or a panel remount never
+     * stops a meeting that is already running.
+     */
+    const recorder = {
+      /** Capture session while recording, else null. */
+      active: null,
+      phase: 'idle',
+      meetingId: '',
+      audioName: '',
+      startedAt: 0,
+      seconds: 0,
+      segments: [],
+      listeners: new Set(),
+      /** Notify every subscribed panel that recorder state moved. */
+      emit() { for (const listener of this.listeners) listener() },
+      /**
+       * Subscribe one panel to recorder changes.
+       * @param listener - Called after every change.
+       * @returns the unsubscribe function.
+       */
+      subscribe(listener) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } },
+    }
+
+    /**
+     * Read the shared recorder inside a component, re-rendering on every change.
+     * @returns the recorder object itself.
+     */
+    function useRecorder() {
+      const [, force] = React.useState(0)
+      React.useEffect(() => recorder.subscribe(() => force((value) => value + 1)), [])
+      return recorder
+    }
+
+    function MeetingPanel(props) {
+      const t = props.t
+      const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
+      const rec = useRecorder()
+      const phase = rec.phase
+      const segments = rec.segments
+      const seconds = rec.seconds
+      const meetingId = rec.meetingId
+      const startedAt = rec.startedAt
+      const audioName = rec.audioName
+      const [error, setError] = React.useState('')
+      const [note, setNote] = React.useState('')
+      const [termsText, setTermsText] = React.useState(readTerms)
+      const [speaker, setSpeaker] = React.useState({ phase: 'unprepared', message: '' })
+      const [points, setPoints] = React.useState([])
+      const [tasks, setTasks] = React.useState([])
+      const [notes, setNotes] = React.useState([])
+      /** How the person using this panel took part; it steers the review prompt. */
+      const [role, setRole] = React.useState('')
+      /**
+       * The shared roster, used only to suggest task owners here. The roster itself is edited
+       * in the meeting hub, because it describes the organisation rather than one meeting.
+       */
+      const [people, setPeople] = React.useState([])
+      /** Documents the agent stored in this meeting (reviews, summaries). */
+      const [documents, setDocuments] = React.useState([])
+      const [openDocument, setOpenDocument] = React.useState(null)
+      /** Which kind of meeting content the panel is showing. */
+      const [bodyTab, setBodyTab] = React.useState('points')
+      /** Whether the occasional actions are unfolded. */
+      const [moreOpen, setMoreOpen] = React.useState(false)
+      /** Whether the speaker-naming fields are unfolded. */
+      const [namesOpen, setNamesOpen] = React.useState(false)
+      /** Tasks whose row is showing the free date-and-time picker rather than a quick choice. */
+      const [customDueIds, setCustomDueIds] = React.useState([])
+      /** Voice labels found in this meeting and the real names assigned to them. */
+      const [labels, setLabels] = React.useState([])
+      const [speakers, setSpeakers] = React.useState({})
+      const [draftNames, setDraftNames] = React.useState({})
+      const [playhead, setPlayhead] = React.useState(0)
+      const [playing, setPlaying] = React.useState(false)
+      const audio = React.useRef(null)
+      const rows = React.useRef([])
+      const noteSeq = React.useRef(0)
+      const [tab, setTab] = React.useState('ink')
+      const [notesOpen, setNotesOpen] = React.useState(false)
+      const [helpOpen, setHelpOpen] = React.useState(false)
+      const [systemText, setSystemText] = React.useState('')
+      const systemField = React.useRef(null)
+
+      // These write through to the shared recorder: the capture callback keeps updating
+      // them after this panel unmounts, so returning to the panel shows the whole meeting.
+      const setPhase = React.useCallback((value) => { recorder.phase = value; recorder.emit() }, [])
+      const setSegments = React.useCallback((value) => { recorder.segments = value; recorder.emit() }, [])
+      const setSeconds = React.useCallback((value) => { recorder.seconds = value; recorder.emit() }, [])
+      const setMeetingId = React.useCallback((value) => { recorder.meetingId = value; recorder.emit() }, [])
+      const setStartedAt = React.useCallback((value) => { recorder.startedAt = value; recorder.emit() }, [])
+      const setAudioName = React.useCallback((value) => { recorder.audioName = value; recorder.emit() }, [])
+
+      /**
+       * Adopt this session's meeting from the host. The panel keeps no durable state, so
+       * after a reload this is the only way it learns which meeting it is looking at.
+       * @returns whether a meeting was found.
+       */
+      const adopt = React.useCallback(async () => {
+        if (sessionId === '') return null
+        try {
+          const response = await fetch(`${PREFIX}/current?sessionId=${encodeURIComponent(sessionId)}`)
+          const value = await response.json()
+          if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+          if (value.meeting === null) return null
+          setMeetingId(value.meeting.meetingId)
+          setStartedAt(value.meeting.startedAt)
+          setSeconds(value.meeting.seconds)
+          setSegments(value.meeting.segments)
+          setAudioName(value.meeting.audioName ?? '')
+          setPoints(value.meeting.points)
+          setTasks(value.meeting.tasks)
+          return value.meeting
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+          return null
+        }
+      }, [sessionId])
+
+      React.useEffect(() => { void adopt() }, [adopt])
+
+      /**
+       * Pull the stored cues, points, and tasks — including ones the agent wrote.
+       * @returns the stored points and tasks, or undefined when no meeting is reachable.
+       */
+      const refreshAnalysis = React.useCallback(async () => {
+        setError('')
+        let id = meetingId
+        if (id === '') {
+          // Nothing recorded in this panel yet; the meeting may belong to an earlier page.
+          const adopted = await adopt()
+          if (adopted === null) {
+            setNote(t('noMeeting'))
+            return undefined
+          }
+          id = adopted.meetingId
+        }
+        try {
+          const response = await fetch(`${PREFIX}/state?meetingId=${encodeURIComponent(id)}`)
+          const value = await response.json()
+          if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+          setSegments(value.segments)
+          setSeconds(value.seconds)
+          if (Array.isArray(value.points)) setPoints(value.points)
+          if (Array.isArray(value.tasks)) setTasks(value.tasks)
+          if (Array.isArray(value.notes)) setNotes(value.notes)
+          if (typeof value.audioName === 'string') setAudioName(value.audioName)
+          if (typeof value.role === 'string') setRole(value.role)
+          if (value.speakers !== null && typeof value.speakers === 'object') setSpeakers(value.speakers)
+          if (Array.isArray(value.labels)) setLabels(value.labels)
+          if (Array.isArray(value.documents)) setDocuments(value.documents)
+          return {
+            points: Array.isArray(value.points) ? value.points : [],
+            tasks: Array.isArray(value.tasks) ? value.tasks : [],
+          }
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+          return undefined
+        }
+      }, [adopt, meetingId, t])
+
+      /**
+       * Make sure this session has a meeting to store notes and tasks in. A session that
+       * never recorded still gets a container, so writing a note before pressing start works
+       * and a later recording joins the same record.
+       * @returns the meeting id, or an empty string when the panel has no session.
+       */
+      const ensureMeeting = React.useCallback(async () => {
+        if (meetingId !== '') return meetingId
+        const adopted = await adopt()
+        if (adopted !== null) return adopted.meetingId
+        if (sessionId === '') return ''
+        try {
+          const reply = await post('/ensure', { sessionId, terms: termsText })
+          if (typeof reply.meetingId === 'string' && reply.meetingId !== '') {
+            setMeetingId(reply.meetingId)
+            return reply.meetingId
+          }
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+        return ''
+      }, [adopt, meetingId, sessionId, termsText])
+
+      /**
+       * Remember how this person took part, so the review prompt matches their seat.
+       * @param next - One of host, attendee, observer.
+       */
+      const chooseRole = React.useCallback(async (next) => {
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        setRole(next)
+        try {
+          await post('/role', { meetingId: id, role: next })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
+
+      /**
+       * Send the whole transcript to the conversation and ask for a review written from the
+       * chosen role, which the agent returns as an archiveable document.
+       */
+      const review = React.useCallback(async () => {
+        setError('')
+        setNote('')
+        if (sessionId === '') {
+          setError(t('reviewNoSession'))
+          return
+        }
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        const seat = role === '' ? 'attendee' : role
+        try {
+          const reply = await get(`/transcript?meetingId=${encodeURIComponent(id)}&limit=4000`)
+          const transcript = typeof reply.text === 'string' ? reply.text : ''
+          if (transcript.trim() === '') {
+            setNote(t('minutesEmpty'))
+            return
+          }
+          const focusKey = seat === 'host' ? 'roleHostFocus' : seat === 'observer' ? 'roleObserverFocus' : 'roleAttendeeFocus'
+          const sectionKey = seat === 'host' ? 'roleHostSection' : seat === 'observer' ? 'roleObserverSection' : 'roleAttendeeSection'
+          const prompt = t('reviewPrompt')
+            .replaceAll('{role}', t(ROLE_LABEL_KEYS[seat]))
+            .replaceAll('{focus}', t(focusKey))
+            .replaceAll('{section}', t(sectionKey))
+            .replaceAll('{transcript}', transcript)
+          const asked = await props.askText(sessionId, prompt)
+          if (!asked.ok) {
+            setError(`${t('reviewNoSession')}: ${asked.error}`)
+            return
+          }
+          setNote(t('reviewSending'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, props, role, sessionId, t])
+
+      /** Ask the agent for a context-aware correction pass over the finished transcript. */
+      const revise = React.useCallback(async () => {
+        setError('')
+        setNote('')
+        if (sessionId === '') {
+          setError(t('reviewNoSession'))
+          return
+        }
+        const asked = await props.askText(sessionId, t('revisePrompt'))
+        if (!asked.ok) {
+          setError(`${t('reviewNoSession')}: ${asked.error}`)
+          return
+        }
+        setNote(t('reviseSending'))
+      }, [props, sessionId, t])
+
+      /**
+       * Attach a real name to a voice label. The label itself never changes, so assigned
+       * names survive the end-of-meeting re-clustering and stay attached to the voice.
+       * @param label - Voice label such as S1.
+       * @param name - The person's name; empty clears the assignment.
+       */
+      const nameSpeaker = React.useCallback(async (label, name) => {
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/speaker/name', { meetingId: id, label, name })
+          if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
+          if (Array.isArray(reply.segments)) setSegments(reply.segments)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
+
+      /** Send the confirmed assignments to the configured group robots. Nothing leaves this
+       * machine until the user both confirms a task and presses this.
+       */
+      const push = React.useCallback(async () => {
+        setError('')
+        setNote('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/push', { meetingId: id })
+          const lines = reply.results.map((entry) => `${entry.kind}: ${entry.ok ? t('pushDone') : entry.message}`)
+          setNote(lines.join('；'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
+
+      /** Load the shared roster once, to suggest owners in task editing. */
+      React.useEffect(() => {
+        let cancelled = false
+        void (async () => {
+          try {
+            const reply = await get('/people')
+            if (!cancelled && Array.isArray(reply.people)) setPeople(reply.people)
+          } catch {
+            // Owner suggestions are optional; an unreadable roster just leaves them empty.
+          }
+        })()
+        return () => { cancelled = true }
+      }, [])
+
+      /**
+       * Add or update one person on the meeting's roster. The mobile number is what a group
+       * robot mentions; the DingTalk user id is what a private work notification addresses.
+       * @param draft - The person to store.
+       * @param action - 'save' adds or updates, 'remove' deletes by name.
+       */
+      /** Write the meeting up as a minutes document the user can keep or send on. */
+      const writeMinutes = React.useCallback(async (format = 'md') => {
+        setError('')
+        setNote('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/minutes', { meetingId: id, format })
+          setNote(`${format === 'docx' ? t('minutesDocxDone') : t('minutesDone')}: ${reply.name}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
+
+      /**
+       * Derive draft points and tasks locally — no model, no login. The agent can refine
+       * them later through the conversation; until then this path always works.
+       */
+      const extract = React.useCallback(async () => {
+        setError('')
+        setNote('')
+        let id = meetingId
+        if (id === '') {
+          const adopted = await adopt()
+          if (adopted === null) {
+            setNote(t('noMeeting'))
+            return
+          }
+          id = adopted.meetingId
+        }
+        try {
+          const reply = await post('/extract', { meetingId: id })
+          setPoints(reply.points)
+          setTasks(reply.tasks)
+          setNote(reply.points.length + reply.tasks.length === 0 ? t('extractEmpty') : t('agentDone'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [adopt, meetingId, t])
+
+      /**
+       * Confirm, edit, or remove one stored entry. Only a human reaches this path, which
+       * is what keeps an unconfirmed draft from becoming somebody else's todo.
+       * @param kind - 'point' or 'task'.
+       * @param id - Entry id from the stored list.
+       * @param patch - Fields to change; empty when removing.
+       * @param op - 'remove' deletes the entry.
+       */
+      const editEntry = React.useCallback(async (kind, id, patch = {}, op = 'update') => {
+        setError('')
+        // Confirm, edit or delete before recording even started: the meeting is created on
+        // demand, so an edit is never silently dropped for a missing id.
+        const target = await ensureMeeting()
+        if (target === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/analysis', { meetingId: target, kind, id, op, patch })
+          setPoints(reply.points)
+          setTasks(reply.tasks)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
+
+      /** Text from the most recent recognition, kept so it can be turned into a task. */
+      const [lastNote, setLastNote] = React.useState('')
+
+      /**
+       * Turn arbitrary text into a draft assignment; shared by the recognized-text row and
+       * the note list, so both paths behave the same.
+       * @param text - The assignment text.
+       * @returns whether the task was created.
+       */
+      const makeTaskFrom = React.useCallback(async (text) => {
+        const title = text.replace(/\s+/gu, ' ').trim()
+        if (title === '') return false
+        const target = await ensureMeeting()
+        if (target === '') {
+          setError(t('needSession'))
+          return false
+        }
+        try {
+          await post('/analysis', { meetingId: target, kind: 'task', op: 'add', text: title })
+          await refreshAnalysis()
+          return true
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+          return false
+        }
+      }, [ensureMeeting, refreshAnalysis, t])
+
+      /**
+       * Turn one recognized line into a draft assignment and report it. The recognized lines
+       * stay on screen so the remaining lines can still be sent.
+       * @param line - The recognized text of one line.
+       */
+      const noteToTask = React.useCallback(async (line) => {
+        if (await makeTaskFrom(line)) setNote(`${t('inkToTaskDone')}: ${line.replace(/\s+/gu, ' ')}`)
+      }, [makeTaskFrom, t])
+
+      /** Key points keep a two-state row: their text is a sentence, not a field to keep live. */
+      const [editingPoint, setEditingPoint] = React.useState('')
+      const [pointDraft, setPointDraft] = React.useState({ text: '', kind: 'point' })
+
+      /**
+       * Open one key point for editing with its current values.
+       * @param point - The stored point.
+       */
+      const beginPointEdit = React.useCallback((point) => {
+        setEditingPoint(point.id)
+        setPointDraft({
+          text: point.text,
+          kind: POINT_KIND_VALUES.includes(point.kind) ? point.kind : 'point',
+        })
+      }, [])
+
+      /** Store the edited key point and close the row. */
+      const savePointEdit = React.useCallback(async () => {
+        if (pointDraft.text.trim() === '') {
+          setError(t('pointTextRequired'))
+          return
+        }
+        await editEntry('point', editingPoint, pointDraft)
+        setEditingPoint('')
+      }, [editEntry, editingPoint, pointDraft, t])
+
+      /** Open one stored document inline, without leaving the panel. */
+      const openStoredDocument = React.useCallback(async (entry) => {
+        setError('')
+        try {
+          const reply = await get(`/file?name=${encodeURIComponent(entry.name)}`)
+          setOpenDocument(typeof reply.content === 'string' ? reply.content : '')
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /**
+       * Save a drawn note into this meeting's record. The sequence keeps two notes drawn
+       * in the same second from overwriting each other.
+       * @param pngBase64 - The canvas rendered as PNG bytes.
+       */
+      const saveNote = React.useCallback(async (pngBase64) => {
+        if (pngBase64 === '') return
+        setError('')
+        noteSeq.current += 1
+        const stamp = stampOf(startedAt === 0 ? Date.now() : startedAt)
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          await post('/note', { name: `${stamp}-note${noteSeq.current}.png`, pngBase64, meetingId: id })
+          setNote(t('inkSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, startedAt, t])
+
+      /**
+       * Ask the agent to read a drawing and store the text. The image travels as a prompt
+       * attachment because only user messages may carry images in this build.
+       * @param pngBase64 - The drawing as base64 PNG bytes.
+       */
+      const recognize = React.useCallback(async (pngBase64) => {
+        setError('')
+        setNote('')
+        if (sessionId === '') {
+          setError(t('inkRecognizeFailed'))
+          return
+        }
+        const asked = await props.askNote(sessionId, t('inkPrompt'), pngBase64)
+        if (!asked.ok) {
+          setError(`${t('inkRecognizeFailed')}: ${asked.error}`)
+          return
+        }
+        setNote(t('inkRecognizing'))
+      }, [props, sessionId, t])
+
+      /**
+       * Recognize a drawing locally and keep the text on this meeting. No agent, no
+       * network: the host runs the model in a child process that stays warm.
+       * @param pixelsBase64 - Packed grayscale pixels from the pad.
+       */
+      const recognizeNote = React.useCallback(async (payloads, asTask) => {
+        setError('')
+        setNote(t('inkRecognizing'))
+        try {
+          const texts = []
+          for (const pixelsBase64 of payloads) {
+            const reply = await post('/handwriting', { chunks: 3, pixelsBase64 })
+            const line = typeof reply.text === 'string' ? reply.text.trim() : ''
+            if (line !== '') texts.push(line)
+          }
+          const text = texts.join('\n')
+          if (text === '') {
+            setNote(t('inkLocalEmpty'))
+            return
+          }
+          const id = await ensureMeeting()
+          if (id === '') {
+            setNote(`${t('inkLocal')}: ${text}`)
+            setError(t('needSession'))
+            return
+          }
+          const stored = await post('/note', { text, meetingId: id, source: 'handwriting' })
+          if (Array.isArray(stored.notes)) setNotes(stored.notes)
+          // Turning a written note into an assignment still lands as a draft, so the human
+          // confirmation gate stays the only path to a confirmed task.
+          if (asTask === true) await post('/analysis', { meetingId: id, kind: 'task', op: 'add', text })
+          await refreshAnalysis()
+          // Keep the text on hand so a plain recognition can also become an assignment.
+          setLastNote(asTask === true ? '' : text)
+          setNote(asTask === true ? `${t('inkToTaskDone')}: ${text}` : `${t('inkLocal')}: ${text}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, refreshAnalysis, t])
+
+      /**
+       * Store text recognised by the system handwriting panel or typed here. This path
+       * never reaches the agent, so it is the fast one.
+       * @param text - The note text.
+       */
+      const saveText = React.useCallback(async (text) => {
+        const trimmed = text.trim()
+        if (trimmed === '') return
+        setError('')
+        try {
+          const target = await ensureMeeting()
+          if (target === '') {
+            setError(t('needSession'))
+            return
+          }
+          const reply = await post('/note', { text: trimmed, meetingId: target, source: 'system' })
+          if (Array.isArray(reply.notes)) setNotes(reply.notes)
+          // Typed or system-panel text can become an assignment the same way a recognized
+          // drawing can.
+          setLastNote(trimmed)
+          setNote(t('inkSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
+
+      /**
+       * Move the recording to a cue's start and play from there, which is what clicking a
+       * transcript line asks for: hear this sentence again.
+       * @param seconds - Offset into the recording.
+       */
+      const seekTo = React.useCallback((seconds) => {
+        const element = audio.current
+        if (element === null) return
+        element.currentTime = seconds
+        setPlayhead(seconds)
+        // Autoplay can be refused before any user gesture in the page; the seek still lands,
+        // so a refusal only costs the playing state.
+        const started = element.play()
+        if (started !== undefined && typeof started.catch === 'function') {
+          started.catch(() => { setPlaying(false) })
+        }
+      }, [])
+
+      // Speaker labels are on by default. The host downloads the model once and caches it,
+      // so this normally settles immediately; the poll keeps the status line honest while
+      // a first-ever download runs, and a failure leaves the retry button in place.
+      React.useEffect(() => {
+        let live = true
+        const settle = async () => {
+          try {
+            const response = await fetch(`${PREFIX}/speaker`)
+            const value = await response.json()
+            if (!live) return
+            setSpeaker({ phase: value.phase, message: value.message ?? '' })
+            if (value.phase === 'unprepared') {
+              await post('/speaker/prepare', {}).catch(() => undefined)
+              return
+            }
+            if (value.phase === 'downloading') {
+              await new Promise((resolve) => setTimeout(resolve, 2000))
+              if (live) await settle()
+            }
+          } catch {
+            // The status line keeps its previous value; recording is unaffected.
+          }
+        }
+        void settle()
+        return () => { live = false }
+      }, [])
+
+      /** Ask the host to prepare speaker support, then follow its state until it settles. */
+      const prepareSpeakers = React.useCallback(async () => {
+        setError('')
+        try {
+          await post('/speaker/prepare', {})
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+          return
+        }
+        for (let attempt = 0; attempt < 300; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+          try {
+            const response = await fetch(`${PREFIX}/speaker`)
+            const value = await response.json()
+            setSpeaker({ phase: value.phase, message: value.message ?? '' })
+            if (value.phase === 'ready' || value.phase === 'failed') return
+          } catch {
+            return
+          }
+        }
+      }, [])
+
+      React.useEffect(() => {
+        try {
+          localStorage.setItem(TERMS_KEY, termsText)
+        } catch {
+          // Storage refused (private mode): the list still applies to this meeting.
+        }
+      }, [termsText])
+
+      // The host mirrors the list so `meeting_read` can hand it to the model.
+      React.useEffect(() => {
+        if (meetingId === '') return
+        void post('/terms', { meetingId, terms: termsText }).catch(() => undefined)
+      }, [meetingId, termsText])
+
+      const { terms, rules } = React.useMemo(() => parseTerms(termsText), [termsText])
+      const visible = React.useMemo(() => applyRules(segments, rules), [segments, rules])
+
+      /** The cue the recording is inside, held until the next one starts — the lyric line. */
+      const activeIndex = React.useMemo(() => {
+        let index = -1
+        for (let i = 0; i < visible.length; i++) if (visible[i].start <= playhead) index = i
+        return index
+      }, [playhead, visible])
+
+      React.useEffect(() => {
+        if (!playing || activeIndex < 0) return
+        const row = rows.current[activeIndex]
+        if (row !== null && row !== undefined) row.scrollIntoView({ block: 'nearest' })
+      }, [activeIndex, playing])
+
+      /** Release capture resources held by the current meeting. */
+      const release = React.useCallback(async () => {
+        const active = recorder.active
+        if (active === null) return
+        recorder.active = null
+        try {
+          active.node.port.onmessage = null
+          active.node.disconnect()
+          active.sink.disconnect()
+          active.source.disconnect()
+          active.stream.getTracks().forEach((track) => track.stop())
+          if (active.url !== '') URL.revokeObjectURL(active.url)
+          await active.audio.close()
+        } catch (failure) {
+          console.warn('meeting-room: release failed', failure)
+        }
+      }, [])
+
+      // Deliberately no release-on-unmount: the capture belongs to the recorder, not to
+      // this panel, so navigating away or closing the dock keeps the meeting running.
+      // Stop is the only path that releases the microphone.
+
+      /**
+       * Send the buffered audio as one cue and fold the reply into panel state.
+       * One request runs at a time; audio keeps accumulating while a request is in flight.
+       * @param active - Capture session.
+       */
+      const flush = React.useCallback(async (active) => {
+        if (active.inflight || active.pending.length === 0) return
+        active.inflight = true
+        const samples = active.pending
+        active.pending = []
+        active.frames = 0
+        active.silenceFrames = 0
+        const merged = new Float32Array(samples.reduce((total, part) => total + part.length, 0))
+        let offset = 0
+        for (const part of samples) {
+          merged.set(part, offset)
+          offset += part.length
+        }
+        const pcm = toPcm16(merged, active.audio.sampleRate)
+        setPhase('transcribing')
+        try {
+          const reply = await post('/chunk', { meetingId: active.meetingId, pcm: base64(pcm) })
+          setSegments(reply.segments)
+          setSeconds(reply.seconds)
+          if (typeof reply.audioName === 'string') setAudioName(reply.audioName)
+          if (Array.isArray(reply.points)) setPoints(reply.points)
+          if (Array.isArray(reply.tasks)) setTasks(reply.tasks)
+          // A voice can appear mid-meeting, so the naming row follows the cue stream.
+          if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
+          if (Array.isArray(reply.labels)) setLabels(reply.labels)
+          if (reply.speaker !== undefined) setSpeaker({ phase: reply.speaker.phase, message: reply.speaker.message ?? '' })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          active.inflight = false
+          if (recorder.active === active) setPhase(active.stopping ? 'transcribing' : 'recording')
+          if (!active.stopping && shouldFlush(active)) void flush(active)
+        }
+      }, [])
+
+      /** Start a meeting and begin capture. */
+      const start = React.useCallback(async () => {
+        setError('')
+        setNote('')
+        setPhase('starting')
+        try {
+          const created = await post('/start', { sessionId, terms: termsText })
+          let audio
+          try {
+            audio = new AudioContext({ sampleRate: TARGET_RATE })
+          } catch {
+            // Chromium rejects an unsupported rate; the box filter in toPcm16 handles any rate.
+            audio = new AudioContext()
+          }
+          await audio.resume()
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true },
+          })
+          const url = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }))
+          await audio.audioWorklet.addModule(url)
+          const source = audio.createMediaStreamSource(stream)
+          const node = new AudioWorkletNode(audio, 'meeting-capture')
+          const sink = audio.createGain()
+          sink.gain.value = 0
+          source.connect(node)
+          node.connect(sink)
+          sink.connect(audio.destination)
+
+          const active = {
+            meetingId: created.meetingId,
+            audio, stream, source, node, sink, url,
+            pending: [],
+            frames: 0,
+            silenceFrames: 0,
+            inflight: false,
+            stopping: false,
+          }
+          recorder.active = active
+          node.port.onmessage = (event) => {
+            const block = event.data
+            active.pending.push(block)
+            active.frames += block.length
+            // Endpoint at a pause instead of a fixed clock: a cue then holds what a
+            // speaker actually said, rather than being cut mid-sentence. The cap keeps
+            // a long monologue from growing without bound.
+            if (blockRms(block) < SILENCE_RMS) active.silenceFrames += block.length
+            else active.silenceFrames = 0
+            if (!active.inflight && shouldFlush(active)) void flush(active)
+          }
+          setSegments([])
+          setSeconds(0)
+          setMeetingId(created.meetingId)
+          setStartedAt(created.startedAt ?? Date.now())
+          setAudioName(typeof created.audioName === 'string' ? created.audioName : '')
+          setPhase('recording')
+        } catch (failure) {
+          await release()
+          setPhase('idle')
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [flush, release, sessionId, termsText])
+
+      /** Stop capture, drain the remaining audio, then finalize the meeting. */
+      const stop = React.useCallback(async () => {
+        const active = recorder.active
+        if (active === null) return
+        active.stopping = true
+        setPhase('transcribing')
+        for (let attempt = 0; attempt < 120 && (active.inflight || active.pending.length > 0); attempt++) {
+          if (active.inflight) await new Promise((resolve) => setTimeout(resolve, 200))
+          else await flush(active)
+        }
+        await release()
+        try {
+          const reply = await post('/stop', { meetingId: active.meetingId })
+          setSegments(reply.segments)
+          setSeconds(reply.seconds)
+          if (typeof reply.audioName === 'string') setAudioName(reply.audioName)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+        setPhase('idle')
+      }, [flush, release])
+
+      /** Write the SRT record and its Markdown companion into the host's meetings directory. */
+      const exportFiles = React.useCallback(async () => {
+        if (meetingId === '') return
+        // Local date and time, so the file name matches the meeting's wall clock.
+        const stamp = stampOf(startedAt === 0 ? Date.now() : startedAt)
+        try {
+          const reply = await post('/export', {
+            meetingId,
+            files: [
+              { name: `${stamp}.srt`, content: srtOf(visible) },
+              { name: `${stamp}.md`, content: markdownOf(visible, startedAt, terms, points, tasks) },
+            ],
+          })
+          setNote(`${t('saved')}: ${reply.paths.join('  |  ')}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [meetingId, points, startedAt, tasks, terms, t, visible])
+
+      /** Copy the SRT record to the clipboard. */
+      const copySrt = React.useCallback(async () => {
+        try {
+          await navigator.clipboard.writeText(srtOf(visible))
+          setNote(t('copied'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [t, visible])
+
+      /** Copy the human-readable transcript to the clipboard. */
+      const copyText = React.useCallback(async () => {
+        const text = visible.map((segment) => `${clock(segment.start)}  ${seenOf(segment)}`).join('\n')
+        try {
+          await navigator.clipboard.writeText(text)
+          setNote(t('copied'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [t, visible])
+
+      /** Copy the correction request that hands the record to the agent. */
+      const copyForFix = React.useCallback(async () => {
+        try {
+          await navigator.clipboard.writeText(correctionPromptOf(srtOf(visible), terms))
+          setNote(t('copied'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [t, terms, visible])
+
+      const recording = phase === 'recording' || phase === 'transcribing'
+      // A meeting counts as having content from notes, tasks or documents alone: recording is
+      // not a precondition for writing minutes, pushing work or exporting Word.
+      const hasContent = segments.length > 0 || points.length > 0 || tasks.length > 0
+        || notes.length > 0 || documents.length > 0
+      // The newest cue's voice is who is speaking now, so the status line names them.
+      const currentSpeaker = segments.length === 0 ? '' : segments[segments.length - 1].speaker
+      const status = phase === 'recording'
+        ? `${t('elapsed')} ${clock(seconds)}${currentSpeaker === '' ? '' : ` · ${t('speakingNow')} ${currentSpeaker}`}`
+        : phase === 'transcribing' ? t('transcribing') : phase === 'starting' ? t('starting') : t('idle')
+      const speakerText = speaker.phase === 'ready' ? t('speakerReady')
+        : speaker.phase === 'downloading' ? t('speakerDownloading')
+          : speaker.phase === 'failed' ? `${t('speakerFailed')}${speaker.message === '' ? '' : `: ${speaker.message}`}`
+            : t('speakerOff')
+
+      return h(Boundary, null, h('section', { style: styles.panel }, [
+        // The pinned console carries the buttons, the status, the note pad, the recording
+        // player and the content tabs; only what follows it scrolls, so a long transcript
+        // cannot push those controls out of reach.
+        h('div', { key: 'head', style: styles.panelHead }, [
+          h('div', { key: 'notebar', style: styles.row }, [
+          h('span', { key: 'rolelabel', style: styles.status }, t('roleLabel')),
+          // A dropdown rather than three buttons: the seat is one choice, and the row is
+          // already carrying the meeting's actions.
+          h('select', {
+            key: 'role',
+            style: styles.inlineInput,
+            value: role === '' ? 'attendee' : role,
+            onChange: (event) => { void chooseRole(event.target.value) },
+          }, ['host', 'attendee', 'observer'].map((seat) => h('option', {
+            key: seat,
+            value: seat,
+          }, t(ROLE_LABEL_KEYS[seat])))),
+          h('button', {
+            key: 'toggle',
+            type: 'button',
+            style: recording ? styles.buttonActive : styles.button,
+            disabled: phase === 'starting',
+            onClick: () => { void (recording ? stop() : start()) },
+          }, recording ? t('stop') : t('start')),
+          h('button', {
+            key: 'notes',
+            type: 'button',
+            style: notesOpen ? styles.buttonActive : styles.button,
+            onClick: () => setNotesOpen((value) => !value),
+          }, t('notesToggle')),
+          segments.length === 0 ? null : h('button', {
+            key: 'extract',
+            type: 'button',
+            style: styles.button,
+            onClick: () => { void extract() },
+          }, t('generate')),
+          h('button', {
+            key: 'review',
+            type: 'button',
+            style: styles.button,
+            onClick: () => { void review() },
+          }, t('review')),
+          h('button', {
+            key: 'minutes',
+            type: 'button',
+            style: styles.button,
+            onClick: () => { void writeMinutes() },
+          }, t('minutes')),
+          // The overflow expands in place, ahead of the button that owns it, so the bar keeps
+          // one row and the extra actions land where the eye already is.
+          moreOpen && hasContent ? h('button', { key: 'files', type: 'button', style: styles.button, onClick: () => { void exportFiles() } }, t('exportFile')) : null,
+          moreOpen && hasContent && segments.length > 0 ? h('button', { key: 'srt', type: 'button', style: styles.button, onClick: () => { void copySrt() } }, t('copySrt')) : null,
+          moreOpen && hasContent && segments.length > 0 ? h('button', { key: 'copy', type: 'button', style: styles.button, onClick: () => { void copyText() } }, t('copy')) : null,
+          moreOpen && hasContent && segments.length > 0 ? h('button', { key: 'fix', type: 'button', style: styles.button, onClick: () => { void copyForFix() } }, t('copyForFix')) : null,
+          moreOpen && hasContent ? h('button', { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void refreshAnalysis() } }, t('refresh')) : null,
+          moreOpen && hasContent && segments.length > 0 ? h('button', { key: 'revise', type: 'button', style: styles.button, onClick: () => { void revise() } }, t('revise')) : null,
+          moreOpen && hasContent ? h('button', { key: 'minutesdocx', type: 'button', style: styles.button, onClick: () => { void writeMinutes('docx') } }, t('minutesDocx')) : null,
+          moreOpen && hasContent ? h('button', { key: 'push', type: 'button', style: styles.button, onClick: () => { void push() } }, t('push')) : null,
+          hasContent ? h('button', {
+            key: 'more',
+            type: 'button',
+            style: moreOpen ? styles.buttonActive : styles.button,
+            onClick: () => setMoreOpen((value) => !value),
+          }, t('more')) : null,
+          h('button', {
+            key: 'help',
+            type: 'button',
+            title: t('helpToggle'),
+            'aria-label': t('helpToggle'),
+            'aria-expanded': helpOpen,
+            style: helpOpen ? styles.buttonActive : styles.button,
+            onClick: () => setHelpOpen((value) => !value),
+          }, '?'),
+        ]),
+        h('span', { key: 'status', style: styles.status }, status),
+        notesOpen ? h('div', { key: 'tabs', style: styles.tabs }, [
+          h('button', {
+            key: 'ink',
+            type: 'button',
+            style: tab === 'ink' ? styles.tabActive : styles.tab,
+            onClick: () => setTab('ink'),
+          }, t('tabInk')),
+          h('button', {
+            key: 'system',
+            type: 'button',
+            style: tab === 'system' ? styles.tabActive : styles.tab,
+            onClick: () => setTab('system'),
+          }, t('tabSystem')),
+          h('button', {
+            key: 'terms',
+            type: 'button',
+            style: tab === 'terms' ? styles.tabActive : styles.tab,
+            onClick: () => setTab('terms'),
+          }, t('tabTerms')),
+        ]) : null,
+        // One fixed-height body so switching tabs never resizes the panel.
+        notesOpen ? h('div', { key: 'tabbody', style: styles.tabBody }, [
+          tab === 'ink' ? h(InkPad, {
+            key: 'ink',
+            t,
+            onSave: saveNote,
+            onRecognize: recognize,
+            onRecognizeLocal: recognizeNote,
+            recognizedText: lastNote,
+            onRecognizedToTask: (text) => { void noteToTask(text) },
+            onDismissRecognized: () => setLastNote(''),
+          }) : null,
+          tab === 'system' ? h('div', { key: 'system', style: styles.list }, [
+            h('span', { key: 'hint', style: styles.hintLines }, t('inkSystemHint')),
+            h('button', {
+              key: 'open',
+              type: 'button',
+              style: styles.button,
+              onClick: () => {
+                const field = systemField.current
+                if (field !== null) field.focus()
+                try {
+                  navigator.virtualKeyboard?.show?.()
+                } catch (failure) {
+                  console.warn('meeting-room: the system handwriting panel did not open', failure)
+                }
+              },
+            }, t('inkSystemOpen')),
+            h('textarea', {
+              key: 'field',
+              ref: systemField,
+              style: styles.textarea,
+              value: systemText,
+              placeholder: t('inkStore'),
+              onChange: (event) => setSystemText(event.target.value),
+            }),
+            h('button', {
+              key: 'store',
+              type: 'button',
+              style: styles.button,
+              disabled: systemText.trim() === '',
+              onClick: () => { void saveText(systemText) },
+            }, t('inkStore')),
+          ]) : null,
+          tab === 'terms' ? h('div', { key: 'terms', style: styles.list }, [
+            h('span', { key: 'hint', style: styles.hint }, t('termsHint')),
+            h('textarea', {
+              key: 'input',
+              id: 'meeting-room-terms',
+              style: styles.termsArea,
+              value: termsText,
+              spellCheck: false,
+              onChange: (event) => setTermsText(event.target.value),
+            }),
+          ]) : null,
+        ]) : null,
+        audioName === '' ? null : h('audio', {
+          key: 'audio',
+          ref: audio,
+          controls: true,
+          preload: 'none',
+          style: styles.audio,
+          src: `${PREFIX}/audio?name=${encodeURIComponent(audioName)}`,
+          onTimeUpdate: (event) => setPlayhead(event.currentTarget.currentTime),
+          onPlay: () => setPlaying(true),
+          onPause: () => setPlaying(false),
+          onEnded: () => setPlaying(false),
+        }),
+        // One tab per kind of meeting content, so the panel shows one thing at a time instead
+        // of the transcript, the points, the assignments and the voices stacked together.
+        h('div', { key: 'bodytabs', style: styles.tabs }, BODY_TAB_VALUES.map((value) => h('button', {
+          key: value,
+          type: 'button',
+          style: bodyTab === value ? styles.tabActive : styles.tab,
+          onClick: () => setBodyTab(value),
+        }, t(BODY_TAB_KEYS[value])))),
+        ]),
+        h('div', { key: 'scroll', style: styles.panelScroll }, [
+        helpOpen ? h('div', { key: 'help', style: styles.help }, t('helpBody')) : null,
+        h('span', { key: 'rolehint', style: styles.hint }, t('roleHint')),
+        h('div', { key: 'speaker', style: styles.row }, [
+          h('span', { key: 'state', style: styles.status }, speakerText),
+          speaker.phase === 'ready' ? null : h('button', {
+            key: 'prepare',
+            type: 'button',
+            style: styles.button,
+            disabled: speaker.phase === 'downloading',
+            onClick: () => { void prepareSpeakers() },
+          }, t('speakerEnable')),
+        ]),
+        bodyTab !== 'transcript' ? null : segments.length === 0
+          ? h('p', { key: 'empty', style: styles.empty }, t('empty'))
+          : h('div', { key: 'list', style: styles.list }, visible.map((segment, index) => h('div', {
+            key: segment.id,
+            ref: (element) => { rows.current[index] = element },
+            style: index === activeIndex ? styles.segmentActive : styles.segment,
+            title: t('seekHint'),
+            onClick: () => seekTo(segment.start),
+          }, [
+            h('span', { key: 'time', style: styles.stamp }, clock(segment.start)),
+            typeof segment.speaker === 'string' && segment.speaker !== ''
+              ? h('span', { key: 'speaker', style: styles.chip }, segment.speaker)
+              : null,
+            h('span', {
+              key: 'text',
+              title: seenOf(segment) === segment.text ? undefined : segment.text,
+            }, seenOf(segment)),
+            // Every cue is its own candidate assignment.
+            h('button', {
+              key: 'toTask',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: (event) => {
+                // The row seeks the recording; making an assignment must not also seek.
+                event.stopPropagation()
+                void makeTaskFrom(seenOf(segment))
+              },
+            }, t('inkToTask')),
+          ]))),
+        bodyTab !== 'names' || labels.length === 0 ? null : h('div', { key: 'names', style: styles.list }, [
+          // Folded away by default: naming voices is an occasional task, and the fields would
+          // otherwise sit in the panel the whole time.
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'title', style: styles.label }, t('speakerNames')),
+            h('button', {
+              key: 'toggle',
+              type: 'button',
+              style: namesOpen ? styles.buttonActive : styles.button,
+              onClick: () => setNamesOpen((value) => !value),
+            }, namesOpen ? t('hubClose') : t('openNames')),
+          ]),
+          namesOpen ? h('div', { key: 'body', style: styles.list }, [
+            h('span', { key: 'hint', style: styles.hint }, t('speakerNameHint')),
+            ...labels.map((label) => h('div', { key: label, style: styles.row }, [
+            h('span', { key: 'label', style: styles.chip }, label),
+            h('input', {
+              key: 'name',
+              style: styles.textarea,
+              value: draftNames[label] ?? speakers[label] ?? '',
+              placeholder: t('speakerNamePlaceholder'),
+              spellCheck: false,
+              list: OWNER_LIST_ID,
+              onChange: (event) => setDraftNames((value) => ({ ...value, [label]: event.target.value })),
+            }),
+            h('button', {
+              key: 'save',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { void nameSpeaker(label, draftNames[label] ?? speakers[label] ?? '') },
+            }, t('robotSave')),
+            ])),
+          ]) : null,
+        ]),
+        bodyTab !== 'points' ? null : segments.length > 0 && points.length === 0 && tasks.length === 0 ? h('div', { key: 'analyze', style: styles.list }, [
+          h('p', { key: 'hint', style: styles.empty }, t('noAnalysis')),
+        ]) : null,
+        bodyTab !== 'points' || points.length === 0 ? null : h('div', { key: 'points', style: styles.list }, [
+          h('div', { key: 'title', style: styles.label }, `${t('points')} (${points.length})`),
+          ...points.map((point) => (editingPoint === point.id ? h('div', {
+            key: point.id,
+            style: styles.taskEdit,
+          }, [
+            h('input', {
+              key: 'text',
+              type: 'text',
+              style: styles.inlineWide,
+              value: pointDraft.text,
+              placeholder: t('pointTextPh'),
+              spellCheck: false,
+              onChange: (event) => setPointDraft((value) => ({ ...value, text: event.target.value })),
+            }),
+            h('select', {
+              key: 'kind',
+              style: styles.inlineInput,
+              value: pointDraft.kind,
+              onChange: (event) => setPointDraft((value) => ({ ...value, kind: event.target.value })),
+            }, POINT_KIND_VALUES.map((value) => h('option', { key: value, value }, t(`point_${value}`)))),
+            h('button', {
+              key: 'save',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => { void savePointEdit() },
+            }, t('saveEntry')),
+            h('button', {
+              key: 'cancel',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => setEditingPoint(''),
+            }, t('cancelEntry')),
+          ]) : h('div', {
+            key: point.id,
+            style: point.status === 'confirmed' ? styles.segment : styles.taskDone,
+          }, [
+            h('input', {
+              key: 'done',
+              type: 'checkbox',
+              checked: point.status === 'confirmed',
+              title: t('confirm'),
+              onChange: (event) => { void editEntry('point', point.id, { status: event.target.checked ? 'confirmed' : 'draft' }) },
+            }),
+            h('span', { key: 'kind', style: styles.chip }, t(`point_${point.kind}`)),
+            h('span', { key: 'text', style: { flex: 1 } }, point.text),
+            h('span', { key: 'origin', style: styles.chip }, point.origin === 'agent' ? t('originAgent') : t('originRule')),
+            h('button', {
+              key: 'edit',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => beginPointEdit(point),
+            }, t('editEntry')),
+            h('button', {
+              key: 'del',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => { void editEntry('point', point.id, {}, 'remove') },
+            }, t('remove')),
+          ]))),
+        ]),
+        bodyTab !== 'tasks' || tasks.length === 0 ? null : h('div', { key: 'tasks', style: styles.list }, [
+          h('div', { key: 'title', style: styles.label }, `${t('tasks')} (${tasks.filter((task) => task.status === 'confirmed').length}/${tasks.length})`),
+          // No edit mode and no save button: every field is a live control that writes on
+          // change, and the title writes on blur so typing does not round-trip per keystroke.
+          ...tasks.map((task) => {
+            const owners = ownerSuggestions(speakers, people)
+            if (task.owner !== '' && !owners.includes(task.owner)) owners.push(task.owner)
+            const presets = duePresets()
+            // A stored value outside the quick list — a free-text 周五 or an exact minute —
+            // keeps its own entry, so the select never shows a value the row does not hold.
+            const customDue = task.due !== '' && !presets.some((entry) => entry.value === task.due)
+            // Asking for a custom time keeps the picker open even when the value it starts from
+            // happens to coincide with a preset.
+            const showDuePicker = customDueIds.includes(task.id) || customDue
+            return h('div', {
+              key: task.id,
+              style: task.status === 'confirmed' ? styles.taskRow : styles.taskRowDraft,
+            }, [
+              h('input', {
+                key: 'done',
+                type: 'checkbox',
+                checked: task.status === 'confirmed',
+                title: t('confirm'),
+                onChange: (event) => { void editEntry('task', task.id, { status: event.target.checked ? 'confirmed' : 'draft' }) },
+              }),
+              h('input', {
+                key: 'title',
+                type: 'text',
+                style: styles.taskTitleInput,
+                defaultValue: task.title,
+                placeholder: t('taskTitlePh'),
+                spellCheck: false,
+                title: task.status === 'draft' ? t('taskDraft') : t('taskConfirmed'),
+                onBlur: (event) => {
+                  const next = event.target.value.trim()
+                  if (next !== '' && next !== task.title) void editEntry('task', task.id, { title: next })
+                  else event.target.value = task.title
+                },
+              }),
+              h('select', {
+                key: 'owner',
+                style: styles.inlineInput,
+                value: task.owner,
+                title: t('ownerPh'),
+                onChange: (event) => { void editEntry('task', task.id, { owner: event.target.value }) },
+              }, [
+                h('option', { key: '', value: '' }, t('ownerPh')),
+                ...owners.map((name) => h('option', { key: name, value: name }, name)),
+              ]),
+              // Time is a quick choice; the exact date and time picker appears only when the
+              // user asks for it, or when the stored value is already something specific.
+              h('select', {
+                key: 'due',
+                style: styles.inlineInput,
+                value: showDuePicker ? CUSTOM_DUE : task.due,
+                title: t('duePh'),
+                onChange: (event) => {
+                  const next = event.target.value
+                  if (next !== CUSTOM_DUE) {
+                    setCustomDueIds((ids) => ids.filter((id) => id !== task.id))
+                    void editEntry('task', task.id, { due: next })
+                    return
+                  }
+                  setCustomDueIds((ids) => (ids.includes(task.id) ? ids : [...ids, task.id]))
+                  // The sentinel opens the picker on a real value, keeping the
+                  // default-selected behaviour rather than leaving the field blank.
+                  void editEntry('task', task.id, { due: dueDraftOf(task.due).replace('T', ' ') })
+                },
+              }, [
+                ...presets.map((entry) => h('option', { key: entry.key, value: entry.value }, t(entry.key))),
+                h('option', { key: 'custom', value: CUSTOM_DUE }, t('dueCustom')),
+              ]),
+              showDuePicker ? h('input', {
+                key: 'duepicker',
+                type: 'datetime-local',
+                style: styles.inlineInput,
+                value: dueDraftOf(task.due),
+                spellCheck: false,
+                onChange: (event) => { void editEntry('task', task.id, { due: event.target.value.replace('T', ' ') }) },
+              }) : null,
+              h('select', {
+                key: 'priority',
+                style: styles.inlineInput,
+                value: TASK_PRIORITY_VALUES.includes(task.priority) ? task.priority : 'normal',
+                title: t('priority'),
+                onChange: (event) => { void editEntry('task', task.id, { priority: event.target.value }) },
+              }, TASK_PRIORITY_VALUES.map((value) => h('option', { key: value, value }, t(PRIORITY_KEYS[value])))),
+              h('button', {
+                key: 'del',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => { void editEntry('task', task.id, {}, 'remove') },
+              }, t('remove')),
+            ])
+          }),
+        ]),
+        notes.length === 0 ? null : h('div', { key: 'notes', style: styles.list }, [
+          h('div', { key: 'label', style: styles.label }, `${t('inkNote')} (${notes.length})`),
+          ...notes.map((entry) => h('div', { key: entry.id, style: styles.segment }, [
+            h('span', { key: 'text', style: { flex: 1 } }, entry.text),
+            h('button', {
+              key: 'toTask',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => { void makeTaskFrom(entry.text) },
+            }, t('inkToTask')),
+          ])),
+        ]),
+        documents.length === 0 ? null : h('div', { key: 'docs', style: styles.list }, [
+          h('div', { key: 'label', style: styles.label }, `${t('documents')} (${documents.length})`),
+          ...documents.map((entry) => h('div', { key: entry.id, style: styles.row }, [
+            h('span', { key: 'title', style: { flex: 1 } }, entry.title),
+            h('span', { key: 'name', style: styles.chip }, entry.name),
+            h('button', {
+              key: 'open',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => { void openStoredDocument(entry) },
+            }, t('openDocument')),
+          ])),
+        ]),
+        openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
+        note === '' ? null : h('p', { key: 'note', style: styles.note }, note),
+        error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        ]),
+      ]))
+    }
+
+    /**
+     * Show the tab's title from the sidebar registry.
+     * @param props - Framework-bound tab identity.
+     * @returns the tab title.
+     */
+    function MeetingTabTitle(props) {
+      const tab = props.useTabInfo()
+      return h(React.Fragment, null, tab.tab.title)
+    }
+
+    /**
+     * Open the meeting panel from the session header.
+     * @param props - Localized copy plus the injected opener.
+     * @returns the header button.
+     */
+    function OpenMeetingButton(props) {
+      return h('button', {
+        type: 'button',
+        style: styles.headerButton,
+        title: props.t('open'),
+        onClick: () => props.open(),
+      }, props.t('open'))
+    }
+
+    /**
+     * Catch a render failure inside a panel so the page shows the error instead of
+     * going blank; a plugin fault should be visible and reportable, never silent.
+     */
+    class Boundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { failed: false, message: '' }
+      }
+
+      static getDerivedStateFromError(error) {
+        return { failed: true, message: error instanceof Error ? error.message : String(error) }
+      }
+
+      render() {
+        if (this.state.failed) {
+          return h('div', { style: styles.hubCard }, [
+            h('div', { style: styles.label }, 'meeting-room render error'),
+            h('pre', { style: styles.pre }, this.state.message),
+          ])
+        }
+        return this.props.children
+      }
+    }
+
+    /**
+     * Draw the left-sidebar row glyph. The row's registered component *is* the icon,
+     * and the shell renders it as the row's direct icon child.
+     * @param props - Owner-supplied glyph size.
+     * @returns the icon element.
+     */
+    function MeetingPanelIcon(props) {
+      const size = typeof props.size === 'number' ? props.size : 18
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.6,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': true,
+      }, [
+        h('rect', { key: 'body', x: 3, y: 4, width: 18, height: 12, rx: 2 }),
+        h('path', { key: 'stand', d: 'M7 20h10' }),
+        h('path', { key: 'pole', d: 'M12 16v4' }),
+        h('path', { key: 'lines', d: 'M8 10.5h2.5M13.5 8.5h2.5M8 13h8' }),
+      ])
+    }
+
+    /** Recognizer geometry, measured against the official preprocessor (design §9.2.3). */
+    const RECOGNIZE_HEIGHT = 32
+    const RECOGNIZE_CHUNKS = 3
+    const WINDOW_WIDTH = 300
+    const PAGE_WIDTH = 804
+    const CHUNK_STRIDE = 252
+
+    /**
+     * Pen canvas for handwritten notes. Implements the Windows pen facts the design
+     * pins down: coalesced sampling so fast strokes keep their points, the real 0–1024
+     * pressure range, the eraser button bit rather than a pointer type, and scroll
+     * suppression through `touch-action` instead of `preventDefault`.
+     * @param props - Localized copy plus the save callback.
+     * @returns the drawing surface and its controls.
+     */
+    function InkPad(props) {
+      const t = props.t
+      const canvas = React.useRef(null)
+      const strokes = React.useRef([])
+      const active = React.useRef(null)
+      /** Strokes a lasso has picked up; the recognition and task actions act on this set. */
+      const selected = React.useRef(new Set())
+      /** Pending long-press timer, or null. */
+      const longPress = React.useRef(null)
+      /** Cached character groups, recomputed when the stroke list changes. */
+      const groups = React.useRef([])
+      const [tool, setTool] = React.useState('pen')
+      const [count, setCount] = React.useState(0)
+
+      /** Stroke width for one pressure sample; the range stays legible for a mouse too. */
+      const widthOf = (pressure) => 1.2 + 3.4 * pressure
+
+      /** Repaint the whole surface from the stored strokes. */
+      const redraw = React.useCallback(() => {
+        const element = canvas.current
+        if (element === null) return
+        const context = element.getContext('2d')
+        const ratio = window.devicePixelRatio || 1
+        const width = element.clientWidth
+        const height = element.clientHeight
+        if (element.width !== Math.round(width * ratio) || element.height !== Math.round(height * ratio)) {
+          element.width = Math.round(width * ratio)
+          element.height = Math.round(height * ratio)
+        }
+        context.setTransform(ratio, 0, 0, ratio, 0, 0)
+        context.clearRect(0, 0, width, height)
+        context.lineCap = 'round'
+        context.lineJoin = 'round'
+        for (const stroke of strokes.current) {
+          // A selected stroke keeps its shape but gains a translucent halo, so the lasso's
+          // result is visible without redrawing the ink in a different colour.
+          if (selected.current.has(stroke)) {
+            context.strokeStyle = 'rgba(64,132,255,0.45)'
+            for (let i = 1; i < stroke.points.length; i++) {
+              const from = stroke.points[i - 1]
+              const to = stroke.points[i]
+              context.beginPath()
+              context.lineWidth = widthOf(to.p) + 5
+              context.moveTo(from.x, from.y)
+              context.lineTo(to.x, to.y)
+              context.stroke()
+            }
+          }
+          context.strokeStyle = '#111111'
+          for (let i = 1; i < stroke.points.length; i++) {
+            const from = stroke.points[i - 1]
+            const to = stroke.points[i]
+            context.beginPath()
+            context.lineWidth = widthOf(to.p)
+            context.moveTo(from.x, from.y)
+            context.lineTo(to.x, to.y)
+            context.stroke()
+          }
+        }
+        // Faint boxes mark what the ink alone says are separate characters: tapping one of
+        // them selects it, so a lasso is optional rather than required. The groups are cached
+        // because this runs on every pointer move.
+        context.save()
+        context.setLineDash([4, 3])
+        context.lineWidth = 1
+        context.strokeStyle = 'rgba(64,132,255,0.35)'
+        for (const group of groups.current) {
+          context.strokeRect(group.left, group.top, group.right - group.left, group.bottom - group.top)
+        }
+        context.restore()
+      }, [])
+
+      React.useEffect(() => {
+        groups.current = detectGroups(strokes.current)
+        redraw()
+      }, [count, redraw])
+
+      // The pad is a percentage width, so opening or closing the meeting focus resizes it
+      // without any stroke changing. Re-fitting the backing store on every box change is what
+      // keeps the ink aligned with the drawn border instead of stretched across a stale bitmap.
+      React.useEffect(() => {
+        const element = canvas.current
+        if (element === null || typeof ResizeObserver !== 'function') return undefined
+        const observer = new ResizeObserver(() => { redraw() })
+        observer.observe(element)
+        return () => observer.disconnect()
+      }, [redraw])
+
+      /**
+       * Place one event in canvas-local coordinates.
+       * @param event - A pointer event or one coalesced sample.
+       * @returns the point with normalized pressure.
+       */
+      const localPoint = (event) => {
+        const rect = canvas.current.getBoundingClientRect()
+        // Windows reports 0–1024 levels and 0 while hovering or for a mouse.
+        const pressure = typeof event.pressure === 'number' && event.pressure > 0 ? Math.min(1, event.pressure) : 0.5
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top, p: pressure }
+      }
+
+      /**
+       * Drop every stroke passing near one eraser position.
+       * @param point - Eraser centre in canvas coordinates.
+       */
+      const eraseAt = (point) => {
+        const radius = 10
+        strokes.current = strokes.current.filter((stroke) => !stroke.points.some(
+          (candidate) => Math.abs(candidate.x - point.x) <= radius && Math.abs(candidate.y - point.y) <= radius,
+        ))
+      }
+
+      /**
+       * Ray-casting point-in-polygon test for the lasso.
+       * @param point - Point in canvas coordinates.
+       * @param polygon - Closed lasso path.
+       * @returns whether the point lies inside.
+       */
+      const insidePolygon = (point, polygon) => {
+        let inside = false
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i++) {
+          const a = polygon[i]
+          const b = polygon[j]
+          if ((a.y > point.y) !== (b.y > point.y)
+            && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
+            inside = !inside
+          }
+        }
+        return inside
+      }
+
+      /**
+       * Replace the selection with every stroke whose ink falls inside the lasso.
+       * @param polygon - The closed lasso path.
+       */
+      const selectInside = (polygon) => {
+        const next = new Set()
+        for (const stroke of strokes.current) {
+          if (stroke.points.some((point) => insidePolygon(point, polygon))) next.add(stroke)
+        }
+        selected.current = next
+      }
+
+      const onPointerDown = (event) => {
+        // Touch is dropped: the system's palm rejection is partial, so the surface keeps
+        // to the pen and the mouse.
+        if (event.pointerType === 'touch') return
+        const erasing = (event.buttons & 32) !== 0 || tool === 'erase'
+        canvas.current.setPointerCapture(event.pointerId)
+        active.current = { points: [localPoint(event)], erasing, lasso: tool === 'lasso' && !erasing }
+        if (erasing) eraseAt(localPoint(event))
+        // A long press either recognizes an existing selection or starts a lasso, so circling
+        // never needs the toolbar.
+        longPress.current = setTimeout(() => {
+          longPress.current = null
+          const stroke = active.current
+          // Only a press that never became a drawing counts.
+          if (stroke === null || stroke.points.length > 2) return
+          if (selected.current.size > 0) {
+            active.current = null
+            setCount((value) => value + 1)
+            void recognizeSelection(false)
+            return
+          }
+          setTool('lasso')
+          if (active.current !== null) active.current.lasso = true
+        }, 600)
+        redraw()
+      }
+
+      const onPointerMove = (event) => {
+        const stroke = active.current
+        if (stroke === null) return
+        // Coalesced samples: without them a fast stroke loses points and reads as chords.
+        const native = event.nativeEvent
+        const samples = typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : [native]
+        for (const sample of samples) {
+          if (stroke.erasing) eraseAt(localPoint(sample))
+          else stroke.points.push(localPoint(sample))
+        }
+        // Moving past a couple of samples means this is a stroke, not a long press.
+        if (longPress.current !== null && stroke.points.length > 3) {
+          clearTimeout(longPress.current)
+          longPress.current = null
+        }
+        redraw()
+      }
+
+      const finishStroke = () => {
+        if (longPress.current !== null) {
+          clearTimeout(longPress.current)
+          longPress.current = null
+        }
+        const stroke = active.current
+        if (stroke === null) return
+        active.current = null
+        if (stroke.lasso) {
+          // The lasso itself is never kept as ink; it only selects.
+          if (stroke.points.length > 2) selectInside(stroke.points)
+          setCount((value) => value + 1)
+          return
+        }
+        // A tap with no drag selects the character the ink says is under it, so a selection
+        // never requires the lasso gesture.
+        if (!stroke.erasing && stroke.points.length <= 2) {
+          const point = stroke.points[0]
+          const group = detectGroups(strokes.current).find((candidate) =>
+            point.x >= candidate.left - 8 && point.x <= candidate.right + 8
+            && point.y >= candidate.top - 8 && point.y <= candidate.bottom + 8)
+          if (group !== undefined) selected.current = new Set(group.strokes)
+          setCount((value) => value + 1)
+          return
+        }
+        // Windows reports pressure 0 on pointerup, so the last real sample is what counts.
+        if (!stroke.erasing && stroke.points.length > 1) strokes.current.push(stroke)
+        setCount((value) => value + 1)
+      }
+
+      const onPointerCancel = () => {
+        // A cancelled pointer means the system took the stroke over: discard it outright.
+        active.current = null
+      }
+
+      /**
+       * Render the current strokes as PNG bytes.
+       * @returns base64 PNG data, or an empty string when nothing was drawn.
+       */
+      const pngBytes = () => {
+        const element = canvas.current
+        if (element === null || strokes.current.length === 0) return ''
+        const dataUrl = element.toDataURL('image/png')
+        const comma = dataUrl.indexOf(',')
+        return comma === -1 ? '' : dataUrl.slice(comma + 1)
+      }
+
+      /** Hand the rendered note to the host as PNG bytes. */
+      const save = async () => {
+        const pngBase64 = pngBytes()
+        if (pngBase64 !== '') await props.onSave(pngBase64)
+      }
+
+      /** Hand the rendered note to the agent for handwriting recognition. */
+      const recognize = async () => {
+        const pngBase64 = pngBytes()
+        if (pngBase64 !== '') await props.onRecognize(pngBase64)
+      }
+
+      /**
+       * Pack the drawing the way the recognizer reads it, following the official ModelScope
+       * preprocessing: crop to the ink, fit the height to 32, paste at the top-left of a
+       * BLACK 32x804 page, then take the three overlapping 300-wide windows at 0, 252, 504.
+       * The host needs no image decoder this way.
+       * @param subset - Strokes to pack; defaults to every stroke on the pad.
+       * @returns base64 grayscale bytes, or an empty string when nothing was drawn.
+       */
+      const packPixels = (subset) => {
+        const element = canvas.current
+        const source = subset === undefined ? strokes.current : subset
+        if (element === null || source.length === 0) return ''
+        let minX = Number.POSITIVE_INFINITY
+        let minY = Number.POSITIVE_INFINITY
+        let maxX = Number.NEGATIVE_INFINITY
+        let maxY = Number.NEGATIVE_INFINITY
+        for (const stroke of source) {
+          for (const point of stroke.points) {
+            if (point.x < minX) minX = point.x
+            if (point.x > maxX) maxX = point.x
+            if (point.y < minY) minY = point.y
+            if (point.y > maxY) maxY = point.y
+          }
+        }
+        const margin = 4
+        minX = Math.max(0, minX - margin)
+        minY = Math.max(0, minY - margin)
+        maxX = Math.min(element.clientWidth, maxX + margin)
+        maxY = Math.min(element.clientHeight, maxY + margin)
+        const cropWidth = Math.max(1, maxX - minX)
+        const cropHeight = Math.max(1, maxY - minY)
+        const fittedWidth = Math.max(1, Math.min(PAGE_WIDTH, Math.round(RECOGNIZE_HEIGHT * (cropWidth / cropHeight))))
+        const page = document.createElement('canvas')
+        page.width = PAGE_WIDTH
+        page.height = RECOGNIZE_HEIGHT
+        const context = page.getContext('2d')
+        // Everything outside the fitted image stays black, as upstream's zero-filled page.
+        context.fillStyle = '#000000'
+        context.fillRect(0, 0, PAGE_WIDTH, RECOGNIZE_HEIGHT)
+        // The pad is transparent over dark ink, so the image area becomes white paper first.
+        context.fillStyle = '#ffffff'
+        context.fillRect(0, 0, fittedWidth, RECOGNIZE_HEIGHT)
+        // Redraw just the chosen strokes onto a scratch pad, so a lasso selection is what
+        // gets recognized rather than everything on the surface.
+        const scratch = document.createElement('canvas')
+        scratch.width = element.clientWidth
+        scratch.height = element.clientHeight
+        const scratchContext = scratch.getContext('2d')
+        scratchContext.lineCap = 'round'
+        scratchContext.lineJoin = 'round'
+        scratchContext.strokeStyle = '#111111'
+        for (const stroke of source) {
+          for (let i = 1; i < stroke.points.length; i++) {
+            const from = stroke.points[i - 1]
+            const to = stroke.points[i]
+            scratchContext.beginPath()
+            scratchContext.lineWidth = widthOf(to.p)
+            scratchContext.moveTo(from.x, from.y)
+            scratchContext.lineTo(to.x, to.y)
+            scratchContext.stroke()
+          }
+        }
+        context.imageSmoothingEnabled = true
+        context.imageSmoothingQuality = 'high'
+        context.drawImage(scratch, minX, minY, cropWidth, cropHeight, 0, 0, fittedWidth, RECOGNIZE_HEIGHT)
+        const pixels = context.getImageData(0, 0, PAGE_WIDTH, RECOGNIZE_HEIGHT).data
+        const packed = new Uint8Array(RECOGNIZE_CHUNKS * RECOGNIZE_HEIGHT * WINDOW_WIDTH)
+        for (let chunk = 0; chunk < RECOGNIZE_CHUNKS; chunk++) {
+          for (let y = 0; y < RECOGNIZE_HEIGHT; y++) {
+            for (let x = 0; x < WINDOW_WIDTH; x++) {
+              const sourceX = chunk * CHUNK_STRIDE + x
+              const target = (chunk * RECOGNIZE_HEIGHT + y) * WINDOW_WIDTH + x
+              if (sourceX >= PAGE_WIDTH) continue
+              const index = (y * PAGE_WIDTH + sourceX) * 4
+              packed[target] = Math.round(0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2])
+            }
+          }
+        }
+        return base64(packed)
+      }
+
+      /**
+       * Split strokes into text lines by the horizontal gaps between them. The recognizer is a
+       * single-line model, so two lines squeezed into one 32-pixel strip read as noise; each
+       * band is recognized on its own instead.
+       * @param subset - Strokes to inspect.
+       * @returns one stroke list per detected line, top to bottom.
+       */
+      const splitLines = (subset) => {
+        const step = 4
+        const coverage = new Map()
+        for (const stroke of subset) {
+          for (const point of stroke.points) {
+            const band = Math.round(point.y / step) * step
+            coverage.set(band, (coverage.get(band) ?? 0) + 1)
+          }
+        }
+        const occupied = [...coverage.keys()].sort((left, right) => left - right)
+        if (occupied.length === 0) return []
+        // A gap wider than a character's breathing room separates two lines.
+        const bands = [[occupied[0]]]
+        for (let index = 1; index < occupied.length; index++) {
+          if (occupied[index] - occupied[index - 1] > 40) bands.push([])
+          bands[bands.length - 1].push(occupied[index])
+        }
+        return bands.map((group) => {
+          const top = group[0] - step
+          const bottom = group[group.length - 1] + step
+          return subset.filter((stroke) => stroke.points.some((point) => point.y >= top && point.y <= bottom))
+        }).filter((line) => line.length > 0)
+      }
+
+      /**
+       * Detect text groups from the ink alone: lines by horizontal gaps, then character groups
+       * by vertical gaps inside each line. Tapping a group selects it, so no lasso is needed.
+       * @param subset - Strokes to inspect.
+       * @returns groups with bounds and member strokes, in reading order.
+       */
+      const detectGroups = (subset) => {
+        const step = 4
+        const groups = []
+        for (const line of splitLines(subset)) {
+          const coverage = new Map()
+          for (const stroke of line) {
+            for (const point of stroke.points) {
+              const band = Math.round(point.x / step) * step
+              coverage.set(band, (coverage.get(band) ?? 0) + 1)
+            }
+          }
+          const occupied = [...coverage.keys()].sort((left, right) => left - right)
+          if (occupied.length === 0) continue
+          // A gap of about a quarter of a character separates two groups.
+          const bands = [[occupied[0]]]
+          for (let index = 1; index < occupied.length; index++) {
+            if (occupied[index] - occupied[index - 1] > 24) bands.push([])
+            bands[bands.length - 1].push(occupied[index])
+          }
+          for (const band of bands) {
+            const left = band[0] - step
+            const right = band[band.length - 1] + step
+            const members = line.filter((stroke) => stroke.points.some((point) => point.x >= left && point.x <= right))
+            if (members.length === 0) continue
+            let top = Number.POSITIVE_INFINITY
+            let bottom = Number.NEGATIVE_INFINITY
+            for (const stroke of members) {
+              for (const point of stroke.points) {
+                if (point.y < top) top = point.y
+                if (point.y > bottom) bottom = point.y
+              }
+            }
+            groups.push({ strokes: members, left, right, top, bottom })
+          }
+        }
+        return groups
+      }
+
+      /**
+       * Pack every text line found in the given strokes.
+       * @param subset - Strokes to pack.
+       * @returns one base64 payload per line, top to bottom.
+       */
+      const packLines = (subset) => {
+        const payloads = []
+        for (const line of splitLines(subset)) {
+          const pixelsBase64 = packPixels(line)
+          if (pixelsBase64 !== '') payloads.push(pixelsBase64)
+        }
+        return payloads
+      }
+
+      /** Recognize the drawing locally — no agent round-trip, no network. */
+      const recognizeLocal = async () => {
+        const payloads = packLines(strokes.current)
+        if (payloads.length > 0) await props.onRecognizeLocal(payloads, false)
+      }
+
+      /**
+       * Recognize what the lasso picked up, optionally turning the result into a task.
+       * @param asTask - Whether the recognized text also becomes a draft assignment.
+       */
+      const recognizeSelection = async (asTask) => {
+        const chosen = [...selected.current]
+        if (chosen.length === 0) return
+        const payloads = packLines(chosen)
+        if (payloads.length > 0) await props.onRecognizeLocal(payloads, asTask === true)
+      }
+
+      return h('div', { style: styles.player }, [
+        h('div', { key: 'bar', style: styles.row }, [
+          h('button', {
+            key: 'pen',
+            type: 'button',
+            style: tool === 'pen' ? styles.buttonActive : styles.button,
+            onClick: () => setTool('pen'),
+          }, t('inkPen')),
+          h('button', {
+            key: 'erase',
+            type: 'button',
+            style: tool === 'erase' ? styles.buttonActive : styles.button,
+            onClick: () => setTool('erase'),
+          }, t('inkErase')),
+          h('button', {
+            key: 'lasso',
+            type: 'button',
+            style: tool === 'lasso' ? styles.buttonActive : styles.button,
+            onClick: () => setTool('lasso'),
+          }, t('inkLasso')),
+          h('button', {
+            key: 'undo',
+            type: 'button',
+            style: styles.button,
+            onClick: () => {
+              const last = strokes.current.pop()
+              if (last !== undefined) selected.current.delete(last)
+              setCount((value) => value + 1)
+            },
+          }, t('inkUndo')),
+          h('button', {
+            key: 'clear',
+            type: 'button',
+            style: styles.button,
+            onClick: () => {
+              strokes.current = []
+              selected.current = new Set()
+              setCount((value) => value + 1)
+            },
+          }, t('inkClear')),
+          h('button', {
+            key: 'save',
+            type: 'button',
+            style: styles.button,
+            disabled: count === 0 && strokes.current.length === 0,
+            onClick: () => { void save() },
+          }, t('inkSave')),
+          h('button', {
+            key: 'local',
+            type: 'button',
+            style: styles.buttonActive,
+            disabled: count === 0 && strokes.current.length === 0,
+            onClick: () => { void recognizeLocal() },
+          }, t('inkLocal')),
+          h('button', {
+            key: 'recognize',
+            type: 'button',
+            style: styles.button,
+            disabled: count === 0 && strokes.current.length === 0,
+            onClick: () => { void recognize() },
+          }, t('inkRecognize')),
+        ]),
+        // One row per recognized line, so a note holding several assignments can send each of
+        // them to the task list on its own.
+        props.recognizedText === '' ? null : h('div', { key: 'recognized', style: styles.list }, [
+          ...props.recognizedText.split('\n').filter((line) => line.trim() !== '').map((line, index) => h('div', {
+            key: `line${index}`,
+            style: styles.row,
+          }, [
+            h('span', { key: 'text', style: styles.recognized }, line),
+            h('button', {
+              key: 'toTask',
+              type: 'button',
+              style: styles.buttonActive,
+              onClick: () => { props.onRecognizedToTask(line) },
+            }, t('inkToTask')),
+          ])),
+          h('div', { key: 'actions', style: styles.row }, [
+            h('button', {
+              key: 'dismiss',
+              type: 'button',
+              style: styles.button,
+              onClick: () => props.onDismissRecognized(),
+            }, t('clearEntry')),
+          ]),
+        ]),
+        // Circled ink is the other target; it is only offered while something is selected.
+        selected.current.size === 0 ? null : h('div', { key: 'selection', style: styles.row }, [
+          h('span', { key: 'label', style: styles.recognized }, `${t('inkLasso')} ${selected.current.size}`),
+          h('button', {
+            key: 'recognizeSelection',
+            type: 'button',
+            style: styles.button,
+            onClick: () => { void recognizeSelection(false) },
+          }, t('inkSelection')),
+          h('button', {
+            key: 'toTask',
+            type: 'button',
+            style: styles.buttonActive,
+            onClick: () => { void recognizeSelection(true) },
+          }, t('inkToTask')),
+          h('button', {
+            key: 'clear',
+            type: 'button',
+            style: styles.button,
+            onClick: () => {
+              selected.current = new Set()
+              setCount((value) => value + 1)
+              props.onDismissRecognized()
+            },
+          }, t('clearEntry')),
+        ]),
+        h('canvas', {
+          key: 'pad',
+          ref: canvas,
+          style: styles.ink,
+          onPointerDown,
+          onPointerMove,
+          onPointerUp: finishStroke,
+          onPointerCancel,
+          onPointerLeave: finishStroke,
+          onContextMenu: (event) => event.preventDefault(),
+        }),
+        h('span', { key: 'hint', style: styles.hint }, tool === 'lasso' ? t('inkLassoHint') : t('inkHint')),
+      ])
+    }
+
+    /**
+     * Render the meeting hub: where records live, how to start one, and the term list.
+     * @param props - Root-scoped slot props plus this namespace's copy.
+     * @returns the hub page.
+     */
+    function MeetingHubPage(props) {
+      const t = props.t
+      const [files, setFiles] = React.useState([])
+      const [preview, setPreview] = React.useState(null)
+      const [error, setError] = React.useState('')
+      const [termsText, setTermsText] = React.useState(readTerms)
+      /** Push settings and the shared roster live here, not in a single meeting's panel. */
+      const [settings, setSettings] = React.useState({ configured: [], people: [], departments: [] })
+      const [settingsDraft, setSettingsDraft] = React.useState({ dingtalk: '', wecom: '', appKey: '', appSecret: '', agentId: '', mode: 'group' })
+      const [personDraft, setPersonDraft] = React.useState({ name: '', phone: '', userId: '' })
+      const [deptId, setDeptId] = React.useState(0)
+      const [directoryBusy, setDirectoryBusy] = React.useState(false)
+      const [settingsNote, setSettingsNote] = React.useState('')
+      /** Which hub section is showing; the page keeps its own tabs, not the panel's. */
+      const [hubTab, setHubTab] = React.useState('records')
+
+      /** Load settings, the roster and any cached department tree when either tab opens. */
+      React.useEffect(() => {
+        if (hubTab !== 'settings' && hubTab !== 'people') return undefined
+        let cancelled = false
+        void (async () => {
+          try {
+            const config = await get('/webhooks')
+            const roster = await get('/people')
+            if (cancelled) return
+            setSettings({
+              ...config,
+              people: Array.isArray(roster.people) ? roster.people : [],
+              departments: Array.isArray(roster.departments) ? roster.departments : [],
+            })
+            // The secret never comes back, so only displayable fields are prefilled.
+            setSettingsDraft((value) => ({
+              ...value,
+              mode: typeof config.mode === 'string' ? config.mode : value.mode,
+              agentId: typeof config.agentId === 'string' ? config.agentId : value.agentId,
+            }))
+          } catch (failure) {
+            if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure))
+          }
+        })()
+        return () => { cancelled = true }
+      }, [hubTab])
+
+      /** Store the robot webhooks and the DingTalk internal application. */
+      const saveSettings = React.useCallback(async () => {
+        setError('')
+        try {
+          const reply = await post('/webhooks', settingsDraft)
+          setSettings((value) => ({ ...value, ...reply }))
+          setSettingsNote(t('robotSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [settingsDraft, t])
+
+      /**
+       * Add, update or remove one person on the shared roster.
+       * @param draft - The person to store.
+       * @param action - 'save' adds or updates, 'remove' deletes by name.
+       */
+      const savePerson = React.useCallback(async (draft, action = 'save') => {
+        setError('')
+        try {
+          const reply = await post('/people', { ...draft, remove: action === 'remove' })
+          if (Array.isArray(reply.people)) setSettings((value) => ({ ...value, people: reply.people }))
+          if (action === 'save') setPersonDraft({ name: '', phone: '', userId: '' })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /** Read the DingTalk department tree so a department can be chosen for a sync. */
+      const readDepartments = React.useCallback(async () => {
+        setError('')
+        setSettingsNote('')
+        setDirectoryBusy(true)
+        try {
+          const reply = await post('/dingtalk/departments', {})
+          if (Array.isArray(reply.departments)) setSettings((value) => ({ ...value, departments: reply.departments }))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setDirectoryBusy(false)
+        }
+      }, [])
+
+      /** Import people from DingTalk. A department id of 0 means the whole organisation. */
+      const syncPeople = React.useCallback(async () => {
+        setError('')
+        setSettingsNote('')
+        setDirectoryBusy(true)
+        try {
+          const reply = await post('/dingtalk/sync', { deptId })
+          if (Array.isArray(reply.people)) setSettings((value) => ({ ...value, people: reply.people }))
+          setSettingsNote(`${t('peopleSynced')}: ${t('peopleAdded')} ${reply.added ?? 0} / ${reply.total ?? 0}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setDirectoryBusy(false)
+        }
+      }, [deptId, t])
+
+      // These two hooks read root-scoped framework seats whose snapshots can be
+      // undefined before the first frame or differ across runtime versions; guard every
+      // access so a shape mismatch degrades to a neutral line instead of a blank page.
+      const sessionId = props.useSessions((state) => {
+        try {
+          const byId = state === null || state === undefined ? undefined : state.byId
+          if (byId === null || byId === undefined) return ''
+          const current = Object.values(byId).find((session) => {
+            const retainedBy = session === null || session === undefined ? undefined : session.retainedBy
+            return ((retainedBy === null || retainedBy === undefined ? undefined : retainedBy.mainView) ?? 0) > 0
+          })
+          return current === undefined ? '' : current.id
+        } catch {
+          return ''
+        }
+      })
+      const conversationOpen = props.usePanelInfo((info) => {
+        try {
+          return info !== null && info !== undefined && info.activePanelId === null
+        } catch {
+          return false
+        }
+      })
+
+      React.useEffect(() => {
+        try {
+          localStorage.setItem(TERMS_KEY, termsText)
+        } catch {
+          // Storage refused (private mode): the list still applies to this meeting.
+        }
+      }, [termsText])
+
+      /** Re-read the exported artifacts from the host. */
+      const refresh = React.useCallback(async () => {
+        setError('')
+        try {
+          const response = await fetch(`${PREFIX}/list`)
+          const value = await response.json()
+          if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+          setFiles(value.files)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      React.useEffect(() => { void refresh() }, [refresh])
+
+      /**
+       * Open one record: pair its recording and transcript by shared name, then hand the
+       * timed cues to the synchronized player.
+       * @param name - Artifact file name.
+       */
+      /**
+       * Hand this meeting's record to a brand-new conversation, where it arrives as the
+       * opening draft so the user reviews it before sending.
+       * @param file - The listed artifact, carrying the meeting it belongs to.
+       */
+      const sendToNewConversation = React.useCallback(async (file) => {
+        setError('')
+        if (file.meetingId === '') {
+          setError(t('hubNoMeeting'))
+          return
+        }
+        try {
+          const reply = await get(`/transcript?meetingId=${encodeURIComponent(file.meetingId)}&limit=4000`)
+          const text = typeof reply.text === 'string' ? reply.text : ''
+          if (text.trim() === '') {
+            setError(t('hubNoText'))
+            return
+          }
+          if (!props.startConversation(text)) setError(t('hubNoWorkspace'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [props, t])
+
+      /**
+       * Show one artifact in the operating system's file manager.
+       * @param name - File name inside the export directory.
+       */
+      const reveal = React.useCallback(async (name) => {
+        setError('')
+        try {
+          await post('/reveal', { name })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      const open = React.useCallback(async (name) => {
+        setError('')
+        // A drawing is shown as an image; nothing to parse.
+        if (name.endsWith('.png')) {
+          setPreview({ name, audioName: '', image: true, segments: [], markdown: '' })
+          return
+        }
+        const base = name.replace(/\.(srt|md|wav)$/u, '')
+        const has = (candidate) => files.some((file) => file.name === candidate)
+        const audioName = has(`${base}.wav`) ? `${base}.wav` : ''
+        const srtName = has(`${base}.srt`) ? `${base}.srt` : ''
+        const mdName = has(`${base}.md`) ? `${base}.md` : ''
+        const load = async (target) => {
+          if (target === '') return ''
+          const response = await fetch(`${PREFIX}/file?name=${encodeURIComponent(target)}`)
+          const value = await response.json()
+          if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+          return typeof value.content === 'string' ? value.content : ''
+        }
+        try {
+          const srtText = await load(srtName)
+          const markdown = await load(mdName)
+          setPreview({
+            name,
+            audioName,
+            segments: srtText === '' ? [] : parseSrt(srtText),
+            markdown,
+          })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [files])
+
+      return h(Boundary, null, h('section', { style: styles.hub }, [
+        h('h1', { key: 'title', style: styles.hubTitle }, t('hubTitle')),
+        h('p', { key: 'intro', style: styles.subtitle }, t('hubIntro')),
+        h('div', { key: 'status', style: styles.hubCard }, [
+          h('div', { key: 'line', style: styles.label }, t('hubCurrent')),
+          h('div', { key: 'value', style: styles.status }, sessionId === ''
+            ? t('hubNoSession')
+            : conversationOpen ? t('hubSessionOpen') : t('hubSessionBackground')),
+          h('div', { key: 'hint', style: styles.hint }, t('hubHowTo')),
+        ]),
+        h('div', { key: 'tabs', style: styles.tabs }, HUB_TAB_VALUES.map((value) => h('button', {
+          key: value,
+          type: 'button',
+          style: hubTab === value ? styles.tabActive : styles.tab,
+          onClick: () => setHubTab(value),
+        }, t(HUB_TAB_KEYS[value])))),
+        hubTab === 'terms' ? h('div', { key: 'terms' }, [
+          h('label', { key: 'label', style: styles.label, htmlFor: 'meeting-room-hub-terms' }, t('terms')),
+          h('span', { key: 'hint', style: styles.hint }, t('termsHint')),
+          h('textarea', {
+            key: 'input',
+            id: 'meeting-room-hub-terms',
+            style: styles.textarea,
+            value: termsText,
+            spellCheck: false,
+            onChange: (event) => setTermsText(event.target.value),
+          }),
+        ]) : null,
+        hubTab === 'settings' ? h('div', { key: 'settings', style: styles.hubCard }, [
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'label', style: styles.label }, t('robotSettings')),
+          ]),
+          h('div', { key: 'body', style: styles.list }, [
+            // The delivery choice comes first: it decides whether the fields below matter.
+            h('div', { key: 'mode', style: styles.row }, [
+              h('span', { key: 'label', style: styles.status }, t('pushMode')),
+              h('select', {
+                key: 'select',
+                style: styles.inlineInput,
+                value: settingsDraft.mode,
+                onChange: (event) => setSettingsDraft((draft) => ({ ...draft, mode: event.target.value })),
+              }, PUSH_MODE_VALUES.map((value) => h('option', { key: value, value }, t(PUSH_MODE_KEYS[value])))),
+            ]),
+            h('span', { key: 'hint', style: styles.hint }, t('robotHint')),
+            h('input', {
+              key: 'dingtalk',
+              style: styles.textarea,
+              placeholder: `dingtalk ${t('robotNone')}`,
+              value: settingsDraft.dingtalk,
+              spellCheck: false,
+              onChange: (event) => setSettingsDraft((value) => ({ ...value, dingtalk: event.target.value })),
+            }),
+            h('input', {
+              key: 'wecom',
+              style: styles.textarea,
+              placeholder: `wecom ${t('robotNone')}`,
+              value: settingsDraft.wecom,
+              spellCheck: false,
+              onChange: (event) => setSettingsDraft((value) => ({ ...value, wecom: event.target.value })),
+            }),
+            h('span', { key: 'apphint', style: styles.hint }, t('robotAppHint')),
+            h('input', {
+              key: 'appKey',
+              style: styles.textarea,
+              placeholder: settings.appKey === undefined || settings.appKey === '' ? 'AppKey' : `AppKey ${settings.appKey}`,
+              value: settingsDraft.appKey,
+              spellCheck: false,
+              onChange: (event) => setSettingsDraft((value) => ({ ...value, appKey: event.target.value })),
+            }),
+            h('input', {
+              key: 'appSecret',
+              type: 'password',
+              style: styles.textarea,
+              placeholder: settings.hasSecret === true ? t('secretKept') : 'AppSecret',
+              value: settingsDraft.appSecret,
+              spellCheck: false,
+              onChange: (event) => setSettingsDraft((value) => ({ ...value, appSecret: event.target.value })),
+            }),
+            h('input', {
+              key: 'agentId',
+              style: styles.textarea,
+              placeholder: 'AgentId',
+              value: settingsDraft.agentId,
+              spellCheck: false,
+              onChange: (event) => setSettingsDraft((value) => ({ ...value, agentId: event.target.value })),
+            }),
+            h('div', { key: 'actions', style: styles.row }, [
+              h('button', { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSettings() } }, t('robotSave')),
+              settingsNote === '' ? null : h('span', { key: 'note', style: styles.status }, settingsNote),
+            ]),
+          ]),
+        ]) : null,
+        hubTab === 'people' ? h('div', { key: 'people', style: styles.hubCard }, [
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'label', style: styles.label }, t('peopleTitle')),
+            h('span', { key: 'count', style: styles.stamp }, `${settings.people.length} ${t('peopleUnit')}`),
+          ]),
+          h('div', { key: 'body', style: styles.list }, [
+            h('span', { key: 'peoplehint', style: styles.hint }, t('peopleHint')),
+            // DingTalk knows the organisation, so the roster can be filled from it instead of
+            // typed by hand; one department or the whole tree.
+            h('div', { key: 'sync', style: styles.row }, [
+              h('button', {
+                key: 'read',
+                type: 'button',
+                style: styles.button,
+                disabled: directoryBusy,
+                onClick: () => { void readDepartments() },
+              }, t('readDepartments')),
+              h('select', {
+                key: 'dept',
+                style: styles.inlineInput,
+                value: String(deptId),
+                onChange: (event) => setDeptId(Number(event.target.value)),
+              }, [
+                h('option', { key: 'all', value: '0' }, t('allOrganization')),
+                ...settings.departments.map((department) => h('option', {
+                  key: department.id,
+                  value: String(department.id),
+                }, department.name)),
+              ]),
+              h('button', {
+                key: 'sync',
+                type: 'button',
+                style: styles.buttonActive,
+                disabled: directoryBusy,
+                onClick: () => { void syncPeople() },
+              }, directoryBusy ? t('hubWorking') : t('syncFromDingtalk')),
+            ]),
+            ...settings.people.map((person) => h('div', { key: person.name, style: styles.row }, [
+              h('span', { key: 'name', style: styles.chip }, person.name),
+              h('span', { key: 'phone', style: styles.status }, person.phone === '' ? t('phonePh') : person.phone),
+              h('span', { key: 'userId', style: styles.status }, person.userId === '' ? t('userIdPh') : person.userId),
+              h('button', {
+                key: 'edit',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => setPersonDraft({ name: person.name, phone: person.phone, userId: person.userId }),
+              }, t('editEntry')),
+              h('button', {
+                key: 'del',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => { void savePerson({ name: person.name }, 'remove') },
+              }, t('remove')),
+            ])),
+            h('div', { key: 'personadd', style: styles.row }, [
+              h('input', {
+                key: 'name',
+                style: styles.inlineInput,
+                placeholder: t('speakerNamePlaceholder'),
+                value: personDraft.name,
+                spellCheck: false,
+                onChange: (event) => setPersonDraft((value) => ({ ...value, name: event.target.value })),
+              }),
+              h('input', {
+                key: 'phone',
+                style: styles.inlineInput,
+                placeholder: t('phonePh'),
+                value: personDraft.phone,
+                spellCheck: false,
+                onChange: (event) => setPersonDraft((value) => ({ ...value, phone: event.target.value })),
+              }),
+              h('input', {
+                key: 'userId',
+                style: styles.inlineInput,
+                placeholder: t('userIdPh'),
+                value: personDraft.userId,
+                spellCheck: false,
+                onChange: (event) => setPersonDraft((value) => ({ ...value, userId: event.target.value })),
+              }),
+              h('button', {
+                key: 'add',
+                type: 'button',
+                style: styles.button,
+                disabled: personDraft.name.trim() === '',
+                onClick: () => { void savePerson(personDraft) },
+              }, t('saveEntry')),
+            ]),
+          ]),
+        ]) : null,
+        hubTab === 'records' ? h('div', { key: 'records', style: styles.hubCard }, [
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'label', style: styles.label }, t('hubRecords')),
+            h('button', { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void refresh() } }, t('hubRefresh')),
+          ]),
+          files.length === 0
+            ? h('p', { key: 'empty', style: styles.empty }, t('hubEmpty'))
+            : h('div', { key: 'list', style: styles.hubList }, files.map((file) => h('div', {
+              key: file.name,
+              style: styles.hubRow,
+            }, [
+              h('button', {
+                key: 'open',
+                type: 'button',
+                style: styles.linkButton,
+                onClick: () => { void open(file.name) },
+              }, file.name),
+              h('span', { key: 'meta', style: styles.stamp }, `${Math.max(1, Math.round(file.size / 1024))} KB · ${absoluteOf(file.modified)}`),
+              h('button', {
+                key: 'send',
+                type: 'button',
+                style: styles.smallButton,
+                title: t('hubSendHint'),
+                onClick: () => { void sendToNewConversation(file) },
+              }, t('hubSend')),
+              file.sessionId === '' ? null : h('button', {
+                key: 'session',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => { props.openConversation(file.sessionId) },
+              }, t('hubOpenSession')),
+              h('button', {
+                key: 'reveal',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => { void reveal(file.name) },
+              }, t('hubReveal')),
+            ]))),
+        ]) : null,
+        hubTab === 'records' && preview !== null ? h('div', { key: 'preview', style: styles.hubCard }, [
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'name', style: styles.label }, preview.name),
+            h('button', { key: 'close', type: 'button', style: styles.button, onClick: () => setPreview(null) }, t('hubClose')),
+          ]),
+          preview.image
+            ? h('img', {
+              key: 'img',
+              style: styles.inkShot,
+              alt: preview.name,
+              src: `${PREFIX}/raw?name=${encodeURIComponent(preview.name)}`,
+            })
+            : preview.name.endsWith('.md')
+              ? h('pre', { key: 'body', style: styles.pre }, preview.markdown)
+              : preview.segments.length > 0
+                ? h(SyncedTranscriptPlayer, {
+                  key: 'player',
+                  t,
+                  src: preview.audioName === '' ? '' : `${PREFIX}/audio?name=${encodeURIComponent(preview.audioName)}`,
+                  segments: preview.segments,
+                })
+                : h('p', { key: 'none', style: styles.empty }, t('hubNoText')),
+        ]) : null,
+        error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+      ]))
+    }
+
+    return {
+      inject: ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'layout', 'sessions'],
+      apply(ctx) {
+        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'meeting-room: dictionaries')
+        const t = ctx.locale.bind(NS)
+
+        /**
+         * Resolve the shared layout store product (state plus actions). The store seat
+         * sits on the registration entry itself, not inside its options table.
+         * @returns the store instance, or null when the seat is unreadable.
+         */
+        function layoutStore() {
+          try {
+            const entries = ctx.slots.entries('root')
+            const entry = entries.find((candidate) => candidate.store !== undefined)
+              ?? entries.find((candidate) => candidate.options?.store !== undefined)
+            const seat = entry?.store ?? entry?.options?.store
+            return seat?.create?.() ?? null
+          } catch (failure) {
+            console.warn('meeting-room: could not reach the layout store', failure)
+            return null
+          }
+        }
+
+        /**
+         * Read the workspace rail's collapsed state. The layout service only toggles, so
+         * without this read the button would expand an already-closed rail.
+         * @returns true when collapsed, false when open, null when unreadable.
+         */
+        function readRailCollapsed() {
+          const sidebar = layoutStore()?.getSnapshot?.()?.layoutInfo?.sidebar
+          // The layout store records 0 for the closed preference and a px width otherwise.
+          return typeof sidebar === 'number' ? sidebar === 0 : null
+        }
+
+        /**
+         * Set the right panel's width preference. The layout service exposes no width
+         * setter, so this writes the store's own action, which clamps to the frame's
+         * maximum — the widest the panel can be while the conversation stays visible.
+         * @param px - Requested width in px.
+         */
+        function setRightbarWidth(px) {
+          try {
+            layoutStore()?.actions?.setRightbar?.(px)
+          } catch (failure) {
+            console.warn('meeting-room: could not set the right panel width', failure)
+          }
+        }
+
+        /** Panel width to restore when leaving meeting focus; null until the first focus. */
+        let savedRightbar = null
+
+        /**
+         * Toggle meeting focus from the session header. Opening: collapse the workspace
+         * rail, open the meeting panel, and widen it to the frame's maximum while the
+         * conversation stays visible. Closing: shut the right panel and give the frame
+         * back to the workspace.
+         *
+         * The decision follows the pane's real state, never a remembered flag: a pane the
+         * user closed by any other route would otherwise leave the memory stale and make every
+         * later click take the opening branch again, collapsing the rail each time.
+         */
+        function toggleMeetingFocus() {
+          if (ctx.sidebarRight.isExpanded()) {
+            // Collapse the column first: it is the visible close of the right window.
+            ctx.sidebarRight.toggleExpanded()
+            if (readRailCollapsed() === true) ctx.layout.toggleSidebar()
+            if (savedRightbar !== null) setRightbarWidth(savedRightbar)
+            return
+          }
+          if (readRailCollapsed() === false) ctx.layout.toggleSidebar()
+          // Opening expands the column and seeds its default width when it never had one.
+          ctx.sidebarRight.openTab(TAB_KIND)
+          const info = layoutStore()?.getSnapshot?.()?.layoutInfo
+          savedRightbar = typeof info?.rightbar === 'number' ? info.rightbar : null
+          setRightbarWidth(info?.viewportWidth ?? window.innerWidth)
+        }
+
+        /**
+         * Submit a prompt carrying one drawing into a session, so handwriting recognition
+         * runs through the agent loop and both the request and the answer stay in the log.
+         * @param sessionId - Target session.
+         * @param text - Prompt text.
+         * @param pngBase64 - The drawing as base64 PNG bytes.
+         * @returns whether the prompt was accepted.
+         */
+        async function askNote(sessionId, text, pngBase64) {
+          const binding = ctx.sessions.binding(sessionId)
+          if (binding === undefined) return { ok: false, error: 'no live session binding' }
+          const handle = binding.session.beginSubmission({ mode: 'queue', text, attachments: [] })
+          try {
+            const result = await binding.session.prompt([
+              { type: 'text', text },
+              { type: 'image', mediaType: 'image/png', data: pngBase64, name: 'note.png' },
+            ], 'queue', undefined, handle.requestId)
+            if (!result.ok) {
+              handle.abandon()
+              return { ok: false, error: String(result.error?.code ?? 'rejected') }
+            }
+            return { ok: true }
+          } catch (failure) {
+            handle.abandon()
+            return { ok: false, error: failure instanceof Error ? failure.message : String(failure) }
+          }
+        }
+
+        /**
+         * Submit a plain text prompt into a session, so a request and its answer stay in the
+         * conversation log.
+         * @param sessionId - Target session.
+         * @param text - Prompt text.
+         * @returns whether the prompt was accepted.
+         */
+        async function askText(sessionId, text) {
+          const binding = ctx.sessions.binding(sessionId)
+          if (binding === undefined) return { ok: false, error: 'no live session binding' }
+          const handle = binding.session.beginSubmission({ mode: 'queue', text, attachments: [] })
+          try {
+            const result = await binding.session.prompt([{ type: 'text', text }], 'queue', undefined, handle.requestId)
+            if (!result.ok) {
+              handle.abandon()
+              return { ok: false, error: String(result.error?.code ?? 'rejected') }
+            }
+            return { ok: true }
+          } catch (failure) {
+            handle.abandon()
+            return { ok: false, error: failure instanceof Error ? failure.message : String(failure) }
+          }
+        }
+
+        // A page type (no patterns): the header button opens it by kind.
+        ctx.effect(() => ctx.sidebarRightTabs.register({
+          id: TAB_ID,
+          kind: TAB_KIND,
+          title: () => t('title'),
+        }), 'meeting-room: tab type')
+
+        ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+          name: 'sidebar.right.pane.tab', key: TAB_ID, locale: NS,
+          inject: () => ({ askNote, askText }),
+        }, MeetingPanel))
+        ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
+          name: 'sidebar.right.pane.tab.title', key: TAB_ID,
+        }, MeetingTabTitle))
+        ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+          name: 'conversation.session.header.actions',
+          id: 'meeting-room.open',
+          order: 20,
+          locale: NS,
+          inject: () => ({ open: () => toggleMeetingFocus() }),
+        }, OpenMeetingButton))
+
+        // The left-sidebar row and its main-panel page share one id: the row addresses the page.
+        ctx.slots.inject('main', () => ctx.slots.register({
+          name: 'main',
+          key: PANEL_ID,
+          locale: NS,
+          // Navigating the workspace is the shell's job, so the page asks for the service
+          // rather than reaching into the session list itself.
+          inject: () => ({
+            /**
+             * Open a fresh conversation with this meeting's content ready in the input.
+             * @param prompt - The text the new conversation starts from.
+             * @returns whether the workspace could take it.
+             */
+            startConversation: (prompt) => {
+              const workspace = ctx.get('uiWorkspace')
+              if (workspace === undefined) return false
+              workspace.startSession(undefined, { prompt, clearPreviousDraft: true })
+              return true
+            },
+            /**
+             * Show the conversation that produced a meeting.
+             * @param sessionId - Target session.
+             * @returns whether the workspace could open it.
+             */
+            openConversation: (sessionId) => {
+              const workspace = ctx.get('uiWorkspace')
+              if (workspace === undefined || sessionId === '') return false
+              workspace.openSession({ sessionId })
+              return true
+            },
+          }),
+        }, MeetingHubPage))
+        ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+          name: 'sidebar.panellist', id: PANEL_ID, order: 20, locale: NS, label: () => t('hubTitle'),
+        }, MeetingPanelIcon))
+      },
+    }
+  },
+})
