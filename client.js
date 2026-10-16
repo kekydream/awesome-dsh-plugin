@@ -284,7 +284,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       speechDialogTitle: '需要先下载语音识别模型',
       speechDialogBody: '没有语音识别模型就无法把录音转成文字，此时开始录制没有意义。请先下载模型，就绪后再开始录制。',
       speechDialogDownload: '立即下载模型',
-      speechDialogCancel: '暂不录制',
+      speechDialogCancel: '关闭',
       prepareInPanel: '下载本地模型',
       preparingInPanel: '正在下载模型…',
       preparedInPanel: '模型已就绪',
@@ -486,7 +486,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       speechDialogTitle: 'Download the speech model first',
       speechDialogBody: 'Without the speech model your recording cannot be transcribed, so starting now would be meaningless. Download the model, then start recording.',
       speechDialogDownload: 'Download now',
-      speechDialogCancel: 'Not now',
+      speechDialogCancel: 'Close',
       prepareInPanel: 'Download local models',
       preparingInPanel: 'Downloading models\u2026',
       preparedInPanel: 'Models ready',
@@ -622,10 +622,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       hintLines: { display: 'block', fontSize: '11px', opacity: 0.65, lineHeight: 1.6, whiteSpace: 'pre-line' },
       termsArea: { width: '100%', flex: 1, minHeight: '320px', padding: '6px', borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px', resize: 'vertical', boxSizing: 'border-box' },
       setupOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-      setupCard: { background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '12px', padding: '18px 20px', maxWidth: '460px', width: 'calc(100% - 40px)', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' },
+      setupCard: { position: 'relative', background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '12px', padding: '18px 20px', maxWidth: '460px', width: 'calc(100% - 40px)', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' },
       setupTitle: { margin: 0, fontSize: '16px', fontWeight: 600 },
       setupFeature: { fontSize: '13px', lineHeight: 1.6 },
       setupFoot: { display: 'flex', gap: '8px', justifyContent: 'flex-end' },
+      setupClose: { position: 'absolute', top: '8px', right: '12px', border: 'none', background: 'none', color: 'inherit', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '4px' },
     }
 
     /**
@@ -1187,7 +1188,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [note, setNote] = React.useState('')
       const [termsText, setTermsText] = React.useState(readTerms)
       const [speaker, setSpeaker] = React.useState({ phase: 'unprepared', message: '' })
-      const [speech, setSpeech] = React.useState({ ready: true, phase: 'checking', requesting: false })
+      const [speech, setSpeech] = React.useState({ ready: true, phase: 'checking', requesting: false, completedBytes: 0, totalBytes: 0 })
       const [showSpeechDialog, setShowSpeechDialog] = React.useState(false)
 
       // Check transcription readiness on mount; follow any in-progress download.
@@ -1196,12 +1197,12 @@ registerProcessor('meeting-capture', MeetingCapture)
         void (async () => {
           let s = await readSpeechState()
           if (!live) return
-          setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy })
+          setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy, completedBytes: s.completedBytes, totalBytes: s.totalBytes })
           while (live && s.busy) {
             await new Promise((r) => setTimeout(r, 1500))
             if (!live) return
             s = await readSpeechState()
-            if (live) setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy })
+            if (live) setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy, completedBytes: s.completedBytes, totalBytes: s.totalBytes })
           }
         })()
         return () => { live = false }
@@ -1215,17 +1216,17 @@ registerProcessor('meeting-capture', MeetingCapture)
           const dl = Date.now() + 600000
           for (;;) {
             const s = await readSpeechState()
-            setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy })
+            setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy, completedBytes: s.completedBytes, totalBytes: s.totalBytes })
             if (s.ready) { setShowSpeechDialog(false); return }
             // Only 'failed' is terminal: 'unprepared'/'unavailable' mean the voice bundle
             // is still being enabled or the download has not started yet — keep polling.
             if (s.phase === 'failed') {
-              setSpeech({ ready: false, phase: 'failed', requesting: false })
+              setSpeech({ ready: false, phase: 'failed', requesting: false, completedBytes: 0, totalBytes: 0 })
               setError(typeof s.message === 'string' && s.message !== '' ? s.message : t('setupPrepareFailed'))
               return
             }
             if (Date.now() >= dl) {
-              setSpeech({ ready: false, phase: 'failed', requesting: false })
+              setSpeech({ ready: false, phase: 'failed', requesting: false, completedBytes: 0, totalBytes: 0 })
               setError(t('setupPrepareFailed'))
               return
             }
@@ -2069,6 +2070,12 @@ registerProcessor('meeting-capture', MeetingCapture)
         : speaker.phase === 'downloading' ? t('speakerDownloading')
           : speaker.phase === 'failed' ? `${t('speakerFailed')}${speaker.message === '' ? '' : `: ${speaker.message}`}`
             : t('speakerOff')
+      // Real download progress when the provider reports byte counts, indeterminate otherwise.
+      const speechDetail = speech.requesting
+        ? (speech.totalBytes > 0
+          ? `${t('speechDownloading')}（${(speech.completedBytes / 1048576).toFixed(1)} / ${(speech.totalBytes / 1048576).toFixed(1)} MB）`
+          : t('speechDownloading'))
+        : ''
 
       return h(Boundary, null, h('section', { style: styles.panel }, [
         // The pinned console carries the buttons, the status, the note pad, the recording
@@ -2506,8 +2513,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         ]),
         openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
         note === '' ? null : h('p', { key: 'note', style: styles.note }, note),
-        speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [h('p', { style: styles.subtitle }, speech.requesting ? t('speechDownloading') : speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechPrepareHint')), h('div', { style: styles.row }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')), typeof props.openVoiceInputBundle === 'function' && !speech.requesting ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null])]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
-        showSpeechDialog ? h('div', { key: 'sd', style: styles.setupOverlay, role: 'dialog', 'aria-modal': 'true' }, [h('div', { style: styles.setupCard }, [h('h2', { style: styles.setupTitle }, t('speechDialogTitle')), h('p', { style: styles.subtitle }, speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechDialogBody')), speech.requesting ? h('p', { style: styles.status }, t('speechDownloading')) : null, h('div', { style: styles.setupFoot }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechDialogDownload')), h('button', { key: 'cn', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => setShowSpeechDialog(false) }, t('speechDialogCancel'))])])]) : null,
+        speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [h('p', { style: styles.subtitle }, speech.requesting ? (speechDetail !== '' ? speechDetail : t('speechDownloading')) : speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechPrepareHint')), h('div', { style: styles.row }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')), typeof props.openVoiceInputBundle === 'function' && !speech.requesting ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null])]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        showSpeechDialog ? h('div', { key: 'sd', style: styles.setupOverlay, role: 'dialog', 'aria-modal': 'true' }, [h('div', { style: styles.setupCard }, [h('h2', { style: styles.setupTitle }, t('speechDialogTitle')), h('button', { key: 'x', type: 'button', style: styles.setupClose, title: t('speechDialogCancel'), onClick: () => setShowSpeechDialog(false) }, '\\u00d7'), h('p', { style: styles.subtitle }, speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechDialogBody')), speech.requesting ? h('p', { style: styles.status }, speechDetail !== '' ? speechDetail : t('speechDownloading')) : null, h('div', { style: styles.setupFoot }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechDialogDownload')), h('button', { key: 'cn', type: 'button', style: styles.button, onClick: () => setShowSpeechDialog(false) }, t('speechDialogCancel'))])])]) : null,
         ]),
       ]))
     }
@@ -3645,8 +3652,10 @@ registerProcessor('meeting-capture', MeetingCapture)
         const phase = typeof reply.phase === 'string' ? reply.phase : 'unavailable'
         const ready = reply.ready === true || phase === 'ready'
         const message = typeof reply.message === 'string' ? reply.message : ''
-        return { ready, phase, busy: SPEECH_BUSY.includes(phase), message }
-      } catch { return { ready: true, phase: 'unavailable', busy: false, message: '' } }
+        const completedBytes = typeof reply.completedBytes === 'number' ? reply.completedBytes : 0
+        const totalBytes = typeof reply.totalBytes === 'number' ? reply.totalBytes : 0
+        return { ready, phase, busy: SPEECH_BUSY.includes(phase), message, completedBytes, totalBytes }
+      } catch { return { ready: true, phase: 'unavailable', busy: false, message: '', completedBytes: 0, totalBytes: 0 } }
     }
     function SetupNotice(props) {
       const [preparing, setPreparing] = React.useState(false)

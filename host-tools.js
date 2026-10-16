@@ -126,29 +126,41 @@ export async function appendChunk(ctx, meeting, pcm, collectedSeconds) {
 
 /**
  * Read the transcription provider readiness as a plain object the browser half can use.
+ * The download progress (`completedBytes`/`totalBytes`) rides along so the UI can show a
+ * real percentage instead of an indeterminate spinner.
  * @param ctx - Host context.
- * @returns `{ ready, phase, message, providerId }`.
+ * @returns `{ ready, phase, message, providerId, completedBytes, totalBytes }`.
  */
 export function readSpeechState(ctx) {
   const speech = ctx.get('speechToText')
   if (speech === undefined) {
-    return { ready: false, phase: 'unavailable', message: '', providerId: '' }
+    return { ready: false, phase: 'unavailable', message: '', providerId: '', completedBytes: 0, totalBytes: 0 }
   }
   let snapshot
   try {
     snapshot = typeof speech.snapshot === 'function' ? speech.snapshot() : undefined
   } catch (error) {
-    return { ready: false, phase: 'unavailable', message: error instanceof Error ? error.message : String(error), providerId: '' }
+    return { ready: false, phase: 'unavailable', message: error instanceof Error ? error.message : String(error), providerId: '', completedBytes: 0, totalBytes: 0 }
   }
   const providers = Array.isArray(snapshot?.providers) ? snapshot.providers : []
   const selectedId = snapshot?.selection?.providerId
   const provider = providers.find((entry) => entry?.id === selectedId) ?? providers[0]
   if (provider === undefined) {
-    return { ready: false, phase: 'unavailable', message: '', providerId: '' }
+    return { ready: false, phase: 'unavailable', message: '', providerId: '', completedBytes: 0, totalBytes: 0 }
   }
-  const phase = typeof provider.preparation?.phase === 'string' ? provider.preparation.phase : 'unavailable'
-  const message = phase === 'failed' && typeof provider.preparation?.message === 'string' ? provider.preparation.message : ''
-  return { ready: phase === 'ready', phase, message, providerId: typeof provider.id === 'string' ? provider.id : '' }
+  const preparation = provider.preparation ?? {}
+  const phase = typeof preparation.phase === 'string' ? preparation.phase : 'unavailable'
+  const message = phase === 'failed' && typeof preparation.message === 'string' ? preparation.message : ''
+  const completedBytes = typeof preparation.completedBytes === 'number' ? preparation.completedBytes : 0
+  const totalBytes = typeof preparation.totalBytes === 'number' ? preparation.totalBytes : 0
+  return {
+    ready: phase === 'ready',
+    phase,
+    message,
+    providerId: typeof provider.id === 'string' ? provider.id : '',
+    completedBytes,
+    totalBytes,
+  }
 }
 
 /**

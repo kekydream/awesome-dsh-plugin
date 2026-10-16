@@ -8,6 +8,8 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile, rm, stat, rename } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { SPEAKER_MODEL, SPEAKER_MODEL_ORIGINS, SPEAKER_THRESHOLD } from './host-constants.js'
@@ -20,7 +22,7 @@ const PACKAGE_DIR = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]
  * @returns an absolute directory path.
  */
 export function speakerDirectory() {
-  const home = process.env.DSH_HOME ?? join(require('node:os').homedir(), '.dsh')
+  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   return join(home, 'speech-to-text', 'speakers')
 }
 
@@ -88,7 +90,6 @@ export function ensureSpeakerWorker(ctx) {
   if (speakerState.modulePath === '') {
     // The runtime hands us the installation's copy only because this package declares
     // `sherpa-onnx-node` as a peer dependency; a bare specifier resolves no other way.
-    const { createRequire } = require('node:module')
     speakerState.modulePath = createRequire(import.meta.url).resolve('sherpa-onnx-node')
   }
   const child = spawn(process.execPath, [
