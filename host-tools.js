@@ -153,13 +153,16 @@ export function readSpeechState(ctx) {
   const message = phase === 'failed' && typeof preparation.message === 'string' ? preparation.message : ''
   const completedBytes = typeof preparation.completedBytes === 'number' ? preparation.completedBytes : 0
   const totalBytes = typeof preparation.totalBytes === 'number' ? preparation.totalBytes : 0
+  // 'standby' holds a verified model with the worker asleep: a recording can begin right
+  // away because the provider wakes its worker lazily on the first transcription.
   return {
-    ready: phase === 'ready',
+    ready: phase === 'ready' || phase === 'standby',
     phase,
     message,
     providerId: typeof provider.id === 'string' ? provider.id : '',
     completedBytes,
     totalBytes,
+    busy: phase === 'checking' || phase === 'downloading' || phase === 'loading' || phase === 'waking' || phase === 'cancelling',
   }
 }
 
@@ -191,8 +194,21 @@ export async function prepareSpeech(ctx) {
       }
     }
   }
-  const state = readSpeechState(ctx)
-  if (speech === undefined || state.providerId === '') return state
+  if (speech === undefined) return readSpeechState(ctx)
+  // Right after activation the provider inspects its disk cache. Calling prepare() while
+  // that inspection runs is silently ignored by the provider, so wait for the verdict
+  // first: the cache either verifies to 'standby' (already usable, no download) or
+  // reports 'unprepared' (needs a real download).
+  let state = readSpeechState(ctx)
+  for (let attempt = 0; attempt < 80 && (state.phase === 'checking' || state.phase === 'unavailable'); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    state = readSpeechState(ctx)
+  }
+  // Verified resources need no download, and an active task must not be double-armed.
+  if (state.providerId === '' || state.phase === 'ready' || state.phase === 'standby') return state
+  if (state.phase === 'downloading' || state.phase === 'loading' || state.phase === 'waking' || state.phase === 'cancelling') return state
+  // 'unprepared', 'cancelled' or a previous 'failed' attempt: nothing is in flight now,
+  // so arming the download takes effect; the provider reuses verified files.
   try {
     if (typeof speech.prepare === 'function') speech.prepare(state.providerId)
   } catch (error) {

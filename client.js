@@ -276,17 +276,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       setupPrepared: '模型已就绪',
       setupPrepareFailed: '下载失败，请重试',
       setupPrepareHint: '点「现在下载模型」可提前把发言人模型与手写模型下载到本机；转写模型由「语音输入」在首次转写时下载。',
-      speechPrepareHint: '语音识别模型尚未下载。点击下方按钮即可在本机下载 SenseVoice 模型，下载完成后就能开始录制。',
-      speechUnavailableHint: '语音输入功能尚未启用。点击「立即下载模型」会自动启用语音输入功能并下载语音识别模型。',
+      speechPrepareHint: '语音识别模型尚未下载。点击「开始下载模型」可提前下载；点击「开始记录」会自动下载，就绪后立即开始录音。',
+      speechUnavailableHint: '语音输入功能尚未启用。点击「开始记录」会自动启用语音输入、按需下载语音识别模型，就绪后立即开始录音。',
       speechPrepareAction: '开始下载模型',
       speechDownloading: '正在下载语音模型…（可关闭此面板，后台继续）',
-      speechRequiredFirst: '请先下载语音识别模型，下载完成后才能开始录制。',
-      speechDialogTitle: '需要先下载语音识别模型',
-      speechDialogBody: '没有语音识别模型就无法把录音转成文字，此时开始录制没有意义。请先下载模型，就绪后再开始录制。',
-      speechDialogDownload: '立即下载模型',
-      speechDialogCancel: '关闭',
+      speechPreparing: '正在准备语音识别…',
+      speechAutoStart: '语音识别准备就绪后将自动开始录音',
+      speechCancel: '取消',
       prepareInPanel: '下载本地模型',
-      preparingInPanel: '正在下载模型…',
+      preparingInPanel: '正在准备…',
       preparedInPanel: '模型已就绪',
     }
 
@@ -478,17 +476,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       setupPrepared: 'Models ready',
       setupPrepareFailed: 'Download failed, retry',
       setupPrepareHint: 'Download the speaker and handwriting models now; the transcription model downloads on first transcription via Voice input.',
-      speechPrepareHint: 'The speech recognition model has not been downloaded. Click the button below to download the SenseVoice model on this machine, then start recording.',
-      speechUnavailableHint: 'Voice input is not enabled yet. Clicking "Download now" will enable the voice-input feature and download the speech recognition model.',
+      speechPrepareHint: 'The speech recognition model has not been downloaded. Click "Download model now" to prepare it in advance, or click "Start" to download it automatically and begin recording as soon as it is ready.',
+      speechUnavailableHint: 'Voice input is not enabled yet. Clicking "Start" enables voice input, downloads the speech model if needed, and begins recording as soon as it is ready.',
       speechPrepareAction: 'Download model now',
       speechDownloading: 'Downloading the speech model\u2026 (safe to close this panel; it continues in the background)',
-      speechRequiredFirst: 'Download the speech recognition model first; recording starts only after it is ready.',
-      speechDialogTitle: 'Download the speech model first',
-      speechDialogBody: 'Without the speech model your recording cannot be transcribed, so starting now would be meaningless. Download the model, then start recording.',
-      speechDialogDownload: 'Download now',
-      speechDialogCancel: 'Close',
+      speechPreparing: 'Preparing speech recognition\u2026',
+      speechAutoStart: 'Recording starts automatically once speech recognition is ready',
+      speechCancel: 'Cancel',
       prepareInPanel: 'Download local models',
-      preparingInPanel: 'Downloading models\u2026',
+      preparingInPanel: 'Preparing\u2026',
       preparedInPanel: 'Models ready',
     }
 
@@ -1189,7 +1185,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [termsText, setTermsText] = React.useState(readTerms)
       const [speaker, setSpeaker] = React.useState({ phase: 'unprepared', message: '' })
       const [speech, setSpeech] = React.useState({ ready: true, phase: 'checking', requesting: false, completedBytes: 0, totalBytes: 0 })
-      const [showSpeechDialog, setShowSpeechDialog] = React.useState(false)
+      // A 'Start' click that an unprepared model blocked: once the enable/download chain
+      // reports ready, recording begins automatically instead of asking for another click.
+      const [pendingStart, setPendingStart] = React.useState(false)
 
       // Check transcription readiness on mount; follow any in-progress download.
       React.useEffect(() => {
@@ -1216,16 +1214,18 @@ registerProcessor('meeting-capture', MeetingCapture)
           const dl = Date.now() + 600000
           for (;;) {
             const s = await readSpeechState()
-            setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy, completedBytes: s.completedBytes, totalBytes: s.totalBytes })
-            if (s.ready) { setShowSpeechDialog(false); return }
-            // Only 'failed' is terminal: 'unprepared'/'unavailable' mean the voice bundle
-            // is still being enabled or the download has not started yet — keep polling.
+            // Stay busy-looking until the server actually reports the model ready, so the
+            // panel shows progress instead of a false "download started" one-liner.
+            setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy === true || s.ready !== true, completedBytes: s.completedBytes, totalBytes: s.totalBytes })
+            if (s.ready) return
             if (s.phase === 'failed') {
+              setPendingStart(false)
               setSpeech({ ready: false, phase: 'failed', requesting: false, completedBytes: 0, totalBytes: 0 })
               setError(typeof s.message === 'string' && s.message !== '' ? s.message : t('setupPrepareFailed'))
               return
             }
             if (Date.now() >= dl) {
+              setPendingStart(false)
               setSpeech({ ready: false, phase: 'failed', requesting: false, completedBytes: 0, totalBytes: 0 })
               setError(t('setupPrepareFailed'))
               return
@@ -1233,6 +1233,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             await new Promise((r) => setTimeout(r, 1500))
           }
         } catch (e) {
+          setPendingStart(false)
           setSpeech((c) => ({ ...c, requesting: false }))
           setError(e instanceof Error ? e.message : String(e))
         }
@@ -1926,7 +1927,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       const start = React.useCallback(async () => {
         setError('')
         setNote('')
-        if (speech.ready !== true) { setShowSpeechDialog(true); return }
+        if (speech.ready !== true) {
+          // One click covers the whole chain: enable the voice-input bundle if it is off,
+          // download the model if it is missing, then start recording once it is ready.
+          setPendingStart(true)
+          void prepareSpeech()
+          return
+        }
         setPhase('starting')
         try {
           const created = await post('/start', { sessionId, terms: termsText })
@@ -1982,7 +1989,16 @@ registerProcessor('meeting-capture', MeetingCapture)
           setPhase('idle')
           setError(failure instanceof Error ? failure.message : String(failure))
         }
-      }, [flush, release, sessionId, termsText, speech.ready])
+      }, [flush, release, sessionId, termsText, speech.ready, prepareSpeech])
+
+      // A pending start fires the moment the model reports ready — no second click, and
+      // no dialog asking again. Cancelling the intent (below) clears the flag first.
+      React.useEffect(() => {
+        if (pendingStart && speech.ready === true && phase === 'idle') {
+          setPendingStart(false)
+          void start()
+        }
+      }, [pendingStart, speech.ready, phase, start])
 
       /** Stop capture, drain the remaining audio, then finalize the meeting. */
       const stop = React.useCallback(async () => {
@@ -2065,7 +2081,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const currentSpeaker = segments.length === 0 ? '' : segments[segments.length - 1].speaker
       const status = phase === 'recording'
         ? `${t('elapsed')} ${clock(seconds)}${currentSpeaker === '' ? '' : ` · ${t('speakingNow')} ${currentSpeaker}`}`
-        : phase === 'transcribing' ? t('transcribing') : phase === 'starting' ? t('starting') : t('idle')
+        : phase === 'transcribing' ? t('transcribing') : phase === 'starting' ? t('starting') : pendingStart ? (speech.requesting ? t('speechPreparing') : t('speechAutoStart')) : t('idle')
       const speakerText = speaker.phase === 'ready' ? t('speakerReady')
         : speaker.phase === 'downloading' ? t('speakerDownloading')
           : speaker.phase === 'failed' ? `${t('speakerFailed')}${speaker.message === '' ? '' : `: ${speaker.message}`}`
@@ -2074,7 +2090,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const speechDetail = speech.requesting
         ? (speech.totalBytes > 0
           ? `${t('speechDownloading')}（${(speech.completedBytes / 1048576).toFixed(1)} / ${(speech.totalBytes / 1048576).toFixed(1)} MB）`
-          : t('speechDownloading'))
+          : t('speechPreparing'))
         : ''
 
       return h(Boundary, null, h('section', { style: styles.panel }, [
@@ -2099,7 +2115,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             key: 'toggle',
             type: 'button',
             style: recording ? styles.buttonActive : styles.button,
-            disabled: phase === 'starting',
+            disabled: phase === 'starting' || pendingStart,
             onClick: () => { void (recording ? stop() : start()) },
           }, recording ? t('stop') : t('start')),
           h('button', {
@@ -2513,8 +2529,15 @@ registerProcessor('meeting-capture', MeetingCapture)
         ]),
         openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
         note === '' ? null : h('p', { key: 'note', style: styles.note }, note),
-        speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [h('p', { style: styles.subtitle }, speech.requesting ? (speechDetail !== '' ? speechDetail : t('speechDownloading')) : speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechPrepareHint')), h('div', { style: styles.row }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')), typeof props.openVoiceInputBundle === 'function' && !speech.requesting ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null])]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
-        showSpeechDialog ? h('div', { key: 'sd', style: styles.setupOverlay, role: 'dialog', 'aria-modal': 'true' }, [h('div', { style: styles.setupCard }, [h('h2', { style: styles.setupTitle }, t('speechDialogTitle')), h('button', { key: 'x', type: 'button', style: styles.setupClose, title: t('speechDialogCancel'), onClick: () => setShowSpeechDialog(false) }, '\\u00d7'), h('p', { style: styles.subtitle }, speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechDialogBody')), speech.requesting ? h('p', { style: styles.status }, speechDetail !== '' ? speechDetail : t('speechDownloading')) : null, h('div', { style: styles.setupFoot }, [h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechDialogDownload')), h('button', { key: 'cn', type: 'button', style: styles.button, onClick: () => setShowSpeechDialog(false) }, t('speechDialogCancel'))])])]) : null,
+        speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [
+          h('p', { style: styles.subtitle }, speech.requesting ? (speechDetail !== '' ? speechDetail : t('speechPreparing')) : speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechPrepareHint')),
+          pendingStart ? h('p', { style: styles.status }, t('speechAutoStart')) : null,
+          h('div', { style: styles.row }, [
+            h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')),
+            pendingStart ? h('button', { key: 'cn', type: 'button', style: styles.button, onClick: () => setPendingStart(false) }, t('speechCancel')) : null,
+            typeof props.openVoiceInputBundle === 'function' && !speech.requesting && !pendingStart ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null,
+          ]),
+        ]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
         ]),
       ]))
     }
