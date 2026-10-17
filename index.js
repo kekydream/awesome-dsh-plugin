@@ -31,6 +31,7 @@ import { setSessionStore, ensureMeetingForSession, reapMeetingForSession, record
 import {
   readTranscript,
   queryMeetings,
+  distillForSession,
   writeAnalysis,
   reviseTranscript,
   saveDocument,
@@ -166,6 +167,24 @@ export function apply(ctx) {
     },
     execute: queryMeetings,
   }, 'meeting-room: meeting_query tool')
+
+  registerTool({
+    name: 'meeting_distill',
+    description: 'Return the distillation recipe for this session\'s meeting: which meeting_read, which cross-meeting meeting_query calls and which meeting_write / meeting_save_document writes its type (briefing, review, weekly, monthly) calls for. Use it when asked to distil, summarise or process a meeting, then carry out the numbered steps it returns.',
+    parameters: {
+      type: 'object',
+      properties: {
+        meetingId: { type: 'string', description: 'Exact meeting id; omit for this session\'s meeting.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    execute: distillForSession,
+  }, 'meeting-room: meeting_distill tool')
 
   registerTool({
     name: 'meeting_write',

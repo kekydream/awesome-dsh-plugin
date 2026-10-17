@@ -179,6 +179,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       scoreBasis: '依据',
       scoresExported: '已导出',
       needPerson: '请先填写人员姓名',
+      seriesPrev: '← 上一场',
+      seriesNext: '下一场 →',
+      carryOverHint: '昨日复盘遗留',
+      carryOverAction: '据此派活',
+      carryOverOpen: '看复盘会',
+      pauseRecording: '暂停',
+      resumeRecording: '继续',
+      pausedStatus: '已暂停 · 已录',
+      pauseLongHint: '仍在暂停（已超过 10 分钟）',
+      carryOverPrompt: '昨天复盘会留下了 {count} 项未完成/遗留事项：\n{list}\n\n请在本次晨会实录里对照这些事项，决定今天派给谁、什么时候完成，并用 meeting_write 把结果写成本会 tasks（草稿，等人确认）。只依据实录与上面的清单，不要编造。',
       distillGeneral: '请按本场会议的类型提炼内容。先调用 meeting_read（meetingId={meetingId}）读完实录，然后：1) 用 meeting_write（meetingId={meetingId}）把决定与要点写入 points（kind 取 decision/point/risk/question）；2) 把明确的行动项写入 tasks（任务/负责人/时限/优先级，草稿，等人确认）；3) 需要存档时用 meeting_save_document 存一份 Markdown。只依据实录，不要编造；人名与术语不确定时保守处理并标注。',
       distillBriefing: '以下是本会话的晨会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再按晨会模板提炼：1) 昨日遗留：用 meeting_query（kind:"review", period:"yesterday", include:["tasks"]）查昨天复盘会留下的遗留事项，与实录对照后单独成段；2) 部署事项：每条写清「任务 / 负责人 / 时限 / 优先级」，区分决定（decision）与要求（point）；3) 用 meeting_write（meetingId={meetingId}）把要点写入 points、把部署写入 tasks（草稿，等人确认）。只依据实录，不要编造。写完用一句话说明提取了多少条。',
       distillReview: '以下是本会话的复盘会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，并按顺序做：1) 用 meeting_query（kind:"briefing", period:"today", include:["tasks"]）取今天晨会的任务，每条都带 #id 与它所属的 meetingId；2) 逐项核销：用 meeting_write 写回**晨会那份记录**（meetingId 填晨会的 id，tasks 里写 {id, done:true/false, source:"实录原句"}）——这是跨会写回，不要复制任务；3) 本会的问题与风险写入 points（kind 取 risk 或 question）；4) 遗留事项写入本会 tasks（草稿），标题注明「遗留」；5) 用 meeting_save_document 存一份「复盘盘点 · {period}」。只依据实录，不要编造。',
@@ -429,6 +439,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       scoreBasis: 'Evidence',
       scoresExported: 'Exported',
       needPerson: 'Write the person\'s name first',
+      seriesPrev: '← Previous',
+      seriesNext: 'Next →',
+      carryOverHint: 'Left open by yesterday\'s review:',
+      carryOverAction: 'Assign these',
+      carryOverOpen: 'Open the review',
+      pauseRecording: 'Pause',
+      resumeRecording: 'Resume',
+      pausedStatus: 'Paused · recorded',
+      pauseLongHint: 'Still paused (over 10 minutes)',
+      carryOverPrompt: 'Yesterday\'s review left {count} item(s) unfinished or carried over:\n{list}\n\nCheck them against this briefing\'s transcript, decide who takes each one and by when, then write the result into this meeting\'s tasks with meeting_write (drafts a human confirms). Use only the transcript and the list above; do not invent anything.',
       distillGeneral: 'Distill this meeting according to its type. First call meeting_read (meetingId={meetingId}) for the full transcript, then: 1) write decisions and points with meeting_write (meetingId={meetingId}), kind being decision/point/risk/question; 2) write clear action items as tasks (title/owner/due/priority — drafts that a human confirms); 3) store a Markdown document with meeting_save_document when it should be archived. Use only the transcript; never invent content and mark anything uncertain.',
       distillBriefing: 'This session is a morning briefing (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) carry-over — call meeting_query (kind:"review", period:"yesterday", include:["tasks"]) for what yesterday\'s review left open, checked against the transcript and listed separately; 2) assignments, each with task / owner / due / priority, separating decisions from requests; 3) write points and tasks back with meeting_write (meetingId={meetingId}); tasks stay drafts. Use only the transcript and finish with one line saying how many entries you extracted.',
       distillReview: 'This session is a daily review (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then work in order: 1) meeting_query (kind:"briefing", period:"today", include:["tasks"]) for today\'s briefing tasks, each carrying its #id and the meetingId that owns it; 2) check them off by writing back to the BRIEFING record with meeting_write — that briefing\'s meetingId, tasks entries {id, done:true|false, source:"transcript words"}; never copy tasks between meetings; 3) this meeting\'s problems and risks go to points (kind risk or question); 4) carry-over items go to this meeting\'s tasks, marked "carry-over"; 5) save a "Review · {period}" document with meeting_save_document. Use only the transcript.',
@@ -1380,6 +1400,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [meta, setMeta] = React.useState({ kind: '', period: '', title: '' })
       /** The start-of-recording name dialog; null when it is closed (§5.5). */
       const [namePrompt, setNamePrompt] = React.useState(null)
+      /** The same kind's neighbouring meetings, for series navigation (FEATURES.md §5.1). */
+      const [series, setSeries] = React.useState({ prev: null, next: null })
+      /** What the previous day's review left open, shown while a briefing is prepared (§3.1). */
+      const [carry, setCarry] = React.useState({ review: null, items: [] })
+      /** Whether capture is paused, and since when (FEATURES.md §5.6). */
+      const [paused, setPaused] = React.useState(false)
+      const pausedAt = React.useRef(0)
+      const pauseWarned = React.useRef(false)
       const audio = React.useRef(null)
       const rows = React.useRef([])
       const noteSeq = React.useRef(0)
@@ -1429,6 +1457,36 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [sessionId])
 
       React.useEffect(() => { void adopt() }, [adopt])
+
+      // Series navigation and the carry-over reminder follow the meeting's identity and
+      // type, so they reload whenever either changes (FEATURES.md §3.1, §5.1).
+      React.useEffect(() => {
+        if (meetingId === '') {
+          setSeries({ prev: null, next: null })
+          setCarry({ review: null, items: [] })
+          return undefined
+        }
+        let live = true
+        void (async () => {
+          try {
+            const value = await get(`/series?meetingId=${encodeURIComponent(meetingId)}`)
+            if (live) setSeries({ prev: value.prev ?? null, next: value.next ?? null })
+          } catch {
+            // Navigation is an extra: a failure simply leaves the buttons hidden.
+          }
+          if (meta.kind !== 'briefing') {
+            if (live) setCarry({ review: null, items: [] })
+            return
+          }
+          try {
+            const value = await get(`/carryover?meetingId=${encodeURIComponent(meetingId)}`)
+            if (live) setCarry({ review: value.review ?? null, items: Array.isArray(value.items) ? value.items : [] })
+          } catch {
+            // Same: the reminder is optional.
+          }
+        })()
+        return () => { live = false }
+      }, [meetingId, meta.kind])
 
       /**
        * Pull the stored cues, points, and tasks — including ones the agent wrote.
@@ -1959,6 +2017,66 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [ensureMeeting, t])
 
+      /** Open the original conversation of a neighbouring meeting in this series. */
+      const openSeries = React.useCallback((ref) => {
+        if (ref === null || ref.sessionId === '') {
+          setError(t('needSession'))
+          return
+        }
+        if (typeof props.openConversation !== 'function') {
+          setError(t('hubNoWorkspace'))
+          return
+        }
+        if (props.openConversation(ref.sessionId) === false) setError(t('hubNoWorkspace'))
+      }, [props, t])
+
+      /** Hand the carry-over list to the agent so it can assign it in this briefing. */
+      const handleCarryOver = React.useCallback(async () => {
+        setError('')
+        if (sessionId === '') {
+          setError(t('needSession'))
+          return
+        }
+        const list = carry.items
+          .map((item) => `- ${item.title}${item.owner === '' ? '' : `（${item.owner}）`}${item.done === true ? '［已办，待确认］' : ''}`)
+          .join('\n')
+        const prompt = t('carryOverPrompt')
+          .replace('{count}', String(carry.items.length))
+          .replace('{list}', list)
+        const asked = await props.askText(sessionId, prompt)
+        if (asked.ok !== true) setError(`${t('reviewNoSession')}: ${asked.error}`)
+      }, [carry.items, props, sessionId, t])
+
+      /**
+       * Pause or resume capture without ending the meeting (FEATURES.md §5.6). The phase
+       * stays "recording" — a pause is a property of the capture, not a different state —
+       * so Stop keeps working and the session never silently ends.
+       */
+      const togglePause = React.useCallback(() => {
+        const active = recorder.active
+        if (active === null) return
+        const next = active.paused !== true
+        active.paused = next
+        // A pause boundary is a boundary: buffered audio is dropped, never split later.
+        if (next) active.pending.length = 0
+        setPaused(next)
+        pausedAt.current = next ? Date.now() : 0
+        pauseWarned.current = false
+      }, [])
+
+      // A long pause gets one reminder, so a forgotten pause is noticed without nagging.
+      React.useEffect(() => {
+        if (!paused) return undefined
+        const timer = setInterval(() => {
+          if (pauseWarned.current) return
+          if (Date.now() - pausedAt.current > 10 * 60 * 1000) {
+            pauseWarned.current = true
+            setNote(t('pauseLongHint'))
+          }
+        }, 30 * 1000)
+        return () => clearInterval(timer)
+      }, [paused, t])
+
       /** Open one stored document inline, without leaving the panel. */
       const openStoredDocument = React.useCallback(async (entry) => {
         setError('')
@@ -2277,9 +2395,13 @@ registerProcessor('meeting-capture', MeetingCapture)
             silenceFrames: 0,
             inflight: false,
             stopping: false,
+            // A paused capture drops what a pause would otherwise record (§5.6).
+            paused: false,
           }
           recorder.active = active
           node.port.onmessage = (event) => {
+            // While paused nothing is buffered, so the exported recording carries no hole.
+            if (active.paused === true) return
             const block = event.data
             active.pending.push(block)
             active.frames += block.length
@@ -2290,6 +2412,9 @@ registerProcessor('meeting-capture', MeetingCapture)
             else active.silenceFrames = 0
             if (!active.inflight && shouldFlush(active)) void flush(active)
           }
+          setPaused(false)
+          pausedAt.current = 0
+          pauseWarned.current = false
           setSegments([])
           setSeconds(0)
           setMeetingId(created.meetingId)
@@ -2391,9 +2516,11 @@ registerProcessor('meeting-capture', MeetingCapture)
         || notes.length > 0 || documents.length > 0
       // The newest cue's voice is who is speaking now, so the status line names them.
       const currentSpeaker = segments.length === 0 ? '' : segments[segments.length - 1].speaker
-      const status = phase === 'recording'
-        ? `${t('elapsed')} ${clock(seconds)}${currentSpeaker === '' ? '' : ` · ${t('speakingNow')} ${currentSpeaker}`}`
-        : phase === 'transcribing' ? t('transcribing') : phase === 'starting' ? t('starting') : pendingStart ? (speech.requesting ? t('speechPreparing') : t('speechAutoStart')) : t('idle')
+      const status = paused
+        ? `${t('pausedStatus')} ${clock(seconds)}`
+        : phase === 'recording'
+          ? `${t('elapsed')} ${clock(seconds)}${currentSpeaker === '' ? '' : ` · ${t('speakingNow')} ${currentSpeaker}`}`
+          : phase === 'transcribing' ? t('transcribing') : phase === 'starting' ? t('starting') : pendingStart ? (speech.requesting ? t('speechPreparing') : t('speechAutoStart')) : t('idle')
       const speakerProgress = speaker.phase === 'downloading' && typeof speaker.totalBytes === 'number' && speaker.totalBytes > 0
         ? `（${((speaker.completedBytes ?? 0) / 1048576).toFixed(1)} / ${(speaker.totalBytes / 1048576).toFixed(1)} MB${speaker.completedBytes > 0 ? ` · ${Math.floor(speaker.completedBytes * 100 / speaker.totalBytes)}%` : ''}）`
         : ''
@@ -2435,12 +2562,32 @@ registerProcessor('meeting-capture', MeetingCapture)
               onChange: (event) => { void saveMeta({ kind: event.target.value }) },
             }, KIND_VALUES.map((value) => h('option', { key: value === '' ? 'general' : value, value }, t(KIND_LABEL_KEYS[value])))),
             meta.period === '' ? null : h('span', { key: 'period', style: styles.chip }, meta.period),
+            series.prev === null ? null : h('button', {
+              key: 'prev',
+              type: 'button',
+              style: styles.smallButton,
+              title: `${series.prev.title === '' ? t('meetingNameNone') : series.prev.title}${series.prev.period === '' ? '' : ` · ${series.prev.period}`}`,
+              onClick: () => openSeries(series.prev),
+            }, t('seriesPrev')),
+            series.next === null ? null : h('button', {
+              key: 'next',
+              type: 'button',
+              style: styles.smallButton,
+              title: `${series.next.title === '' ? t('meetingNameNone') : series.next.title}${series.next.period === '' ? '' : ` · ${series.next.period}`}`,
+              onClick: () => openSeries(series.next),
+            }, t('seriesNext')),
             h('button', {
               key: 'distill',
               type: 'button',
               style: styles.button,
               onClick: () => { void distill() },
             }, t(DISTILL_BUTTON_KEYS[meta.kind] ?? 'distillButtonGeneral')),
+          ]),
+          // A briefing starts by accounting for what yesterday's review left open (§3.1).
+          carry.items.length === 0 ? null : h('div', { key: 'carry', style: styles.row }, [
+            h('span', { key: 'hint', style: styles.hint }, `${t('carryOverHint')} ${carry.items.length}`),
+            h('button', { key: 'handle', type: 'button', style: styles.smallButton, onClick: () => { void handleCarryOver() } }, t('carryOverAction')),
+            carry.review === null ? null : h('button', { key: 'open', type: 'button', style: styles.smallButton, onClick: () => openSeries(carry.review) }, t('carryOverOpen')),
           ]),
           h('div', { key: 'notebar', style: styles.row }, [
           h('span', { key: 'rolelabel', style: styles.status }, t('roleLabel')),
@@ -2467,6 +2614,13 @@ registerProcessor('meeting-capture', MeetingCapture)
               setNamePrompt({ text: '', kind: meta.kind })
             },
           }, recording ? t('stop') : t('start')),
+          // Pause sits beside Stop: a pause keeps the meeting open, Stop ends it (§5.6).
+          phase !== 'recording' ? null : h('button', {
+            key: 'pause',
+            type: 'button',
+            style: paused ? styles.buttonActive : styles.button,
+            onClick: () => togglePause(),
+          }, paused ? t('resumeRecording') : t('pauseRecording')),
           h('button', {
             key: 'notes',
             type: 'button',

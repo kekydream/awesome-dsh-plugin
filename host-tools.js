@@ -382,6 +382,122 @@ export async function writeScoresXlsx(ctx, meeting, name) {
   return name
 }
 
+/** A small reference to one meeting, for navigation and reminders. */
+function meetingRef(meeting) {
+  return meeting === undefined ? null : {
+    meetingId: meeting.id,
+    sessionId: meeting.sessionId ?? '',
+    period: meeting.period ?? '',
+    title: meeting.title ?? '',
+    startedAt: meeting.startedAt,
+  }
+}
+
+/**
+ * The meetings just before and after this one in its own series: same kind, ordered by
+ * period then start time. A general meeting belongs to no series.
+ * @param meeting - the meeting to locate.
+ * @returns `{ prev, next }`, either may be null.
+ */
+export function seriesFor(meeting) {
+  const kind = meeting.kind ?? ''
+  if (kind === '') return { prev: null, next: null }
+  const siblings = [...meetings.values()]
+    .filter((other) => (other.kind ?? '') === kind)
+    .sort((left, right) => {
+      const leftPeriod = left.period ?? ''
+      const rightPeriod = right.period ?? ''
+      if (leftPeriod !== rightPeriod) return leftPeriod < rightPeriod ? -1 : 1
+      return left.startedAt - right.startedAt
+    })
+  const index = siblings.findIndex((other) => other.id === meeting.id)
+  if (index < 0) return { prev: null, next: null }
+  return { prev: meetingRef(siblings[index - 1]), next: meetingRef(siblings[index + 1]) }
+}
+
+/**
+ * What the previous review meeting left open — the briefing's carry-over reminder. The
+ * day before is computed from this meeting's own start, so the reminder follows the
+ * meeting's calendar rather than the wall clock.
+ * @param meeting - the meeting being prepared (usually a briefing).
+ * @returns `{ review, items }`; items are the review's unfinished or carry-over tasks.
+ */
+export function carryOverFor(meeting) {
+  const startedAt = typeof meeting.startedAt === 'number' ? meeting.startedAt : Date.now()
+  const yesterday = periodOf('briefing', startedAt - 24 * 3600 * 1000)
+  const review = [...meetings.values()]
+    .filter((other) => (other.kind ?? '') === 'review' && (other.period ?? '') === yesterday)
+    .sort((left, right) => right.startedAt - left.startedAt)[0]
+  if (review === undefined) return { review: null, items: [] }
+  const items = (review.tasks ?? [])
+    .filter((task) => task.done !== true || /遗留/u.test(task.title ?? ''))
+    .map((task) => ({
+      meetingId: review.id,
+      taskId: task.id,
+      title: task.title,
+      owner: task.owner ?? '',
+      due: task.due ?? '',
+      done: task.done === true,
+    }))
+  return { review: meetingRef(review), items }
+}
+
+/**
+ * The recipe behind one kind's distillation: which read, which cross-meeting query and
+ * which writes produce the structured result (FEATURES §3, §4.3). It is a checklist, not
+ * the prose the panel injects, so the wording lives in exactly one place.
+ * @param meeting - the meeting to distil.
+ * @returns the numbered recipe.
+ */
+export function distillPlan(meeting) {
+  const period = meeting.period === undefined || meeting.period === '' ? '（无周期）' : meeting.period
+  const kind = meeting.kind ?? ''
+  const title = meeting.title === undefined || meeting.title === '' ? '（未命名）' : meeting.title
+  const lines = [
+    `会议 ${meeting.id}（类型：${KIND_TEXT[kind] ?? '通用'}　周期：${period}　名称：${title}）`,
+    `1) meeting_read { meetingId: "${meeting.id}" } 读完实录；要点与工作安排会带 #id。`,
+  ]
+  if (kind === 'briefing') {
+    lines.push('2) meeting_query { kind: "review", period: "yesterday", include: ["tasks"] } 取昨日复盘的遗留，与实录对照。')
+    lines.push('3) meeting_write { meetingId, points: [决定/要求], tasks: [任务·负责人·时限·优先级] }（草稿，等人确认）。')
+    lines.push(`4) meeting_save_document { kind: "summary", title: "晨会部署 · ${period}" }。`)
+  } else if (kind === 'review') {
+    lines.push('2) meeting_query { kind: "briefing", period: "today", include: ["tasks"] } 取当天晨会任务，每条带 #id 与所属 meetingId。')
+    lines.push('3) meeting_write { meetingId: <晨会的 meetingId>, tasks: [{ id, done: true|false, source }] } 逐项核销——跨会写回，不要复制任务。')
+    lines.push('4) meeting_write { meetingId: <本会>, points: [risk/question], tasks: [遗留，标题注明「遗留」] }。')
+    lines.push(`5) meeting_save_document { kind: "summary", title: "复盘盘点 · ${period}" }。`)
+  } else if (kind === 'weekly') {
+    lines.push('2) meeting_query { kind: "briefing", period: "this-week", include: ["tasks"] } 与 { kind: "review", period: "this-week", include: ["tasks"] }。')
+    lines.push('3) meeting_write { meetingId, points: [主题/论点/体会/实践] }。')
+    lines.push(`4) meeting_save_document { kind: "summary", title: "本周纪要 · ${period}" }（完成 / 未完成 / 风险三清单，注明来源会议）。`)
+  } else if (kind === 'monthly') {
+    lines.push('2) meeting_query { period: "this-month", include: ["tasks", "points"] } 取本月会议与任务，按人汇总完成率。')
+    lines.push('3) meeting_write { meetingId, scores: [{ person, hours, completion, quality, learn, highlight, improve, basis }] }（草稿，等人确认改分）。')
+    lines.push(`4) meeting_save_document { kind: "summary", title: "月度评分 · ${period}" }。`)
+  } else {
+    lines.push('2) meeting_write { meetingId, points: [...], tasks: [...] }（草稿）。')
+    lines.push(`3) meeting_save_document { kind: "summary", title: "会议纪要 · ${period}" }（可选）。`)
+  }
+  lines.push('只依据实录与查询结果，不要编造；人名与术语不确定时保守处理并标注。')
+  return lines.join('\n')
+}
+
+/**
+ * Tool entry point for `meeting_distill`: resolve the calling session's meeting and hand
+ * back its recipe.
+ * @param args - Model arguments.
+ * @param exec - Tool run context carrying the calling session.
+ * @returns the recipe, or a note when the session has no meeting.
+ */
+export function distillForSession(args, exec) {
+  const request = args !== null && typeof args === 'object' ? args : {}
+  const sessionId = exec?.agent?.session?.id
+  const meetingId = typeof request.meetingId === 'string' ? request.meetingId : ''
+  const meeting = meetingForSession(typeof sessionId === 'string' ? sessionId : '', meetingId)
+  if (meeting === undefined) return 'No meeting was found for this session; nothing to distil.'
+  return distillPlan(meeting)
+}
+
 // ---------------------------------------------------------------------------
 // Transcription
 // ---------------------------------------------------------------------------

@@ -60,6 +60,8 @@ import {
   readSettings,
   writeSettings,
   periodOf,
+  seriesFor,
+  carryOverFor,
   scoreTotal,
   monthRangeOf,
   ownerTaskStats,
@@ -402,6 +404,29 @@ export function createHandler(ctx) {
         await mkdir(directory, { recursive: true })
         await writeFile(join(directory, name), content, 'utf8')
         sendJson(res, 200, { name, content })
+        return
+      }
+
+      if (method === 'GET' && route === '/series') {
+        // The panel's series navigation: the same kind's previous and next meeting, so a
+        // briefing can step back through the week without searching (FEATURES §5.1).
+        const meeting = meetings.get(url.searchParams.get('meetingId') ?? '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        sendJson(res, 200, seriesFor(meeting))
+        return
+      }
+
+      if (method === 'GET' && route === '/carryover') {
+        // What the previous day's review left open: the briefing's reminder (§3.1).
+        const meeting = meetings.get(url.searchParams.get('meetingId') ?? '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        sendJson(res, 200, carryOverFor(meeting))
         return
       }
 
