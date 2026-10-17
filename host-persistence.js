@@ -27,9 +27,10 @@ export function meetingStoreDirectory() {
  */
 export function recordOf(meeting) {
   // A writer handle and an abort controller are process-local; speaker embeddings belong to
-  // the recording that produced them and are rebuilt by the next one.
+  // the recording that produced them and are rebuilt by the next one; kept PCM is only a
+  // stop-time backfill vehicle for cues the first-pass labeling missed.
   const { audioHandle, controller, ...rest } = meeting
-  const segments = rest.segments.map(({ embedding, ...segment }) => segment)
+  const segments = rest.segments.map(({ embedding, pcm, ...segment }) => segment)
   return JSON.stringify({
     ...rest,
     segments,
@@ -43,6 +44,25 @@ export function recordOf(meeting) {
 export const persisted = new Map()
 
 /**
+ * Whether a meeting carries no meeting content at all: no transcript, points, tasks,
+ * notes, documents, corrections, people, speakers, terms, role, or recording. An eager
+ * meeting created because its session was created stays in this state until the person
+ * actually records or writes something into it.
+ * @param meeting - Meeting record.
+ * @returns true when nothing worth persisting has happened yet.
+ */
+export function meetingIsEmpty(meeting) {
+  for (const key of ['segments', 'points', 'tasks', 'notes', 'documents', 'revisions', 'people']) {
+    if (Array.isArray(meeting[key]) && meeting[key].length > 0) return false
+  }
+  if (typeof meeting.audioName === 'string' && meeting.audioName !== '') return false
+  if (typeof meeting.role === 'string' && meeting.role !== '') return false
+  if (typeof meeting.terms === 'string' && meeting.terms !== '') return false
+  if (meeting.speakers !== null && typeof meeting.speakers === 'object' && !Array.isArray(meeting.speakers) && Object.keys(meeting.speakers).length > 0) return false
+  return true
+}
+
+/**
  * Write every meeting whose record changed. Called periodically and when a recording stops,
  * so points, tasks, notes, corrections and speaker names survive a restart without a write
  * on every keystroke-sized change.
@@ -54,6 +74,9 @@ export async function flushMeetings(ctx) {
   for (const meeting of meetings.values()) {
     const text = recordOf(meeting)
     if (persisted.get(meeting.id) === text) continue
+    // A meeting created eagerly for a new session writes nothing to disk until it
+    // carries actual meeting content; the store holds only real records.
+    if (meetingIsEmpty(meeting) && !persisted.has(meeting.id)) continue
     try {
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, `${meeting.id}.json`), text, 'utf8')
@@ -84,6 +107,24 @@ export async function restoreMeetings(ctx) {
     try {
       const record = JSON.parse(await readFile(join(directory, name), 'utf8'))
       if (typeof record.id !== 'string' || record.id === '') continue
+      // One session owns at most one meeting. A live meeting for the same session can
+      // already exist when `session/created` or the boot sweep ran before this file was
+      // read back. The disk record is the authoritative history: an empty, never-
+      // persisted live meeting loses to it; a live meeting that already carries content
+      // (the session continued working in the startup window) wins instead.
+      const sessionId = typeof record.sessionId === 'string' && record.sessionId !== '' ? record.sessionId : ''
+      const live = sessionId === '' ? undefined : [...meetings.values()].find(
+        (meeting) => meeting.id !== record.id && meeting.sessionId === sessionId,
+      )
+      if (live !== undefined) {
+        if (meetingIsEmpty(live) && !persisted.has(live.id)) {
+          meetings.delete(live.id)
+          ctx.logger.info('dsh-meeting-room: adopting %s: empty live meeting %s of session %s yields to the stored record', record.id, live.id, sessionId)
+        } else {
+          ctx.logger.warn('dsh-meeting-room: skipping %s: session %s already has live meeting %s with content', record.id, sessionId, live.id)
+          continue
+        }
+      }
       // A restored record is history: it gets no writer handle, and its controller only
       // guards future work.
       meetings.set(record.id, {

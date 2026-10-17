@@ -25,6 +25,7 @@ import {
   DEFAULT_CUE_LIMIT,
   MAX_CUE_LIMIT,
   SPEAKER_THRESHOLD,
+  SPEAKER_MODEL,
   ROLES,
   ROLE_LABELS,
   seenText,
@@ -45,14 +46,14 @@ import {
   pythonExecutable,
 } from './host-helpers.js'
 
-import { speakerState, prepareSpeakers, labelCue } from './host-speaker.js'
+import { speakerState, prepareSpeakers, labelCue, relabelFromRecording } from './host-speaker.js'
 import { handwritingState, recognizeHandwriting, prepareHandwriting } from './host-handwriting.js'
-import { flushMeetings } from './host-persistence.js'
 
 import {
   appendChunk,
   extractAnalysis,
   correctText,
+  finalizeRecording,
   minutesText,
   transcriptText,
   readSettings,
@@ -244,7 +245,12 @@ export function createHandler(ctx) {
           notes: meeting.notes,
           speakers: meeting.speakers,
           labels: speakerLabels(meeting),
-          speaker: { phase: speakerState.phase, message: speakerState.message },
+          speaker: {
+            phase: speakerState.phase,
+            message: speakerState.message,
+            completedBytes: typeof speakerState.completedBytes === 'number' ? speakerState.completedBytes : 0,
+            totalBytes: typeof speakerState.totalBytes === 'number' ? speakerState.totalBytes : SPEAKER_MODEL.bytes,
+          },
         })
         return
       }
@@ -289,6 +295,41 @@ export function createHandler(ctx) {
         if (name === '') delete meeting.speakers[label]
         else meeting.speakers[label] = name
         sendJson(res, 200, { speakers: meeting.speakers, segments: publicSegments(meeting) })
+        return
+      }
+
+      if (method === 'POST' && route === '/relabel') {
+        // Re-identify a meeting from its recording: the online pass can miss cues (the
+        // model was still downloading, or the worker died mid-meeting), and this is the
+        // panel's way to redo the whole meeting — including ones recorded earlier.
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const meeting = meetings.get(typeof body.meetingId === 'string' ? body.meetingId : '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        if (meeting.audioName === undefined && typeof meeting.audioPath !== 'string') {
+          sendJson(res, 400, { error: 'this meeting has no recording' })
+          return
+        }
+        // A manual re-run must work even when the worker died or was never prepared.
+        if (speakerState.phase !== 'ready') await prepareSpeakers(ctx)
+        if (speakerState.phase !== 'ready') {
+          sendJson(res, 409, { error: speakerState.message === '' ? 'speaker support is unavailable' : speakerState.message })
+          return
+        }
+        const judged = await relabelFromRecording(ctx, meeting, { all: true })
+        // The repass re-clusters every cue by its embedding, so labels and any assigned
+        // names settle consistently; the vectors themselves are not needed afterwards.
+        const voices = relabelSpeakers(meeting)
+        for (const segment of meeting.segments) delete segment.embedding
+        sendJson(res, 200, {
+          judged,
+          voices,
+          segments: publicSegments(meeting),
+          speakers: meeting.speakers,
+          labels: speakerLabels(meeting),
+        })
         return
       }
 
@@ -552,22 +593,34 @@ export function createHandler(ctx) {
         }
         const list = body.kind === 'point' ? meeting.points : meeting.tasks
         if (body.op === 'add') {
-          // A human turning a written note into an assignment; it still lands as a draft.
-          const title = typeof body.text === 'string' ? body.text.trim() : ''
-          if (title === '') {
-            sendJson(res, 400, { error: 'a new task needs text' })
+          // A human writing an entry by hand (or turning a written note into an
+          // assignment); it still lands as a draft, like everything the extractors write.
+          const text = typeof body.text === 'string' ? body.text.trim() : ''
+          if (text === '') {
+            sendJson(res, 400, { error: body.kind === 'point' ? 'a new point needs text' : 'a new task needs text' })
             return
           }
-          meeting.tasks.push({
-            id: `t${meeting.tasks.length + 1}`,
-            title,
-            owner: '',
-            due: '',
-            priority: 'normal',
-            source: '',
-            status: 'draft',
-            origin: 'ink',
-          })
+          const origin = body.origin === 'ink' ? 'ink' : 'manual'
+          if (body.kind === 'point') {
+            meeting.points.push({
+              id: `p${meeting.points.length + 1}`,
+              kind: POINT_KINDS.includes(body.pointKind) ? body.pointKind : 'point',
+              text,
+              status: 'draft',
+              origin,
+            })
+          } else {
+            meeting.tasks.push({
+              id: `t${meeting.tasks.length + 1}`,
+              title: text,
+              owner: '',
+              due: '',
+              priority: 'normal',
+              source: '',
+              status: 'draft',
+              origin,
+            })
+          }
           sendJson(res, 200, { points: meeting.points, tasks: meeting.tasks })
           return
         }
@@ -605,23 +658,9 @@ export function createHandler(ctx) {
           sendJson(res, 404, { error: 'unknown meeting' })
           return
         }
-        meeting.controller.abort(new Error('meeting stopped'))
-        // Patch the WAV sizes and close the file so the recording is a complete, seekable file.
-        if (meeting.audioHandle !== undefined) {
-          try {
-            await meeting.audioHandle.write(wavHeader(meeting.audioBytes, SAMPLE_RATE), 0, 44, 0)
-          } finally {
-            await meeting.audioHandle.close()
-            meeting.audioHandle = undefined
-          }
-        }
-        // The recording is finished, so the cues can be re-clustered as a whole: the online
-        // gallery cannot split or merge what it has already labelled.
-        const voices = relabelSpeakers(meeting)
-        // The embeddings have done their job once the voices are settled, so a long meeting
-        // does not keep every cue's vector in memory for the rest of the session.
-        for (const segment of meeting.segments) delete segment.embedding
-        void flushMeetings(ctx)
+        // One end-of-recording path for every stop entry: the panel button, the
+        // session leaving the store, and a forced archive all land here.
+        const voices = await finalizeRecording(ctx, meeting)
         sendJson(res, 200, {
           seconds: meeting.seconds,
           segments: publicSegments(meeting),
@@ -840,6 +879,8 @@ export function createHandler(ctx) {
           phase: speakerState.phase,
           message: speakerState.message,
           threshold: SPEAKER_THRESHOLD,
+          completedBytes: typeof speakerState.completedBytes === 'number' ? speakerState.completedBytes : 0,
+          totalBytes: typeof speakerState.totalBytes === 'number' ? speakerState.totalBytes : SPEAKER_MODEL.bytes,
         })
         return
       }

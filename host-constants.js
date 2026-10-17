@@ -47,6 +47,21 @@ export const SPEAKER_MODEL_ORIGINS = [
 /** Cosine similarity above which a cue joins an existing speaker instead of creating one. */
 export const SPEAKER_THRESHOLD = 0.6
 
+/**
+ * How many unlabeled cues the end-of-meeting pass may backfill from the finished
+ * recording. The speaker worker is serial, and a first-ever meeting can outrun the
+ * model download by hundreds of cues; the cap keeps "stop" instant while the rest
+ * stays unlabeled (the panel's re-identify action can redo the whole meeting).
+ */
+export const SPEAKER_BACKFILL_CAP = 60
+
+/**
+ * How often one process may bring the speaker worker back after an unexpected exit.
+ * A crashed worker must not end labeling for the rest of a meeting, but a worker that
+ * keeps dying (a broken model, a missing runtime) must not become a respawn loop.
+ */
+export const SPEAKER_WORKER_RESTARTS = 3
+
 /** Point kinds the model may use; anything else is stored as a plain point. */
 export const POINT_KINDS = ['decision', 'point', 'risk', 'question']
 

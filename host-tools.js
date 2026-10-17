@@ -21,6 +21,7 @@ import {
   ROLES,
   ROLE_LABELS,
   SPEAKER_MERGE_THRESHOLD,
+  SPEAKER_BACKFILL_CAP,
   WEBHOOK_KINDS,
   PUSH_MODES,
   DOCUMENT_KINDS,
@@ -56,9 +57,14 @@ import {
   findMeeting,
   pythonExecutable,
   wavFromPcm,
+  wavHeader,
 } from './host-helpers.js'
 
 import { flushMeetings } from './host-persistence.js'
+
+import { meetingForSession } from './host-sessions.js'
+
+import { relabelFromRecording } from './host-speaker.js'
 
 // Re-export regex constants and seenText so consumers can import from this module.
 export {
@@ -655,9 +661,54 @@ export function relabelSpeakers(meeting) {
   return names.size
 }
 
+/**
+ * Finish a recording wherever the stop comes from: the panel's stop button, the
+ * owning session leaving the store, or a forced archive. The three entries share
+ * this one path so the WAV is always patched shut, the file handle closed, and the
+ * voices re-clustered exactly once. Idempotent: a meeting that has already stopped
+ * has no handle and all embeddings were already dropped, so a second pass only
+ * re-flushes an unchanged record.
+ * @param ctx - Host context, used to flush the finalized record.
+ * @param meeting - Meeting whose recording ends.
+ * @returns the number of voices after the whole-meeting repass.
+ */
+export async function finalizeRecording(ctx, meeting) {
+  if (meeting.controller !== undefined && !meeting.controller.signal.aborted) {
+    meeting.controller.abort(new Error('meeting stopped'))
+  }
+  // Patch the WAV sizes and close the file so the recording is a complete, seekable file.
+  if (meeting.audioHandle !== undefined) {
+    try {
+      await meeting.audioHandle.write(wavHeader(meeting.audioBytes, SAMPLE_RATE), 0, 44, 0)
+    } finally {
+      await meeting.audioHandle.close()
+      meeting.audioHandle = undefined
+    }
+  }
+  // Cues captured before the speaker model finished downloading carry no label, and a
+  // worker that died mid-meeting leaves the rest blank too. The finished recording
+  // still holds every cue's audio, so judge the unlabeled ones from it now; capped so
+  // a long first meeting never stalls the stop button.
+  let backfilled = 0
+  try {
+    backfilled = await relabelFromRecording(ctx, meeting, { limit: SPEAKER_BACKFILL_CAP })
+  } catch (error) {
+    ctx?.logger?.warn('dsh-meeting-room: speaker backfill failed: %s', error instanceof Error ? error.message : String(error))
+  }
+  if (backfilled > 0) ctx?.logger?.info('dsh-meeting-room: backfilled %d unlabeled cue(s) at stop', backfilled)
+  // The recording is finished, so the cues can be re-clustered as a whole: the online
+  // gallery cannot split or merge what it has already labelled.
+  const voices = relabelSpeakers(meeting)
+  // The embeddings have done their job once the voices are settled, so a long meeting
+  // does not keep every cue's vector in memory for the rest of the session.
+  for (const segment of meeting.segments) delete segment.embedding
+  void flushMeetings(ctx)
+  return voices
+}
+
 /** The transcript as the panel reads it: every field except the speaker embeddings. */
 export function publicSegments(meeting) {
-  return meeting.segments.map(({ embedding, speaker, ...rest }) => ({
+  return meeting.segments.map(({ embedding, pcm, speaker, ...rest }) => ({
     ...rest,
     // The label stays the identity a voice is re-clustered by; the name is what a person
     // reads, and it falls back to the label until someone assigns one.
@@ -1086,8 +1137,7 @@ export async function readTranscript(args, exec) {
   const meetingId = typeof request.meetingId === 'string' ? request.meetingId : ''
   const rawLimit = typeof request.limit === 'number' && Number.isFinite(request.limit) ? Math.floor(request.limit) : DEFAULT_CUE_LIMIT
   const limit = Math.max(1, Math.min(MAX_CUE_LIMIT, rawLimit))
-  const sessionId = exec?.agent?.session?.id
-  const meeting = findMeeting(meetings, typeof sessionId === 'string' ? sessionId : '', meetingId)
+  const meeting = meetingForSession(exec?.agent?.session?.id, meetingId)
   if (meeting === undefined) {
     const known = [...meetings.values()].map((entry) => entry.id)
     return known.length === 0

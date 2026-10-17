@@ -4,7 +4,9 @@ DeepSeek Harness 的会议插件：**本机转写、发言人分离、要点与�
 
 音频不出本机；转写用随 DSH 安装的 SenseVoice，手写识别用随插件安装的本地小模型。**不登录也能**写字、识别、建任务、出纪要。
 
-设计文档：[meeting-plugin-design.md](../meeting-plugin-design.md)。
+设计文档：
+- [DESIGN.md](DESIGN.md)——「会话 ↔ 会议」与「登录用户 ↔ 会话」的完整关系设计；
+- [FEATURES.md](FEATURES.md)——会议类型（晨会/复盘会/例会/总结会）、跨会提炼与月度评分的增量功能设计（设计稿，尚未实现）。
 
 ## 安装
 
@@ -47,6 +49,17 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
 > **麦克风权限**：录制需要系统允许 DeepSeek Harness 访问麦克风。若点击「开始记录」后未进入录制状态，请到系统「设置 → 隐私 → 麦克风」确认已授权，并确认没有其它应用占用麦克风。
 
 ## 功能
+
+### 会话与会议
+
+- **一会话、一会议（1:1）**：新建会话的那一刻就建好它的会议记录；录音、要点、任务、
+  笔记、文档全部写进同一份，换会话即换会议，彼此独立；
+- 子代理 / 团队成员等代理会话不单独建会议，它们的一切活动记到所属根对话的会议里；
+- 会话被分支（fork）时，新分支拿到自己的一份新会议；
+- 会话销毁时：空会议直接回收，不留空文件；有内容的会议保留为历史记录，可在
+  「会议管理」里回放或一键打开原会话；
+- 录音中的会话不能被静默归档；强制归档会在停止录音（文件补全后保存）之后进行；
+- 会议记录是**本机产物**：归本机会话所有，与登录账号无关，换账号登录不影响任何记录。
 
 ### 录制与转写
 
@@ -122,7 +135,7 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
 
 | 路径 | 作用 |
 | --- | --- |
-| `index.js` | 宿主半边：路由、会议状态与持久化、模型下载、工具（`meeting_read` / `meeting_write` / `meeting_note_write` / `meeting_revise` / `meeting_save_document`） |
+| `index.js` | 宿主半边：事件接线（会话↔会议生命周期、归档准入）、路由注册、工具注册（`meeting_read` / `meeting_write` / `meeting_note_write` / `meeting_revise` / `meeting_save_document`）；业务逻辑在 `host-*.js` |
 | `client.js` | 浏览器半边：采集、会话右侧面板、会议管理页 |
 | `speaker-worker.js` | 子进程：说话人向量提取与画廊 |
 | `handwriting-worker.js` | 子进程：本地手写识别 |

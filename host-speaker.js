@@ -7,12 +7,13 @@
  */
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile, rm, stat, rename } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, rm, stat, rename, open } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { SPEAKER_MODEL, SPEAKER_MODEL_ORIGINS, SPEAKER_THRESHOLD } from './host-constants.js'
+import { SPEAKER_MODEL, SPEAKER_MODEL_ORIGINS, SPEAKER_THRESHOLD, SPEAKER_WORKER_RESTARTS, SAMPLE_RATE } from './host-constants.js'
+import { exportDirectory } from './host-helpers.js'
 
 /** This package's own directory, used to locate the worker beside this file. */
 const PACKAGE_DIR = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -28,9 +29,10 @@ export function speakerDirectory() {
 
 /**
  * Speaker support as this process sees it: the model must be present and verified, and
- * the worker started, before any cue can be labelled.
+ * the worker started, before any cue can be labelled. The byte counters let the panel
+ * render a real download percentage instead of an indeterminate spinner.
  */
-export const speakerState = { phase: 'unprepared', message: '', modulePath: '' }
+export const speakerState = { phase: 'unprepared', message: '', modulePath: '', completedBytes: 0, totalBytes: 0 }
 
 /** The running speaker worker, or null. */
 export let speakerWorker = null
@@ -59,15 +61,21 @@ export async function ensureSpeakerModel(ctx) {
       const chunks = []
       const hash = createHash('sha256')
       let size = 0
+      speakerState.completedBytes = 0
+      speakerState.totalBytes = SPEAKER_MODEL.bytes
       for await (const chunk of response.body) {
         size += chunk.length
         if (size > SPEAKER_MODEL.bytes) throw new Error('response exceeds the pinned size')
         hash.update(chunk)
         chunks.push(chunk)
+        // The browser polls /speaker every two seconds while downloading, so the
+        // counter needs no throttling of its own.
+        speakerState.completedBytes = size
       }
       if (size !== SPEAKER_MODEL.bytes) throw new Error(`size ${size} differs from the pinned ${SPEAKER_MODEL.bytes}`)
       const digest = hash.digest('hex')
       if (digest !== SPEAKER_MODEL.sha256) throw new Error(`sha256 ${digest} differs from the pinned digest`)
+      speakerState.completedBytes = SPEAKER_MODEL.bytes
       await writeFile(part, Buffer.concat(chunks))
       await rename(part, target)
       return
@@ -161,6 +169,8 @@ export async function prepareSpeakers(ctx) {
   if (speakerState.phase === 'ready') return
   speakerState.phase = 'downloading'
   speakerState.message = ''
+  speakerState.totalBytes = SPEAKER_MODEL.bytes
+  speakerState.completedBytes = 0
   try {
     await ensureSpeakerModel(ctx)
     const worker = ensureSpeakerWorker(ctx)
@@ -186,7 +196,13 @@ export async function prepareSpeakers(ctx) {
  */
 export async function labelCue(ctx, pcm) {
   const none = { speaker: '', embedding: '' }
-  if (speakerState.phase !== 'ready') return none
+  if (speakerState.phase !== 'ready') {
+    // A worker that died mid-meeting must not silently end labeling for the rest of
+    // the meeting; 'unprepared' means the model itself is missing, so only a failed
+    // worker is worth one bounded revive attempt.
+    if (speakerState.phase !== 'failed') return none
+    if (!(await reviveSpeakerWorker(ctx))) return none
+  }
   let worker
   try {
     worker = ensureSpeakerWorker(ctx)
@@ -209,6 +225,104 @@ export async function labelCue(ctx, pcm) {
     })
     worker.child.stdin.write(`${JSON.stringify({ id, pcmBase64: pcm.toString('base64') })}\n`)
   })
+}
+
+/** How many times this process has revived the worker; bounded by SPEAKER_WORKER_RESTARTS. */
+let workerRestarts = 0
+
+/**
+ * Bring the worker back after an unexpected exit and wait for it to load the model.
+ * The restarted worker numbers voices from scratch, which is harmless: the
+ * end-of-meeting repass re-clusters every cue by its stored embedding.
+ * @param ctx - Host context.
+ * @returns whether a fresh worker reported ready.
+ */
+async function reviveSpeakerWorker(ctx) {
+  if (workerRestarts >= SPEAKER_WORKER_RESTARTS) return false
+  workerRestarts += 1
+  try {
+    const worker = ensureSpeakerWorker(ctx)
+    const deadline = Date.now() + 20_000
+    // The worker clears itself from the module slot when it dies, so that slot is the
+    // liveness signal while the phase still reads 'failed'.
+    while (!worker.ready && speakerWorker === worker && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    if (worker.ready) {
+      speakerState.phase = 'ready'
+      speakerState.message = ''
+      ctx.logger.info('meeting-room: speaker worker revived')
+      return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+/** WAV header bytes in front of the PCM payload of this plugin's own recordings. */
+const WAV_HEADER_BYTES = 44
+
+/**
+ * Where one cue's audio sits inside the recording's PCM payload. Cue audio is written
+ * back to back, so a cue's start/end seconds map linearly onto PCM16 bytes; the same
+ * mapping the recorder used when it accumulated `meeting.seconds`.
+ * @param segment - cue carrying start/end in seconds.
+ * @returns byte offsets relative to the PCM payload.
+ */
+export function pcmRangeOf(segment) {
+  const from = Math.max(0, Math.round(segment.start * SAMPLE_RATE) * 2)
+  const to = Math.max(from, Math.round(segment.end * SAMPLE_RATE) * 2)
+  return { from, to }
+}
+
+/**
+ * Re-judge cues from the finished recording. Used at stop to label the cues captured
+ * before the speaker model finished downloading, and by the panel's re-identify
+ * action over an existing meeting.
+ * @param ctx - Host context.
+ * @param meeting - meeting whose recording is on disk.
+ * @param options - `all` re-judges every cue; otherwise only unlabeled cues, and
+ *                  `limit` (0 = uncapped) bounds how many are judged.
+ * @returns the number of cues that received a label.
+ */
+export async function relabelFromRecording(ctx, meeting, options = {}) {
+  if (speakerState.phase !== 'ready') return 0
+  const all = options.all === true
+  const limit = typeof options.limit === 'number' ? options.limit : 0
+  const audioPath = typeof meeting.audioPath === 'string' && meeting.audioPath !== ''
+    ? meeting.audioPath
+    : (typeof meeting.audioName === 'string' && meeting.audioName !== '' ? join(exportDirectory(), meeting.audioName) : '')
+  if (audioPath === '') return 0
+  let handle
+  try {
+    handle = await open(audioPath, 'r')
+  } catch {
+    // The recording is gone (cleaned up by hand): nothing to re-judge.
+    return 0
+  }
+  let judged = 0
+  try {
+    for (const segment of meeting.segments) {
+      if (limit > 0 && judged >= limit) break
+      const labeled = typeof segment.speaker === 'string' && segment.speaker !== ''
+      if (labeled && !all) continue
+      const { from, to } = pcmRangeOf(segment)
+      // Below half a second the embedding measures noise, not a voice.
+      if (to - from < SAMPLE_RATE) continue
+      const buffer = Buffer.alloc(to - from)
+      const read = await handle.read(buffer, 0, buffer.length, WAV_HEADER_BYTES + from)
+      if (read.bytesRead < buffer.length) continue
+      const result = await labelCue(ctx, buffer)
+      if (result.speaker === '') continue
+      segment.speaker = result.speaker
+      if (result.embedding !== '') segment.embedding = result.embedding
+      judged += 1
+    }
+  } finally {
+    await handle.close().catch(() => undefined)
+  }
+  return judged
 }
 
 /**

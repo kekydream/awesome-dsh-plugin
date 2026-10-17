@@ -139,6 +139,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       taskDraft: '待确认',
       taskConfirmed: '已确认',
       noAnalysis: '还没有要点或工作安排。点下面的按钮在本地生成。',
+      pointsNoRecording: '本场还没有实录。点上方「开始记录」，也可以在下面直接写一条要点。',
+      tasksNoRecording: '本场还没有实录。点上方「开始记录」，也可以在下面直接写一条工作安排。',
+      tasksEmpty: '还没有工作安排。点上方「生成要点与任务」从实录提取，或直接添加；勾选表示人已确认，确认后才能推送。',
+      addEntry: '添加',
+      entryAdded: '已添加',
+      taskTextRequired: '请先写工作安排的内容',
+      originManual: '手填',
       generate: '生成要点与任务（本地）',
       extractEmpty: '没有识别出明显的要点或行动项。可在会话里直接对 Agent 说「读一下这场会议，给我要点和行动项」来精修。',
       noMeeting: '这个会话还没有会议记录。点「开始记录」录一场，再来生成要点与任务。',
@@ -230,6 +237,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       openNames: '填写姓名',
       speakerNameHint: '给识别到的发言人填上真实姓名；标签不变，会终重聚类后姓名会跟着声音走。留空则显示 S1、S2。',
       speakerNamePlaceholder: '姓名',
+      speakerNamesEmpty: '本场还没有识别到发言人。说话停顿后会自动标上 S1、S2…；若整场都没标上，点「重新识别发言人」从录音里补。',
+      speakerRelabel: '重新识别发言人',
+      speakerRelabeling: '正在重新识别…',
+      speakerRelabelDone: '发言人已重新识别',
       reviewSending: '已把实录发给对话，Agent 正在复盘',
       reviewNoSession: '复盘需要登录并打开一个对话',
       reviewPrompt: '以下是一场会议的完整实录（本机语音识别，可能含错字）。请以「{role}」的身份复盘这场会议，并输出一份可直接存档的 Markdown 文档。\n\n【角色关注点】{focus}\n\n【输出要求】\n1. 只依据实录内容，不要编造未出现的信息；\n2. 人名、术语若可能有识别错误，请保守处理并标注不确定；\n3. 结构：# 会议复盘（{role}视角）→ 会议概要 → 关键结论 → {section} → 待确认信息；\n4. 能执行的信息要具体到人和时间。\n5. 写完正文后，调用 meeting_save_document 把这份文档存进本场会议（kind=review，title=会议复盘（{role}视角），markdown=完整正文），这样用户可以随时在会议面板里打开。\n\n【会议实录】\n{transcript}',
@@ -340,6 +351,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       taskDraft: 'Draft',
       taskConfirmed: 'Confirmed',
       noAnalysis: 'No points or assignments yet. Use the button below to extract them locally.',
+      pointsNoRecording: 'This meeting has no recording yet. Press Start above, or write a point below.',
+      tasksNoRecording: 'This meeting has no recording yet. Press Start above, or write an assignment below.',
+      tasksEmpty: 'No assignments yet. Extract them from the recording, or add one below; the checkbox is the human confirmation that pushing requires.',
+      addEntry: 'Add',
+      entryAdded: 'Added',
+      taskTextRequired: 'Write the assignment first',
+      originManual: 'written',
       generate: 'Extract points and tasks (local)',
       extractEmpty: 'No obvious points or assignments were found. Ask the agent in the conversation to refine, e.g. "read this meeting and give me the key points and action items".',
       noMeeting: 'This session has no meeting yet. Start a recording first, then extract the points and tasks.',
@@ -431,6 +449,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       openNames: 'Name them',
       speakerNameHint: 'Give each recognized voice a real name. The label stays the same, and names follow the voice through the end-of-meeting re-clustering; empty shows S1, S2.',
       speakerNamePlaceholder: 'Name',
+      speakerNamesEmpty: 'No voices recognized yet. Labels (S1, S2 …) appear after someone speaks and pauses; if the whole meeting stayed blank, re-identify it from the recording.',
+      speakerRelabel: 'Re-identify speakers',
+      speakerRelabeling: 'Re-identifying…',
+      speakerRelabelDone: 'Speakers re-identified',
       reviewSending: 'Transcript sent to the conversation; the agent is reviewing it',
       reviewNoSession: 'Reviewing needs a signed-in conversation',
       reviewPrompt: 'Below is the full transcript of a meeting (recognized locally, so it may contain errors). Review this meeting as the 「{role}」 and produce a Markdown document ready to archive.\n\n[Role focus] {focus}\n\n[Requirements]\n1. Use only the transcript; never invent details that are not there.\n2. Treat names and terms that may be misrecognized conservatively and mark uncertainty.\n3. Structure: # Meeting review ({role} view) → summary → key conclusions → {section} → uncertain items.\n4. Make actionable points specific about who and when.\n5. After writing the document, call meeting_save_document to store it in this meeting (kind=review, title=Meeting review ({role} view), markdown=the full text), so the user can open it from the meeting panel later.\n\n[Transcript]\n{transcript}',
@@ -1183,7 +1205,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [error, setError] = React.useState('')
       const [note, setNote] = React.useState('')
       const [termsText, setTermsText] = React.useState(readTerms)
-      const [speaker, setSpeaker] = React.useState({ phase: 'unprepared', message: '' })
+      const [speaker, setSpeaker] = React.useState({ phase: 'unprepared', message: '', completedBytes: 0, totalBytes: 0 })
       const [speech, setSpeech] = React.useState({ ready: true, phase: 'checking', requesting: false, completedBytes: 0, totalBytes: 0 })
       // A 'Start' click that an unprepared model blocked: once the enable/download chain
       // reports ready, recording begins automatically instead of asking for another click.
@@ -1258,6 +1280,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [moreOpen, setMoreOpen] = React.useState(false)
       /** Whether the speaker-naming fields are unfolded. */
       const [namesOpen, setNamesOpen] = React.useState(false)
+      /** Whether a whole-meeting re-identification is running. */
+      const [relabeling, setRelabeling] = React.useState(false)
       /** Tasks whose row is showing the free date-and-time picker rather than a quick choice. */
       const [customDueIds, setCustomDueIds] = React.useState([])
       /** Voice labels found in this meeting and the real names assigned to them. */
@@ -1292,9 +1316,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const adopt = React.useCallback(async () => {
         if (sessionId === '') return null
         try {
-          const response = await fetch(`${PREFIX}/current?sessionId=${encodeURIComponent(sessionId)}`)
-          const value = await response.json()
-          if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+          const value = await get(`/current?sessionId=${encodeURIComponent(sessionId)}`)
           if (value.meeting === null) return null
           setMeetingId(value.meeting.meetingId)
           setStartedAt(value.meeting.startedAt)
@@ -1329,9 +1351,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           id = adopted.meetingId
         }
         try {
-          const response = await fetch(`${PREFIX}/state?meetingId=${encodeURIComponent(id)}`)
-          const value = await response.json()
-          if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+          const value = await get(`/state?meetingId=${encodeURIComponent(id)}`)
           setSegments(value.segments)
           setSeconds(value.seconds)
           if (Array.isArray(value.points)) setPoints(value.points)
@@ -1374,6 +1394,34 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
         return ''
       }, [adopt, meetingId, sessionId, termsText])
+
+      /**
+       * Re-identify the whole meeting from its recording, then take the settled labels
+       * and names back into the panel. This is the repair path for cues the online pass
+       * missed (the voice model was still downloading, or its worker died mid-meeting).
+       */
+      const relabelRecording = React.useCallback(async () => {
+        if (relabeling) return
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        setRelabeling(true)
+        setNote(t('speakerRelabeling'))
+        try {
+          const reply = await post('/relabel', { meetingId: id })
+          if (Array.isArray(reply.segments)) setSegments(reply.segments)
+          if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
+          if (Array.isArray(reply.labels)) setLabels(reply.labels)
+          setNote(`${t('speakerRelabelDone')}${typeof reply.judged === 'number' ? ` · ${reply.judged}` : ''}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setRelabeling(false)
+        }
+      }, [ensureMeeting, relabeling, t])
 
       /**
        * Remember how this person took part, so the review prompt matches their seat.
@@ -1622,6 +1670,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       /** Key points keep a two-state row: their text is a sentence, not a field to keep live. */
       const [editingPoint, setEditingPoint] = React.useState('')
       const [pointDraft, setPointDraft] = React.useState({ text: '', kind: 'point' })
+      /** The hand-written entry drafts; the tabs are never a dead end without a recording. */
+      const [newPoint, setNewPoint] = React.useState({ text: '', kind: 'point' })
+      const [newTask, setNewTask] = React.useState('')
 
       /**
        * Open one key point for editing with its current values.
@@ -1644,6 +1695,61 @@ registerProcessor('meeting-capture', MeetingCapture)
         await editEntry('point', editingPoint, pointDraft)
         setEditingPoint('')
       }, [editEntry, editingPoint, pointDraft, t])
+
+      /** Write one key point by hand — a meeting that was never recorded still gets notes. */
+      const addPoint = React.useCallback(async () => {
+        const text = newPoint.text.trim()
+        if (text === '') {
+          setError(t('pointTextRequired'))
+          return
+        }
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/analysis', {
+            meetingId: id,
+            kind: 'point',
+            op: 'add',
+            text,
+            pointKind: newPoint.kind,
+            origin: 'manual',
+          })
+          if (Array.isArray(reply.points)) setPoints(reply.points)
+          if (Array.isArray(reply.tasks)) setTasks(reply.tasks)
+          setNewPoint({ text: '', kind: newPoint.kind })
+          setNote(t('entryAdded'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, newPoint, t])
+
+      /** Write one work assignment by hand; it stays a draft until a human confirms it. */
+      const addTask = React.useCallback(async () => {
+        const text = newTask.trim()
+        if (text === '') {
+          setError(t('taskTextRequired'))
+          return
+        }
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/analysis', { meetingId: id, kind: 'task', op: 'add', text, origin: 'manual' })
+          if (Array.isArray(reply.points)) setPoints(reply.points)
+          if (Array.isArray(reply.tasks)) setTasks(reply.tasks)
+          setNewTask('')
+          setNote(t('entryAdded'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, newTask, t])
 
       /** Open one stored document inline, without leaving the panel. */
       const openStoredDocument = React.useCallback(async (entry) => {
@@ -1790,10 +1896,9 @@ registerProcessor('meeting-capture', MeetingCapture)
         let live = true
         const settle = async () => {
           try {
-            const response = await fetch(`${PREFIX}/speaker`)
-            const value = await response.json()
+            const value = await get('/speaker')
             if (!live) return
-            setSpeaker({ phase: value.phase, message: value.message ?? '' })
+            setSpeaker({ phase: value.phase, message: value.message ?? '', completedBytes: value.completedBytes ?? 0, totalBytes: value.totalBytes ?? 0 })
             if (value.phase === 'unprepared') {
               await post('/speaker/prepare', {}).catch(() => undefined)
               return
@@ -1822,9 +1927,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         for (let attempt = 0; attempt < 300; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 2000))
           try {
-            const response = await fetch(`${PREFIX}/speaker`)
-            const value = await response.json()
-            setSpeaker({ phase: value.phase, message: value.message ?? '' })
+            const value = await get('/speaker')
+            setSpeaker({ phase: value.phase, message: value.message ?? '', completedBytes: value.completedBytes ?? 0, totalBytes: value.totalBytes ?? 0 })
             if (value.phase === 'ready' || value.phase === 'failed') return
           } catch {
             return
@@ -1914,7 +2018,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           // A voice can appear mid-meeting, so the naming row follows the cue stream.
           if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
           if (Array.isArray(reply.labels)) setLabels(reply.labels)
-          if (reply.speaker !== undefined) setSpeaker({ phase: reply.speaker.phase, message: reply.speaker.message ?? '' })
+          if (reply.speaker !== undefined) setSpeaker({ phase: reply.speaker.phase, message: reply.speaker.message ?? '', completedBytes: reply.speaker.completedBytes ?? 0, totalBytes: reply.speaker.totalBytes ?? 0 })
         } catch (failure) { const msg = failure instanceof Error ? failure.message : String(failure); setError(msg); if (msg.indexOf('\u8bed\u97f3\u6a21\u578b\u5c1a\u672a\u4e0b\u8f7d') !== -1) setSpeech((c) => ({ ...c, ready: false }))
         } finally {
           active.inflight = false
@@ -2082,8 +2186,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       const status = phase === 'recording'
         ? `${t('elapsed')} ${clock(seconds)}${currentSpeaker === '' ? '' : ` · ${t('speakingNow')} ${currentSpeaker}`}`
         : phase === 'transcribing' ? t('transcribing') : phase === 'starting' ? t('starting') : pendingStart ? (speech.requesting ? t('speechPreparing') : t('speechAutoStart')) : t('idle')
+      const speakerProgress = speaker.phase === 'downloading' && typeof speaker.totalBytes === 'number' && speaker.totalBytes > 0
+        ? `（${((speaker.completedBytes ?? 0) / 1048576).toFixed(1)} / ${(speaker.totalBytes / 1048576).toFixed(1)} MB${speaker.completedBytes > 0 ? ` · ${Math.floor(speaker.completedBytes * 100 / speaker.totalBytes)}%` : ''}）`
+        : ''
       const speakerText = speaker.phase === 'ready' ? t('speakerReady')
-        : speaker.phase === 'downloading' ? t('speakerDownloading')
+        : speaker.phase === 'downloading' ? `${t('speakerDownloading')}${speakerProgress}`
           : speaker.phase === 'failed' ? `${t('speakerFailed')}${speaker.message === '' ? '' : `: ${speaker.message}`}`
             : t('speakerOff')
       // Real download progress when the provider reports byte counts, indeterminate otherwise.
@@ -2308,19 +2415,30 @@ registerProcessor('meeting-capture', MeetingCapture)
               },
             }, t('inkToTask')),
           ]))),
-        bodyTab !== 'names' || labels.length === 0 ? null : h('div', { key: 'names', style: styles.list }, [
+        bodyTab !== 'names' ? null : h('div', { key: 'names', style: styles.list }, [
           // Folded away by default: naming voices is an occasional task, and the fields would
           // otherwise sit in the panel the whole time.
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, t('speakerNames')),
-            h('button', {
+            labels.length === 0 ? null : h('button', {
               key: 'toggle',
               type: 'button',
               style: namesOpen ? styles.buttonActive : styles.button,
               onClick: () => setNamesOpen((value) => !value),
             }, namesOpen ? t('hubClose') : t('openNames')),
+            h('button', {
+              key: 'relabel',
+              type: 'button',
+              style: styles.button,
+              disabled: relabeling,
+              onClick: () => { void relabelRecording() },
+            }, relabeling ? t('speakerRelabeling') : t('speakerRelabel')),
           ]),
-          namesOpen ? h('div', { key: 'body', style: styles.list }, [
+          labels.length === 0
+            // An empty tab must explain itself: labels appear once someone speaks and pauses,
+            // and this button is the repair path when the online pass left the meeting blank.
+            ? h('span', { key: 'empty', style: styles.hint }, t('speakerNamesEmpty'))
+            : namesOpen ? h('div', { key: 'body', style: styles.list }, [
             h('span', { key: 'hint', style: styles.hint }, t('speakerNameHint')),
             ...labels.map((label) => h('div', { key: label, style: styles.row }, [
             h('span', { key: 'label', style: styles.chip }, label),
@@ -2342,11 +2460,13 @@ registerProcessor('meeting-capture', MeetingCapture)
             ])),
           ]) : null,
         ]),
-        bodyTab !== 'points' ? null : segments.length > 0 && points.length === 0 && tasks.length === 0 ? h('div', { key: 'analyze', style: styles.list }, [
-          h('p', { key: 'hint', style: styles.empty }, t('noAnalysis')),
-        ]) : null,
-        bodyTab !== 'points' || points.length === 0 ? null : h('div', { key: 'points', style: styles.list }, [
+        bodyTab !== 'points' ? null : h('div', { key: 'points', style: styles.list }, [
           h('div', { key: 'title', style: styles.label }, `${t('points')} (${points.length})`),
+          points.length === 0
+            // An empty tab must explain itself and stay usable: no recording yet, nothing
+            // extracted yet, or the person simply wants to type an entry in.
+            ? h('p', { key: 'hint', style: styles.empty }, segments.length === 0 ? t('pointsNoRecording') : t('noAnalysis'))
+            : null,
           ...points.map((point) => (editingPoint === point.id ? h('div', {
             key: point.id,
             style: styles.taskEdit,
@@ -2391,7 +2511,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             }),
             h('span', { key: 'kind', style: styles.chip }, t(`point_${point.kind}`)),
             h('span', { key: 'text', style: { flex: 1 } }, point.text),
-            h('span', { key: 'origin', style: styles.chip }, point.origin === 'agent' ? t('originAgent') : t('originRule')),
+            h('span', { key: 'origin', style: styles.chip }, point.origin === 'agent' ? t('originAgent') : point.origin === 'manual' ? t('originManual') : t('originRule')),
             h('button', {
               key: 'edit',
               type: 'button',
@@ -2405,9 +2525,37 @@ registerProcessor('meeting-capture', MeetingCapture)
               onClick: () => { void editEntry('point', point.id, {}, 'remove') },
             }, t('remove')),
           ]))),
+          // Hand-writing an entry is always possible: no recording, or nothing extracted yet.
+          h('div', { key: 'add', style: styles.row }, [
+            h('input', {
+              key: 'text',
+              type: 'text',
+              style: styles.inlineWide,
+              value: newPoint.text,
+              placeholder: t('pointTextPh'),
+              spellCheck: false,
+              onChange: (event) => setNewPoint((value) => ({ ...value, text: event.target.value })),
+              onKeyDown: (event) => { if (event.key === 'Enter') void addPoint() },
+            }),
+            h('select', {
+              key: 'kind',
+              style: styles.inlineInput,
+              value: newPoint.kind,
+              onChange: (event) => setNewPoint((value) => ({ ...value, kind: event.target.value })),
+            }, POINT_KIND_VALUES.map((value) => h('option', { key: value, value }, t(`point_${value}`)))),
+            h('button', {
+              key: 'save',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => { void addPoint() },
+            }, t('addEntry')),
+          ]),
         ]),
-        bodyTab !== 'tasks' || tasks.length === 0 ? null : h('div', { key: 'tasks', style: styles.list }, [
+        bodyTab !== 'tasks' ? null : h('div', { key: 'tasks', style: styles.list }, [
           h('div', { key: 'title', style: styles.label }, `${t('tasks')} (${tasks.filter((task) => task.status === 'confirmed').length}/${tasks.length})`),
+          tasks.length === 0
+            ? h('p', { key: 'hint', style: styles.empty }, segments.length === 0 ? t('tasksNoRecording') : t('tasksEmpty'))
+            : null,
           // No edit mode and no save button: every field is a live control that writes on
           // change, and the title writes on blur so typing does not round-trip per keystroke.
           ...tasks.map((task) => {
@@ -2501,6 +2649,25 @@ registerProcessor('meeting-capture', MeetingCapture)
               }, t('remove')),
             ])
           }),
+          // The same promise as the points tab: this tab is never a dead end.
+          h('div', { key: 'add', style: styles.row }, [
+            h('input', {
+              key: 'text',
+              type: 'text',
+              style: styles.inlineWide,
+              value: newTask,
+              placeholder: t('taskTitlePh'),
+              spellCheck: false,
+              onChange: (event) => setNewTask(event.target.value),
+              onKeyDown: (event) => { if (event.key === 'Enter') void addTask() },
+            }),
+            h('button', {
+              key: 'save',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => { void addTask() },
+            }, t('addEntry')),
+          ]),
         ]),
         notes.length === 0 ? null : h('div', { key: 'notes', style: styles.list }, [
           h('div', { key: 'label', style: styles.label }, `${t('inkNote')} (${notes.length})`),
@@ -3335,9 +3502,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const refresh = React.useCallback(async () => {
         setError('')
         try {
-          const response = await fetch(`${PREFIX}/list`)
-          const value = await response.json()
-          if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+          const value = await get('/list')
           setFiles(value.files)
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
@@ -3402,9 +3567,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         const mdName = has(`${base}.md`) ? `${base}.md` : ''
         const load = async (target) => {
           if (target === '') return ''
-          const response = await fetch(`${PREFIX}/file?name=${encodeURIComponent(target)}`)
-          const value = await response.json()
-          if (!response.ok) throw new Error(value.error ?? `request failed: ${response.status}`)
+          const value = await get(`/file?name=${encodeURIComponent(target)}`)
           return typeof value.content === 'string' ? value.content : ''
         }
         try {
