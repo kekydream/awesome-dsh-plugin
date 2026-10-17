@@ -153,29 +153,33 @@ scores: [{
 ```yaml
 meeting_query:
   parameters:
-    kind:        # 可空；briefing|review|weekly|monthly
-    period:      # 可空；Y[YYY-MM-DD | YYYY-Www | YYYY-MM]；与 from/to 互斥
-    from / to:   # 可空；日期范围（ISO 日期），与 period 互斥
-    person:      # 可空；只返回 owner/评分含此人的条目相关会议
-    include:     # summary(默认) | tasks | points | scores，可多项
-    limit:       # 默认 20，最大 100；超限提示收窄查询
-  returns:       # [{ meetingId, sessionId, kind, period, startedAt,
-                 #    title, summary, taskStats:{total,done,confirmed}, tasks?, points?, scores? }]
+    kind:        # 可空；briefing|review|weekly|monthly；省略=全部类型
+    period:      # 可空；Y[YYY-MM-DD | YYYY-Www | YYYY-MM]，或别名 today|yesterday|this-week|this-month
+    from / to:   # 可空；日期范围（本地 ISO 日期，含端点），与 period 互斥
+    person:      # 可空；只返回 owner/评分含此人的会议
+    include:     # 可空；tasks | points | scores 可多项；默认只给统计与摘要
+    limit:       # 默认 20，最大 100；超出时保留最近若干场并说明省略了多少
+  returns:       # 文本报告：命中数/筛选条件 + 每场 { title, kind, period, meetingId,
+                 #   sessionId, 开始时间, 工作安排统计(共/已完成/已确认), 要点摘要 }
+                 #   include 时附 tasks（含 #id）/ points / scores 明细
 ```
 
 - 只查内存 map（开机已全量读回，旧会话不在线也不影响）。
-- `taskStats` 让模板一句查询拿到“本周完成率”“本月每人完成数”，不用把几百条任务全
-  塞进上下文；`include: tasks` 只在要点对点核销/评分溯源时用。
-- 排序：period 升序、startedAt 升序。
+- **周期别名**：`today / yesterday / this-week / this-month`（也接受「今天/昨天/本周/本月」）
+  由宿主解析——周别名只会命中例会（日桶与周桶格式不同），避免模型自己算 ISO 周出错。
+- **文本报告而非结构化数组**：与 `meeting_read` 一致，模型直接读；每条命中都带
+  `meetingId`，跨会写回（4.2）靠它寻址。
+- 排序：period 升序、startedAt 升序；**截断时保留最近的若干场**并在首行说明省略数。
 
 ### 4.2 `meeting_write` 扩展 —— 跨会写回（核销的唯一通道）
 
 在既有 `meeting_write` 上小幅扩展，**不新增全局状态**：
 
-- tasks 条目新增可选 `id`：目标会议里已存在同名任务 → **更新**该任务（含 `done`），
-  不存在 → 新建草稿；
+- tasks 条目新增可选 `id`：命中已有任务 → **原地更新**（标题/负责人/时限/优先级/来源/
+  `done`；`done: true` 记 `doneAt`，置回 false 清掉），未命中或没有 `id` → 新建草稿；
 - 传显式 `meetingId` 即跨会写回（今天复盘会给昨天晨会核销）；
-- 写回目标仅限**已确认存在**的会议（`meeting_query` 先定位再写，拒绝凭空造会议引用）。
+- 写回目标仅限**已确认存在**的会议（`meeting_query` 先定位再写，拒绝凭空造会议引用）；
+- `meeting_read` 的工作安排逐条输出 `#id` 与完成状态，供模型直接引用核销。
 
 ### 4.3 `meeting_distill`（可选糖衣，P4 再定）
 
@@ -310,7 +314,8 @@ meeting_query:
 
 > **实现进度**：**P1 已实现**（会议类型 `kind`、派生周期 `period`、会议名称 `title`、面板类型选择器
 > 与周期徽标、四套提炼模板按钮、开始记录前的名称确认、`meeting_write` 按 `id` 更新与 `done`
-> 核销、`meeting_read` 抬头与工作安排输出 id/完成状态）。P2–P4 待实现。
+> 核销、`meeting_read` 抬头与工作安排输出 id/完成状态）。**P2 已实现**（`meeting_query` 跨会只读
+> 查询含周期别名与人员过滤、模板接入跨会对照与核销写回）。P3–P4 待实现。
 
 | 期 | 内容 | 文件 |
 | --- | --- | --- |

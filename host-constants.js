@@ -71,6 +71,10 @@ export const MEETING_KINDS = ['', 'briefing', 'review', 'weekly', 'monthly']
  */
 export const KIND_PERIOD_UNITS = { briefing: 'day', review: 'day', weekly: 'week', monthly: 'month' }
 
+/** Meeting windows the cross-meeting query returns by default, and its ceiling. */
+export const DEFAULT_QUERY_LIMIT = 20
+export const MAX_QUERY_LIMIT = 100
+
 /** Point kinds the model may use; anything else is stored as a plain point. */
 export const POINT_KINDS = ['decision', 'point', 'risk', 'question']
 

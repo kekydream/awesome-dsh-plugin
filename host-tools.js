@@ -23,6 +23,9 @@ import {
   SPEAKER_MERGE_THRESHOLD,
   SPEAKER_BACKFILL_CAP,
   KIND_PERIOD_UNITS,
+  MEETING_KINDS,
+  DEFAULT_QUERY_LIMIT,
+  MAX_QUERY_LIMIT,
   WEBHOOK_KINDS,
   PUSH_MODES,
   DOCUMENT_KINDS,
@@ -118,6 +121,134 @@ export function periodOf(kind, startedAt) {
   if (unit === 'month') return `${year}-${month}`
   if (unit === 'week') return isoWeekOf(date)
   return `${year}-${month}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/** Chinese label per kind, used in the reading text the model gets. */
+const KIND_TEXT = { '': '通用', briefing: '晨会', review: '复盘会', weekly: '例会', monthly: '总结会' }
+
+/**
+ * Local timestamp of an ISO date, or undefined when the text is not one.
+ * @param value - 'YYYY-MM-DD'.
+ * @param endOfDay - true for the last millisecond of that local day.
+ * @returns the timestamp, or undefined.
+ */
+function localDayOf(value, endOfDay = false) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(typeof value === 'string' ? value.trim() : '')
+  if (match === null) return undefined
+  const year = Number(match[1])
+  const month = Number(match[2]) - 1
+  const day = Number(match[3])
+  const date = endOfDay ? new Date(year, month, day, 23, 59, 59, 999) : new Date(year, month, day)
+  return Number.isNaN(date.getTime()) ? undefined : date.getTime()
+}
+
+/**
+ * Resolve a period argument: an exact bucket, or one of the aliases that keep the model
+ * from doing calendar arithmetic ('today', 'yesterday', 'this-week', 'this-month').
+ * @param value - the argument as given.
+ * @returns a period bucket, or '' when nothing was asked.
+ */
+export function resolvePeriod(value) {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === '') return ''
+  if (text === 'today' || text === '今天' || text === '昨天' || text === 'yesterday') {
+    const yesterday = text === '昨天' || text === 'yesterday'
+    return periodOf('briefing', yesterday ? Date.now() - 24 * 3600 * 1000 : Date.now())
+  }
+  if (text === 'this-week' || text === 'thisweek' || text === '本周') return periodOf('weekly', Date.now())
+  if (text === 'this-month' || text === 'thismonth' || text === '本月') return periodOf('monthly', Date.now())
+  return text
+}
+
+/**
+ * Answer a cross-meeting read-only query: which meetings match, what they hold, and how
+ * their work stands. Every hit carries its meeting id, so the model can address a write
+ * back to it — a review meeting checking off the tasks a briefing assigned, for instance.
+ * @param args - Model arguments, validated here because a raw definition is not.
+ * @returns the readable report.
+ */
+export function queryMeetings(args) {
+  const request = args !== null && typeof args === 'object' ? args : {}
+  const askedKind = typeof request.kind === 'string' ? request.kind.trim() : ''
+  const kind = askedKind !== '' && MEETING_KINDS.includes(askedKind) ? askedKind : ''
+  const period = resolvePeriod(request.period)
+  const from = localDayOf(request.from)
+  const to = localDayOf(request.to, true)
+  const person = typeof request.person === 'string' ? request.person.trim() : ''
+  const include = new Set((Array.isArray(request.include) ? request.include : []).filter((entry) => typeof entry === 'string'))
+  const wanted = Number(request.limit)
+  const limit = Number.isFinite(wanted) && wanted > 0 ? Math.min(Math.floor(wanted), MAX_QUERY_LIMIT) : DEFAULT_QUERY_LIMIT
+
+  const matches = []
+  for (const meeting of meetings.values()) {
+    if (kind !== '' && (meeting.kind ?? '') !== kind) continue
+    if (period !== '' && (meeting.period ?? '') !== period) continue
+    if (from !== undefined && meeting.startedAt < from) continue
+    if (to !== undefined && meeting.startedAt > to) continue
+    if (person !== '') {
+      const owns = (meeting.tasks ?? []).some((task) => task.owner === person)
+      const scored = (meeting.scores ?? []).some((score) => score.person === person)
+      if (!owns && !scored) continue
+    }
+    matches.push(meeting)
+  }
+  matches.sort((left, right) => {
+    const leftPeriod = left.period ?? ''
+    const rightPeriod = right.period ?? ''
+    // Oldest first, so a week reads as a chronology; an empty period sorts ahead of dates.
+    if (leftPeriod !== rightPeriod) return leftPeriod < rightPeriod ? -1 : 1
+    return left.startedAt - right.startedAt
+  })
+
+  const filters = [
+    kind === '' ? '' : `类型=${KIND_TEXT[kind]}`,
+    period === '' ? '' : `周期=${period}`,
+    from === undefined && to === undefined
+      ? ''
+      : `日期=${typeof request.from === 'string' && request.from !== '' ? request.from : '不限'}~${typeof request.to === 'string' && request.to !== '' ? request.to : '不限'}`,
+    person === '' ? '' : `人员=${person}`,
+  ].filter((part) => part !== '').join('　')
+  if (matches.length === 0) return `没有符合条件的会议${filters === '' ? '' : `（${filters}）`}。`
+
+  // When more meetings match than asked for, the most recent ones are the useful ones.
+  const kept = matches.slice(Math.max(0, matches.length - limit))
+  const lines = [
+    `会议检索：命中 ${matches.length} 场，显示最近 ${kept.length} 场${filters === '' ? '' : `（${filters}）`}`,
+  ]
+  if (kept.length < matches.length) {
+    lines.push(`（较早的 ${matches.length - kept.length} 场已省略：缩小范围或提高 limit）`)
+  }
+  for (const meeting of kept) {
+    const tasks = meeting.tasks ?? []
+    const points = meeting.points ?? []
+    const done = tasks.filter((task) => task.done === true).length
+    const confirmed = tasks.filter((task) => task.status === 'confirmed').length
+    lines.push('')
+    lines.push(`## ${meeting.title === undefined || meeting.title === '' ? '（未命名）' : meeting.title}　${KIND_TEXT[meeting.kind ?? ''] ?? '通用'}　${meeting.period === undefined || meeting.period === '' ? '（无周期）' : meeting.period}`)
+    lines.push(`meetingId: ${meeting.id}　sessionId: ${meeting.sessionId === '' ? '（未知）' : meeting.sessionId}　开始: ${new Date(meeting.startedAt).toLocaleString()}`)
+    lines.push(`工作安排: 共 ${tasks.length}，已完成 ${done}，已确认 ${confirmed}　要点 ${points.length} 条　文档 ${(meeting.documents ?? []).length} 篇`)
+    if (!include.has('points') && points.length > 0) {
+      const teaser = points.slice(0, 3).map((point) => (point.text.length > 40 ? `${point.text.slice(0, 40)}…` : point.text)).join('；')
+      lines.push(`要点摘要: ${teaser}${points.length > 3 ? `（其余 ${points.length - 3} 条可用 include:["points"] 读取）` : ''}`)
+    }
+    if (include.has('tasks') && tasks.length > 0) {
+      lines.push('工作安排：')
+      for (const task of tasks) {
+        lines.push(`- #${task.id} ${task.title}（${task.owner === '' ? '未定负责人' : task.owner} / ${task.due === '' ? '未定时间' : task.due} / ${task.priority} / ${task.status}${task.done === true ? ' / 已完成' : ''}）`)
+      }
+    }
+    if (include.has('points') && points.length > 0) {
+      lines.push('要点：')
+      for (const point of points) lines.push(`- [${point.kind}] ${point.text}`)
+    }
+    if (include.has('scores') && (meeting.scores ?? []).length > 0) {
+      lines.push('评分：')
+      for (const score of meeting.scores) {
+        lines.push(`- ${score.person}（课时 ${score.hours} / 完成率 ${score.completion} / 质量 ${score.quality} / 学习 ${score.learn} / 总分 ${score.total} / ${score.status}）`)
+      }
+    }
+  }
+  return lines.join('\n')
 }
 
 // ---------------------------------------------------------------------------

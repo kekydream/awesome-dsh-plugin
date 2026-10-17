@@ -30,6 +30,7 @@ import { flushMeetings, restoreMeetings } from './host-persistence.js'
 import { setSessionStore, ensureMeetingForSession, reapMeetingForSession, recordingMeetingForSession } from './host-sessions.js'
 import {
   readTranscript,
+  queryMeetings,
   writeAnalysis,
   reviseTranscript,
   saveDocument,
@@ -137,6 +138,34 @@ export function apply(ctx) {
     },
     execute: readTranscript,
   }, 'meeting-room: meeting_read tool')
+
+  registerTool({
+    name: 'meeting_query',
+    description: 'Find this machine\'s meetings by type, period, date range or person and read what each one holds: a short summary by default, plus tasks, points or scores on request. Read-only, and every hit carries its meeting id — which is how a later meeting writes back to an earlier one (meeting_write with an explicit meetingId), e.g. a review meeting checking off what a briefing assigned. Results read oldest first; when more meetings match than fit the limit, the older ones are omitted and the report says so.',
+    parameters: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['briefing', 'review', 'weekly', 'monthly'], description: 'Only meetings of this type; omit to search every type.' },
+        period: { type: 'string', description: 'One bucket: a day (2026-10-18), an ISO week (2026-W42) or a month (2026-10); or the alias today, yesterday, this-week or this-month. A weekly alias matches only weekly meetings. Do not combine with from/to.' },
+        from: { type: 'string', description: 'Earliest meeting start, as the local date YYYY-MM-DD; do not combine with period.' },
+        to: { type: 'string', description: 'Latest meeting start, as the local date YYYY-MM-DD; do not combine with period.' },
+        person: { type: 'string', description: 'Only meetings where this person owns a task or appears in the scores; exact name match.' },
+        include: {
+          type: 'array',
+          items: { type: 'string', enum: ['tasks', 'points', 'scores'] },
+          description: 'Detail to list per meeting; without it a meeting reports counts and a short summary only.',
+        },
+        limit: { type: 'integer', description: 'Maximum meetings to report, keeping the most recent (default 20, max 100).' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    execute: queryMeetings,
+  }, 'meeting-room: meeting_query tool')
 
   registerTool({
     name: 'meeting_write',
