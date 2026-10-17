@@ -62,6 +62,15 @@ export const SPEAKER_BACKFILL_CAP = 60
  */
 export const SPEAKER_WORKER_RESTARTS = 3
 
+/** Meeting kinds a record may carry; '' is the general meeting. */
+export const MEETING_KINDS = ['', 'briefing', 'review', 'weekly', 'monthly']
+
+/**
+ * Period granularity per kind: the daily meetings bucket by day, the weekly meeting by
+ * ISO week (Monday-based), the monthly by month; the general meeting has no period.
+ */
+export const KIND_PERIOD_UNITS = { briefing: 'day', review: 'day', weekly: 'week', monthly: 'month' }
+
 /** Point kinds the model may use; anything else is stored as a plain point. */
 export const POINT_KINDS = ['decision', 'point', 'risk', 'question']
 

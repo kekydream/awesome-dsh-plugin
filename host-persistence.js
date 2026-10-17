@@ -137,6 +137,11 @@ export async function restoreMeetings(ctx) {
         role: '',
         revisions: [],
         speakers: {},
+        // Metadata added after some records were already on disk: absent fields read as
+        // "general, unnamed" instead of failing the restore.
+        kind: '',
+        period: '',
+        title: '',
         ...record,
         controller: new AbortController(),
       })

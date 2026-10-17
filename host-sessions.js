@@ -48,6 +48,11 @@ export function newMeeting(sessionId, startedAt) {
     sessionId,
     terms: '',
     role: '',
+    // Meeting metadata (FEATURES §2.1): kind and period drive the templates and the
+    // cross-meeting queries; an eager meeting starts as a general, unnamed one.
+    kind: '',
+    period: '',
+    title: '',
     controller: new AbortController(),
   }
 }

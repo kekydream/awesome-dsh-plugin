@@ -26,6 +26,7 @@ import {
   MAX_CUE_LIMIT,
   SPEAKER_THRESHOLD,
   SPEAKER_MODEL,
+  MEETING_KINDS,
   ROLES,
   ROLE_LABELS,
   seenText,
@@ -58,6 +59,7 @@ import {
   transcriptText,
   readSettings,
   writeSettings,
+  periodOf,
   pushTasks,
   relabelSpeakers,
   publicSegments,
@@ -269,12 +271,31 @@ export function createHandler(ctx) {
           tasks: meeting.tasks,
           notes: meeting.notes,
           role: meeting.role,
+          kind: meeting.kind ?? '',
+          period: meeting.period ?? '',
+          title: meeting.title ?? '',
           speakers: meeting.speakers,
           people: meeting.people ?? [],
           documents: meeting.documents ?? [],
           labels: speakerLabels(meeting),
           speaker: { phase: speakerState.phase, message: speakerState.message },
         })
+        return
+      }
+
+      if (method === 'POST' && route === '/kind') {
+        // The meeting's type and name. The period is derived, never typed in: it is what
+        // lets a later meeting find this one ("today's briefing", "this week").
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const meeting = meetings.get(typeof body.meetingId === 'string' ? body.meetingId : '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        if (typeof body.kind === 'string' && MEETING_KINDS.includes(body.kind)) meeting.kind = body.kind
+        if (typeof body.title === 'string') meeting.title = body.title.trim()
+        meeting.period = periodOf(meeting.kind ?? '', meeting.startedAt)
+        sendJson(res, 200, { kind: meeting.kind ?? '', period: meeting.period, title: meeting.title ?? '' })
         return
       }
 
@@ -566,7 +587,12 @@ export function createHandler(ctx) {
             audioName: meeting.audioName,
             points: meeting.points,
             tasks: meeting.tasks,
-          notes: meeting.notes,
+            notes: meeting.notes,
+            kind: meeting.kind ?? '',
+            period: meeting.period ?? '',
+            title: meeting.title ?? '',
+            speakers: meeting.speakers,
+            labels: speakerLabels(meeting),
           },
         })
         return

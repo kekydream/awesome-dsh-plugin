@@ -162,17 +162,19 @@ export function apply(ctx) {
         },
         tasks: {
           type: 'array',
-          description: 'Work assignments agreed in the meeting.',
+          description: 'Work assignments: an entry with a title creates a draft task; an entry with the id of an existing task updates that task in place (this is how a review meeting checks off what a briefing assigned, including in another meeting through meetingId).',
           items: {
             type: 'object',
             properties: {
-              title: { type: 'string', description: 'The task, starting with a verb.' },
+              id: { type: 'string', description: 'Id of an existing task to update, as reported by meeting_read or meeting_query; omit to create a new task.' },
+              title: { type: 'string', description: 'The task, starting with a verb. Required when creating; optional when updating.' },
               owner: { type: 'string', description: 'Who owns it; empty when the meeting did not say.' },
               due: { type: 'string', description: 'Due date or time as agreed, e.g. 周五 or 2026-10-20 18:00; empty when unstated.' },
               priority: { type: 'string', enum: ['high', 'normal', 'low'], description: 'Priority; defaults to normal.' },
               source: { type: 'string', description: 'The transcript words that assigned it, verbatim.' },
+              done: { type: 'boolean', description: 'Whether the work is finished; a human owns the final confirmation, so this is separate from the confirmed/draft state.' },
             },
-            required: ['title'],
+            required: [],
             additionalProperties: false,
           },
         },

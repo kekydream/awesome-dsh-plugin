@@ -22,6 +22,7 @@ import {
   ROLE_LABELS,
   SPEAKER_MERGE_THRESHOLD,
   SPEAKER_BACKFILL_CAP,
+  KIND_PERIOD_UNITS,
   WEBHOOK_KINDS,
   PUSH_MODES,
   DOCUMENT_KINDS,
@@ -77,6 +78,46 @@ export {
   RISK_MARKERS,
   QUESTION_MARKERS,
   seenText,
+}
+
+// ---------------------------------------------------------------------------
+// Meeting metadata
+// ---------------------------------------------------------------------------
+
+/**
+ * ISO-8601 week label ('YYYY-Www', Monday-based) for a local date.
+ * @param date - local date.
+ * @returns the week label.
+ */
+function isoWeekOf(date) {
+  // The Thursday of the same week belongs to the ISO year the week is numbered in.
+  const thursday = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const dayIndex = (thursday.getDay() + 6) % 7
+  thursday.setDate(thursday.getDate() - dayIndex + 3)
+  const isoYear = thursday.getFullYear()
+  const firstThursday = new Date(isoYear, 0, 4)
+  firstThursday.setDate(firstThursday.getDate() - ((firstThursday.getDay() + 6) % 7) + 3)
+  const week = 1 + Math.round((thursday.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000))
+  return `${isoYear}-W${String(week).padStart(2, '0')}`
+}
+
+/**
+ * Derive a meeting's period bucket from its kind and start time, in local time. The
+ * bucket is what lets later meetings find earlier ones ("today's briefing", "this
+ * week's meetings") without any manual filing.
+ * @param kind - meeting kind; '' (general) has no period.
+ * @param startedAt - meeting start timestamp.
+ * @returns 'YYYY-MM-DD', 'YYYY-Www', 'YYYY-MM', or '' for the general meeting.
+ */
+export function periodOf(kind, startedAt) {
+  const unit = KIND_PERIOD_UNITS[kind]
+  if (unit === undefined) return ''
+  const date = new Date(typeof startedAt === 'number' && Number.isFinite(startedAt) ? startedAt : Date.now())
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  if (unit === 'month') return `${year}-${month}`
+  if (unit === 'week') return isoWeekOf(date)
+  return `${year}-${month}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +795,7 @@ export function transcriptText(meeting, limit) {
   const header = [
     '会议实录（本地语音识别，可能含错字；如需订正请对照术语表）',
     `会议：${meeting.id}`,
+    `名称：${meeting.title === undefined || meeting.title === '' ? '（未命名）' : meeting.title}　类型：${meeting.kind === undefined || meeting.kind === '' ? '通用' : meeting.kind}　周期：${meeting.period === undefined || meeting.period === '' ? '（无）' : meeting.period}`,
     `会话：${meeting.sessionId === '' ? '（未知）' : meeting.sessionId}`,
     `开始：${new Date(meeting.startedAt).toLocaleString()}`,
     `时长：${clockOf(meeting.seconds)} 段落：${all.length}`,
@@ -775,11 +817,13 @@ export function transcriptText(meeting, limit) {
     for (const point of meeting.points) recorded.push(`- [${point.kind}] ${point.text}`)
   }
   if (meeting.tasks.length > 0) {
-    recorded.push('', '已记录的工作安排：')
+    recorded.push('', '已记录的工作安排（可用 meeting_write 带 id 更新，含 done 核销）：')
     for (const task of meeting.tasks) {
       const owner = task.owner === '' ? '（未定负责人）' : task.owner
       const due = task.due === '' ? '（未定时间）' : task.due
-      recorded.push(`- ${task.title}（${owner} / ${due} / ${task.priority} / ${task.status}）`)
+      // The id is what a review meeting addresses when it checks a task off, so the
+      // reading view carries it next to the human-readable fields.
+      recorded.push(`- #${task.id} ${task.title}（${owner} / ${due} / ${task.priority} / ${task.status}${task.done === true ? ' / 已完成' : ''}）`)
     }
   }
   // Handwritten notes are meeting content too: a review of a meeting that was only written
@@ -1157,7 +1201,7 @@ export async function writeAnalysis(args, exec) {
   const request = args !== null && typeof args === 'object' ? args : {}
   const sessionId = exec?.agent?.session?.id
   const meetingId = typeof request.meetingId === 'string' ? request.meetingId : ''
-  const meeting = findMeeting(meetings, typeof sessionId === 'string' ? sessionId : '', meetingId)
+  const meeting = meetingForSession(typeof sessionId === 'string' ? sessionId : '', meetingId)
   if (meeting === undefined) return 'No meeting was found for this session; nothing was recorded.'
   if (request.mode === 'replace') {
     meeting.points = []
@@ -1179,8 +1223,28 @@ export async function writeAnalysis(args, exec) {
     storedPoints += 1
   }
   let storedTasks = 0
+  let updatedTasks = 0
   for (const item of Array.isArray(request.tasks) ? request.tasks : []) {
     const source = item !== null && typeof item === 'object' ? item : {}
+    const id = typeof source.id === 'string' ? source.id.trim() : ''
+    const existing = id === '' ? undefined : meeting.tasks.find((task) => task.id === id)
+    if (existing !== undefined) {
+      // An addressed task is updated in place: this is how a review meeting checks off the
+      // tasks a briefing assigned, in the meeting that owns them. A human still owns the
+      // final confirmation, so `done` and `status` stay independent.
+      if (typeof source.title === 'string' && source.title.trim() !== '') existing.title = source.title.trim()
+      if (typeof source.owner === 'string') existing.owner = source.owner.trim()
+      if (typeof source.due === 'string') existing.due = source.due.trim()
+      if (TASK_PRIORITIES.includes(source.priority)) existing.priority = source.priority
+      if (typeof source.source === 'string' && source.source.trim() !== '') existing.source = source.source.trim()
+      if (typeof source.done === 'boolean') {
+        existing.done = source.done
+        if (source.done) existing.doneAt = Date.now()
+        else delete existing.doneAt
+      }
+      updatedTasks += 1
+      continue
+    }
     const title = typeof source.title === 'string' ? source.title.trim() : ''
     if (title === '' || meeting.tasks.some((existing) => existing.title === title)) continue
     meeting.tasks.push({
@@ -1193,10 +1257,11 @@ export async function writeAnalysis(args, exec) {
       // A human confirms before anything is pushed anywhere.
       status: 'draft',
       origin: 'agent',
+      done: false,
     })
     storedTasks += 1
   }
-  return `Meeting ${meeting.id}: stored ${storedPoints} point(s) and ${storedTasks} task(s); it now holds ${meeting.points.length} point(s) and ${meeting.tasks.length} task(s). Tasks stay drafts until a human confirms them.`
+  return `Meeting ${meeting.id}: stored ${storedPoints} point(s), ${storedTasks} new task(s) and ${updatedTasks} updated task(s); it now holds ${meeting.points.length} point(s) and ${meeting.tasks.length} task(s). Tasks stay drafts until a human confirms them.`
 }
 
 /**
@@ -1211,7 +1276,7 @@ export async function reviseTranscript(args, exec) {
   const request = args !== null && typeof args === 'object' ? args : {}
   const sessionId = exec?.agent?.session?.id
   const meetingId = typeof request.meetingId === 'string' ? request.meetingId : ''
-  const meeting = findMeeting(meetings, typeof sessionId === 'string' ? sessionId : '', meetingId)
+  const meeting = meetingForSession(typeof sessionId === 'string' ? sessionId : '', meetingId)
   if (meeting === undefined) return 'No meeting was found for this session; nothing was revised.'
   const corrections = Array.isArray(request.corrections) ? request.corrections : []
   const applied = []
@@ -1244,7 +1309,7 @@ export async function saveDocument(args, exec) {
   const request = args !== null && typeof args === 'object' ? args : {}
   const sessionId = exec?.agent?.session?.id
   const meetingId = typeof request.meetingId === 'string' ? request.meetingId : ''
-  const meeting = findMeeting(meetings, typeof sessionId === 'string' ? sessionId : '', meetingId)
+  const meeting = meetingForSession(typeof sessionId === 'string' ? sessionId : '', meetingId)
   if (meeting === undefined) return 'No meeting was found for this session; nothing was saved.'
   const markdown = typeof request.markdown === 'string' ? request.markdown.trim() : ''
   if (markdown === '') return 'The document was empty; nothing was saved.'
@@ -1275,7 +1340,7 @@ export async function writeNote(args, exec) {
   const request = args !== null && typeof args === 'object' ? args : {}
   const sessionId = exec?.agent?.session?.id
   const meetingId = typeof request.meetingId === 'string' ? request.meetingId : ''
-  const meeting = findMeeting(meetings, typeof sessionId === 'string' ? sessionId : '', meetingId)
+  const meeting = meetingForSession(typeof sessionId === 'string' ? sessionId : '', meetingId)
   if (meeting === undefined) return 'No meeting was found for this session; nothing was recorded.'
   const text = typeof request.text === 'string' ? request.text.trim() : ''
   if (text === '') return 'The text was empty; nothing was recorded.'

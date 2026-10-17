@@ -308,6 +308,10 @@ meeting_query:
 
 ## 9. 分期与文件落点
 
+> **实现进度**：**P1 已实现**（会议类型 `kind`、派生周期 `period`、会议名称 `title`、面板类型选择器
+> 与周期徽标、四套提炼模板按钮、开始记录前的名称确认、`meeting_write` 按 `id` 更新与 `done`
+> 核销、`meeting_read` 抬头与工作安排输出 id/完成状态）。P2–P4 待实现。
+
 | 期 | 内容 | 文件 |
 | --- | --- | --- |
 | **P1 类型+模板** | `kind`/`period` 字段（recordOf/restore 默认）、类型选择器与徽标、四套模板文本与面板按钮、meeting_write 的 id/更新与 `done` | host-constants、host-tools、host-routes（`/kind`）、client.js（面板）、locale |

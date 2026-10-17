@@ -146,6 +146,28 @@ registerProcessor('meeting-capture', MeetingCapture)
       entryAdded: '已添加',
       taskTextRequired: '请先写工作安排的内容',
       originManual: '手填',
+      kindGeneral: '通用',
+      kindBriefing: '晨会',
+      kindReview: '复盘会',
+      kindWeekly: '例会',
+      kindMonthly: '总结会',
+      distillButtonGeneral: '提炼要点',
+      distillButtonBriefing: '提炼部署',
+      distillButtonReview: '盘点今日',
+      distillButtonWeekly: '整理本周',
+      distillButtonMonthly: '生成评分',
+      distillSent: '已把提炼请求发给对话',
+      meetingNameTitle: '这场会议叫什么？',
+      meetingNameHint: '选一个常用名称，或自己写一个；名称会显示在面板、实录抬头与纪要里。',
+      meetingNamePlaceholder: '会议名称，如「晨会 · 10月18日」',
+      meetingNameSkip: '暂不命名',
+      meetingNameNone: '（未命名）',
+      periodNone: '（无周期）',
+      distillGeneral: '请按本场会议的类型提炼内容。先调用 meeting_read（meetingId={meetingId}）读完实录，然后：1) 用 meeting_write（meetingId={meetingId}）把决定与要点写入 points（kind 取 decision/point/risk/question）；2) 把明确的行动项写入 tasks（任务/负责人/时限/优先级，草稿，等人确认）；3) 需要存档时用 meeting_save_document 存一份 Markdown。只依据实录，不要编造；人名与术语不确定时保守处理并标注。',
+      distillBriefing: '以下是本会话的晨会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再按晨会模板提炼：1) 部署事项：每条写清「任务 / 负责人 / 时限 / 优先级」，区分决定（decision）与要求（point）；2) 昨日遗留：实录提到的未完成事项单独列一段；3) 用 meeting_write（meetingId={meetingId}）把要点写入 points、把部署写入 tasks（草稿，等人确认）。只依据实录，不要编造。写完用一句话说明提取了多少条。',
+      distillReview: '以下是本会话的复盘会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再按复盘模板提炼：1) 今日盘点：逐项列出已完成与未完成的事实及原因；2) 问题与风险写入 points（kind 取 risk 或 question）；3) 遗留事项写入 tasks（草稿），标题注明「遗留」；4) 用 meeting_save_document 存一份「复盘盘点 · {period}」。只依据实录，不要编造。',
+      distillWeekly: '以下是本会话的例会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再按例会模板提炼：1) 学习部分：主题、核心论点、体会启发、下一步实践，写入 points；2) 本周汇总：完成事项 / 未完成事项 / 风险与问题三份清单；3) 用 meeting_save_document 存一份「本周纪要 · {period}」。只依据实录。',
+      distillMonthly: '以下是本会话的总结会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再按总结会模板提炼：1) 逐人整理：课时/工作量、完成情况、亮点、待改进，每条都给出实录依据；2) 每人写一条 point；3) 用 meeting_save_document 存一份「月度评分 · {period}」草稿表（Markdown 表格，含依据列），供人确认改分。评分依据必须来自实录，不要凭空打分。',
       generate: '生成要点与任务（本地）',
       extractEmpty: '没有识别出明显的要点或行动项。可在会话里直接对 Agent 说「读一下这场会议，给我要点和行动项」来精修。',
       noMeeting: '这个会话还没有会议记录。点「开始记录」录一场，再来生成要点与任务。',
@@ -358,6 +380,28 @@ registerProcessor('meeting-capture', MeetingCapture)
       entryAdded: 'Added',
       taskTextRequired: 'Write the assignment first',
       originManual: 'written',
+      kindGeneral: 'General',
+      kindBriefing: 'Morning briefing',
+      kindReview: 'Daily review',
+      kindWeekly: 'Weekly meeting',
+      kindMonthly: 'Monthly review',
+      distillButtonGeneral: 'Distill',
+      distillButtonBriefing: 'Distill assignments',
+      distillButtonReview: 'Review today',
+      distillButtonWeekly: 'Summarize the week',
+      distillButtonMonthly: 'Draft scores',
+      distillSent: 'Distill request sent to the conversation',
+      meetingNameTitle: 'Name this meeting',
+      meetingNameHint: 'Pick a common name or type your own; it shows in the panel, the transcript header and the minutes.',
+      meetingNamePlaceholder: 'Meeting name, e.g. "Briefing · Oct 18"',
+      meetingNameSkip: 'Skip naming',
+      meetingNameNone: '(unnamed)',
+      periodNone: '(no period)',
+      distillGeneral: 'Distill this meeting according to its type. First call meeting_read (meetingId={meetingId}) for the full transcript, then: 1) write decisions and points with meeting_write (meetingId={meetingId}), kind being decision/point/risk/question; 2) write clear action items as tasks (title/owner/due/priority — drafts that a human confirms); 3) store a Markdown document with meeting_save_document when it should be archived. Use only the transcript; never invent content and mark anything uncertain.',
+      distillBriefing: 'This session is a morning briefing (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then distill it: 1) assignments, each with task / owner / due / priority, separating decisions from requests; 2) yesterday\'s carry-over, listed separately when the transcript mentions unfinished work; 3) write points and tasks back with meeting_write (meetingId={meetingId}); tasks stay drafts. Use only the transcript and finish with one line saying how many entries you extracted.',
+      distillReview: 'This session is a daily review (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) list what was finished and what was not, with the stated reason; 2) write problems and risks as points (kind risk or question); 3) write carry-over items as tasks marked "carry-over"; 4) save a "Review · {period}" document with meeting_save_document. Use only the transcript.',
+      distillWeekly: 'This session is the weekly meeting (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) the learning part — topics, main arguments, takeaways, next practice — as points; 2) the week in three lists: finished / unfinished / risks and problems; 3) save a "Week · {period}" document with meeting_save_document. Use only the transcript.',
+      distillMonthly: 'This session is the monthly review (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) go person by person — hours/workload, completion, highlights, improvements — each with transcript evidence; 2) one point per person; 3) save a "Monthly scores · {period}" draft table (Markdown, with an evidence column) through meeting_save_document so a human can confirm and adjust it. Scores must be grounded in the transcript.',
       generate: 'Extract points and tasks (local)',
       extractEmpty: 'No obvious points or assignments were found. Ask the agent in the conversation to refine, e.g. "read this meeting and give me the key points and action items".',
       noMeeting: 'This session has no meeting yet. Start a recording first, then extract the points and tasks.',
@@ -1063,6 +1107,12 @@ registerProcessor('meeting-capture', MeetingCapture)
 
     /** Point kinds a reader can choose between when editing. */
     const POINT_KIND_VALUES = ['decision', 'point', 'risk', 'question']
+    /** Meeting kinds the panel offers, and the copy each one uses. */
+    const KIND_VALUES = ['', 'briefing', 'review', 'weekly', 'monthly']
+    const KIND_LABEL_KEYS = { '': 'kindGeneral', briefing: 'kindBriefing', review: 'kindReview', weekly: 'kindWeekly', monthly: 'kindMonthly' }
+    /** One distill prompt and one button label per kind (FEATURES.md §3). */
+    const DISTILL_KEYS = { '': 'distillGeneral', briefing: 'distillBriefing', review: 'distillReview', weekly: 'distillWeekly', monthly: 'distillMonthly' }
+    const DISTILL_BUTTON_KEYS = { '': 'distillButtonGeneral', briefing: 'distillButtonBriefing', review: 'distillButtonReview', weekly: 'distillButtonWeekly', monthly: 'distillButtonMonthly' }
 
     /** Id of the datalist that offers this meeting's speaker names as owners. */
     const OWNER_LIST_ID = 'meeting-room-owners'
@@ -1290,6 +1340,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [draftNames, setDraftNames] = React.useState({})
       const [playhead, setPlayhead] = React.useState(0)
       const [playing, setPlaying] = React.useState(false)
+      /** The meeting's name, type and derived period (FEATURES.md §2.1). */
+      const [meta, setMeta] = React.useState({ kind: '', period: '', title: '' })
+      /** The start-of-recording name dialog; null when it is closed (§5.5). */
+      const [namePrompt, setNamePrompt] = React.useState(null)
       const audio = React.useRef(null)
       const rows = React.useRef([])
       const noteSeq = React.useRef(0)
@@ -1325,6 +1379,11 @@ registerProcessor('meeting-capture', MeetingCapture)
           setAudioName(value.meeting.audioName ?? '')
           setPoints(value.meeting.points)
           setTasks(value.meeting.tasks)
+          setMeta({
+            kind: typeof value.meeting.kind === 'string' ? value.meeting.kind : '',
+            period: typeof value.meeting.period === 'string' ? value.meeting.period : '',
+            title: typeof value.meeting.title === 'string' ? value.meeting.title : '',
+          })
           return value.meeting
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
@@ -1362,6 +1421,11 @@ registerProcessor('meeting-capture', MeetingCapture)
           if (value.speakers !== null && typeof value.speakers === 'object') setSpeakers(value.speakers)
           if (Array.isArray(value.labels)) setLabels(value.labels)
           if (Array.isArray(value.documents)) setDocuments(value.documents)
+          setMeta({
+            kind: typeof value.kind === 'string' ? value.kind : '',
+            period: typeof value.period === 'string' ? value.period : '',
+            title: typeof value.title === 'string' ? value.title : '',
+          })
           return {
             points: Array.isArray(value.points) ? value.points : [],
             tasks: Array.isArray(value.tasks) ? value.tasks : [],
@@ -1422,6 +1486,58 @@ registerProcessor('meeting-capture', MeetingCapture)
           setRelabeling(false)
         }
       }, [ensureMeeting, relabeling, t])
+
+      /**
+       * Store the meeting's type and/or name. The host derives the period from the type,
+       * so the panel never asks the user for it (FEATURES.md §2.1).
+       * @param patch - `kind` and/or `title` to store.
+       * @returns whether the write landed.
+       */
+      const saveMeta = React.useCallback(async (patch) => {
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return false
+        }
+        try {
+          const reply = await post('/kind', { meetingId: id, ...patch })
+          setMeta({
+            kind: typeof reply.kind === 'string' ? reply.kind : '',
+            period: typeof reply.period === 'string' ? reply.period : '',
+            title: typeof reply.title === 'string' ? reply.title : '',
+          })
+          return true
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+          return false
+        }
+      }, [ensureMeeting, t])
+
+      /**
+       * Ask the agent to distill this meeting with the template its kind calls for
+       * (FEATURES.md §3): the button injects the template as a normal message, so the
+       * agent reads the transcript and writes the result back through its tools.
+       */
+      const distill = React.useCallback(async () => {
+        setError('')
+        if (sessionId === '') {
+          setError(t('needSession'))
+          return
+        }
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        const prompt = t(DISTILL_KEYS[meta.kind] ?? 'distillGeneral')
+          .replace('{meetingId}', id)
+          .replace('{title}', meta.title === '' ? t('meetingNameNone') : meta.title)
+          .replace('{period}', meta.period === '' ? t('periodNone') : meta.period)
+        setNote(t('distillSent'))
+        const asked = await props.askText(sessionId, prompt)
+        if (asked.ok !== true) setError(`${t('reviewNoSession')}: ${asked.error}`)
+      }, [ensureMeeting, meta.kind, meta.period, meta.title, props, sessionId, t])
 
       /**
        * Remember how this person took part, so the review prompt matches their seat.
@@ -2205,6 +2321,35 @@ registerProcessor('meeting-capture', MeetingCapture)
         // player and the content tabs; only what follows it scrolls, so a long transcript
         // cannot push those controls out of reach.
         h('div', { key: 'head', style: styles.panelHead }, [
+          // Meeting identity: name, type, the derived period, and this kind's one-click
+          // distill (FEATURES.md §2.1, §3, §5.1).
+          h('div', { key: 'metabar', style: styles.row }, [
+            h('input', {
+              key: `title-${meta.title}`,
+              type: 'text',
+              style: styles.inlineWide,
+              defaultValue: meta.title,
+              placeholder: t('meetingNamePlaceholder'),
+              spellCheck: false,
+              onBlur: (event) => {
+                const next = event.target.value.trim()
+                if (next !== meta.title) void saveMeta({ title: next })
+              },
+            }),
+            h('select', {
+              key: 'kind',
+              style: styles.inlineInput,
+              value: meta.kind,
+              onChange: (event) => { void saveMeta({ kind: event.target.value }) },
+            }, KIND_VALUES.map((value) => h('option', { key: value === '' ? 'general' : value, value }, t(KIND_LABEL_KEYS[value])))),
+            meta.period === '' ? null : h('span', { key: 'period', style: styles.chip }, meta.period),
+            h('button', {
+              key: 'distill',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { void distill() },
+            }, t(DISTILL_BUTTON_KEYS[meta.kind] ?? 'distillButtonGeneral')),
+          ]),
           h('div', { key: 'notebar', style: styles.row }, [
           h('span', { key: 'rolelabel', style: styles.status }, t('roleLabel')),
           // A dropdown rather than three buttons: the seat is one choice, and the row is
@@ -2223,7 +2368,12 @@ registerProcessor('meeting-capture', MeetingCapture)
             type: 'button',
             style: recording ? styles.buttonActive : styles.button,
             disabled: phase === 'starting' || pendingStart,
-            onClick: () => { void (recording ? stop() : start()) },
+            onClick: () => {
+              if (recording) { void stop(); return }
+              // Name the meeting once before the first recording (§5.5).
+              if (meta.title !== '') { void start(); return }
+              setNamePrompt({ text: '', kind: meta.kind })
+            },
           }, recording ? t('stop') : t('start')),
           h('button', {
             key: 'notes',
@@ -2705,6 +2855,67 @@ registerProcessor('meeting-capture', MeetingCapture)
             typeof props.openVoiceInputBundle === 'function' && !speech.requesting && !pendingStart ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null,
           ]),
         ]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        namePrompt === null ? null : h('div', {
+          key: 'nameprompt',
+          style: styles.setupOverlay,
+          role: 'dialog',
+          'aria-modal': 'true',
+        }, [
+          h('div', { style: styles.setupCard }, [
+            h('h2', { style: styles.setupTitle }, t('meetingNameTitle')),
+            h('p', { style: styles.note }, t('meetingNameHint')),
+            h('input', {
+              key: 'text',
+              type: 'text',
+              style: styles.inlineWide,
+              value: namePrompt.text,
+              placeholder: t('meetingNamePlaceholder'),
+              spellCheck: false,
+              onChange: (event) => setNamePrompt((value) => ({ ...value, text: event.target.value })),
+            }),
+            h('div', { key: 'chips', style: styles.row }, KIND_VALUES.map((value) => h('button', {
+              key: value === '' ? 'general' : value,
+              type: 'button',
+              style: namePrompt.kind === value ? styles.buttonActive : styles.button,
+              onClick: () => setNamePrompt((current) => ({
+                kind: value,
+                // A chip fills the default name only while nothing was typed yet.
+                text: current.text.trim() === ''
+                  ? `${t(KIND_LABEL_KEYS[value])} · ${new Date().toLocaleDateString()}`
+                  : current.text,
+              })),
+            }, t(KIND_LABEL_KEYS[value])))),
+            h('div', { key: 'foot', style: styles.setupFoot }, [
+              h('button', {
+                key: 'go',
+                type: 'button',
+                style: styles.button,
+                onClick: () => {
+                  const draft = namePrompt
+                  setNamePrompt(null)
+                  void (async () => {
+                    if (draft !== null && (draft.text.trim() !== '' || draft.kind !== '')) {
+                      await saveMeta({ title: draft.text.trim(), kind: draft.kind })
+                    }
+                    await start()
+                  })()
+                },
+              }, t('start')),
+              h('button', {
+                key: 'skip',
+                type: 'button',
+                style: styles.button,
+                onClick: () => { setNamePrompt(null); void start() },
+              }, t('meetingNameSkip')),
+              h('button', {
+                key: 'cancel',
+                type: 'button',
+                style: styles.button,
+                onClick: () => setNamePrompt(null),
+              }, t('cancelEntry')),
+            ]),
+          ]),
+        ]),
         ]),
       ]))
     }
