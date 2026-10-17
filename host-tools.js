@@ -26,6 +26,7 @@ import {
   MEETING_KINDS,
   DEFAULT_QUERY_LIMIT,
   MAX_QUERY_LIMIT,
+  SCORE_WEIGHTS,
   WEBHOOK_KINDS,
   PUSH_MODES,
   DOCUMENT_KINDS,
@@ -249,6 +250,136 @@ export function queryMeetings(args) {
     }
   }
   return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Monthly scores (FEATURES §2.4 / §3.4)
+// ---------------------------------------------------------------------------
+
+/** Clamp a value into 0…max, treating anything that is not a finite number as 0. */
+function clampNumber(value, max) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(Math.max(value, 0), max) : 0
+}
+
+/**
+ * Weighted total of one score row, with the design's default weights: quality and
+ * completion 40% each, learning 20%. Quality and learning are 1–10 and read as
+ * percentages; completion is already a percentage.
+ * @param row - score entry carrying completion, quality and learn.
+ * @returns the rounded 0–100 total.
+ */
+export function scoreTotal(row) {
+  const quality = clampNumber(row.quality, 10) * 10
+  const completion = clampNumber(row.completion, 100)
+  const learn = clampNumber(row.learn, 10) * 10
+  return Math.round(SCORE_WEIGHTS.quality * quality + SCORE_WEIGHTS.completion * completion + SCORE_WEIGHTS.learn * learn)
+}
+
+/**
+ * The local date range a 'YYYY-MM' period covers, inclusive on both ends.
+ * @param period - monthly period bucket.
+ * @returns `{ from, to }` as ISO dates, or undefined when the text is not a month.
+ */
+export function monthRangeOf(period) {
+  const match = /^(\d{4})-(\d{2})$/u.exec(typeof period === 'string' ? period.trim() : '')
+  if (match === null) return undefined
+  const month = Number(match[2])
+  if (month < 1 || month > 12) return undefined
+  const lastDay = new Date(Number(match[1]), month, 0).getDate()
+  return { from: `${match[1]}-${match[2]}-01`, to: `${match[1]}-${match[2]}-${String(lastDay).padStart(2, '0')}` }
+}
+
+/**
+ * Per-owner task statistics over a window — what pre-fills a monthly table's completion
+ * column (FEATURES §3.4): one row per owner, with how much of their work is done.
+ * @param from - inclusive local ISO date.
+ * @param to - inclusive local ISO date.
+ * @returns rows sorted by name.
+ */
+export function ownerTaskStats(from, to) {
+  const fromAt = localDayOf(from)
+  const toAt = localDayOf(to, true)
+  const stats = new Map()
+  for (const meeting of meetings.values()) {
+    if (fromAt !== undefined && meeting.startedAt < fromAt) continue
+    if (toAt !== undefined && meeting.startedAt > toAt) continue
+    for (const task of meeting.tasks ?? []) {
+      const owner = typeof task.owner === 'string' ? task.owner.trim() : ''
+      if (owner === '') continue
+      const row = stats.get(owner) ?? { person: owner, total: 0, done: 0, completion: 0 }
+      row.total += 1
+      if (task.done === true) row.done += 1
+      stats.set(owner, row)
+    }
+  }
+  const rows = [...stats.values()]
+  for (const row of rows) row.completion = row.total === 0 ? 0 : Math.round((row.done / row.total) * 100)
+  rows.sort((left, right) => left.person.localeCompare(right.person, 'zh'))
+  return rows
+}
+
+/** Header row of the score table, shared by the CSV and the Excel renderer. */
+const SCORE_HEADERS = ['人员', '课时', '完成率%', '工作质量', '学习参与', '总分', '状态', '亮点', '待改进', '依据']
+
+/** One score row as plain cells, in header order. */
+function scoreCells(row) {
+  return [
+    row.person ?? '',
+    String(row.hours ?? 0),
+    String(row.completion ?? 0),
+    String(row.quality ?? 0),
+    String(row.learn ?? 0),
+    String(row.total ?? 0),
+    row.status === 'confirmed' ? '已确认' : '草稿',
+    row.highlight ?? '',
+    row.improve ?? '',
+    (row.basis ?? []).join(' / '),
+  ]
+}
+
+/**
+ * The score table as CSV text.
+ * @param meeting - meeting carrying the scores.
+ * @returns CSV text: one header row plus one row per person.
+ */
+export function scoresCsv(meeting) {
+  const lines = [SCORE_HEADERS, ...(meeting.scores ?? []).map(scoreCells)]
+  return lines.map((cells) => cells.map((cell) => (/[",\n]/u.test(cell) ? `"${cell.replace(/"/gu, '""')}"` : cell)).join(',')).join('\n')
+}
+
+/**
+ * Render the score table as an Excel workbook through the bundled Python runtime.
+ * @param ctx - Host context, used to log a renderer failure.
+ * @param meeting - meeting carrying the scores.
+ * @param name - file name inside the export directory.
+ * @returns the written file name.
+ */
+export async function writeScoresXlsx(ctx, meeting, name) {
+  const directory = exportDirectory()
+  await mkdir(directory, { recursive: true })
+  const target = join(directory, name)
+  const python = await pythonExecutable()
+  const script = join(PACKAGE_DIR, 'scores-xlsx.py')
+  const payload = JSON.stringify({
+    title: meeting.title === undefined || meeting.title === '' ? '月度评分' : meeting.title,
+    period: meeting.period ?? '',
+    rows: meeting.scores ?? [],
+  })
+  await new Promise((resolve, reject) => {
+    const child = spawn(python, [script, target], { stdio: ['pipe', 'pipe', 'pipe'] })
+    let errors = ''
+    child.stderr.on('data', (chunk) => { errors += chunk.toString() })
+    child.on('error', (error) => reject(new Error(`无法启动 Python：${error.message}`)))
+    child.on('exit', (code) => {
+      if (code === 0) resolve()
+      else {
+        ctx.logger.warn('meeting-room: xlsx renderer failed: %s', errors.trim())
+        reject(new Error(errors.trim() === '' ? `Python 退出码 ${code}` : errors.trim()))
+      }
+    })
+    child.stdin.end(payload, 'utf8')
+  })
+  return name
 }
 
 // ---------------------------------------------------------------------------
@@ -1392,7 +1523,32 @@ export async function writeAnalysis(args, exec) {
     })
     storedTasks += 1
   }
-  return `Meeting ${meeting.id}: stored ${storedPoints} point(s), ${storedTasks} new task(s) and ${updatedTasks} updated task(s); it now holds ${meeting.points.length} point(s) and ${meeting.tasks.length} task(s). Tasks stay drafts until a human confirms them.`
+  let storedScores = 0
+  for (const item of Array.isArray(request.scores) ? request.scores : []) {
+    const source = item !== null && typeof item === 'object' ? item : {}
+    const person = typeof source.person === 'string' ? source.person.trim() : ''
+    if (person === '') continue
+    if (!Array.isArray(meeting.scores)) meeting.scores = []
+    const existing = meeting.scores.find((row) => row.person === person)
+    const target = existing ?? {
+      person, hours: 0, completion: 0, quality: 0, learn: 0, highlight: '', improve: '', basis: [],
+      // A score is a draft until a human confirms it, exactly like a task.
+      status: 'draft',
+    }
+    for (const [field, max] of [['hours', 10000], ['completion', 100], ['quality', 10], ['learn', 10]]) {
+      const value = source[field]
+      if (typeof value === 'number' && Number.isFinite(value)) target[field] = Math.min(Math.max(value, 0), max)
+    }
+    if (typeof source.highlight === 'string') target.highlight = source.highlight.trim()
+    if (typeof source.improve === 'string') target.improve = source.improve.trim()
+    if (Array.isArray(source.basis)) {
+      target.basis = source.basis.filter((entry) => typeof entry === 'string' && entry.trim() !== '').map((entry) => entry.trim())
+    }
+    target.total = scoreTotal(target)
+    if (existing === undefined) meeting.scores.push(target)
+    storedScores += 1
+  }
+  return `Meeting ${meeting.id}: stored ${storedPoints} point(s), ${storedTasks} new task(s), ${updatedTasks} updated task(s) and ${storedScores} score row(s); it now holds ${meeting.points.length} point(s), ${meeting.tasks.length} task(s) and ${(meeting.scores ?? []).length} score row(s). Tasks and scores stay drafts until a human confirms them.`
 }
 
 /**

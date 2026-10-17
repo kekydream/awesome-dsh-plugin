@@ -52,7 +52,7 @@ export const persisted = new Map()
  * @returns true when nothing worth persisting has happened yet.
  */
 export function meetingIsEmpty(meeting) {
-  for (const key of ['segments', 'points', 'tasks', 'notes', 'documents', 'revisions', 'people']) {
+  for (const key of ['segments', 'points', 'tasks', 'notes', 'documents', 'revisions', 'people', 'scores']) {
     if (Array.isArray(meeting[key]) && meeting[key].length > 0) return false
   }
   if (typeof meeting.audioName === 'string' && meeting.audioName !== '') return false
@@ -142,6 +142,7 @@ export async function restoreMeetings(ctx) {
         kind: '',
         period: '',
         title: '',
+        scores: [],
         ...record,
         controller: new AbortController(),
       })

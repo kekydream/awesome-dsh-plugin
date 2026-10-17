@@ -131,12 +131,13 @@ export function stampOf(at) {
 }
 
 /**
- * Resolve the directory exports are written to.
- * Uses the DSH_HOME pattern: ~/.dsh/meetings
+ * Resolve the directory exports are written to: `$DSH_HOME/meetings`, the same root the
+ * meeting records, the speaker models and the handwriting models resolve against.
  * @returns an absolute directory path.
  */
 export function exportDirectory() {
-  return join(homedir(), '.dsh', 'meetings')
+  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  return join(home, 'meetings')
 }
 
 /**

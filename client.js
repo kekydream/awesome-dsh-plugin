@@ -163,11 +163,27 @@ registerProcessor('meeting-capture', MeetingCapture)
       meetingNameSkip: '暂不命名',
       meetingNameNone: '（未命名）',
       periodNone: '（无周期）',
+      panelTabScores: '评分',
+      scoresPrefill: '统计预填',
+      scoresExportCsv: '导出 CSV',
+      scoresExportXlsx: '导出 Excel',
+      scoresHint: '完成率可按本月任务统计预填；质量与学习由人打分（1–10）。勾选＝已确认。总分＝质量 40% ＋ 完成率 40% ＋ 学习 20%。',
+      scoresAddPerson: '添加人员',
+      scoreHours: '课时',
+      scoreCompletion: '完成率 %',
+      scoreQuality: '工作质量 1–10',
+      scoreLearn: '学习参与 1–10',
+      scoreTotal: '总分',
+      scoreHighlight: '亮点',
+      scoreImprove: '待改进',
+      scoreBasis: '依据',
+      scoresExported: '已导出',
+      needPerson: '请先填写人员姓名',
       distillGeneral: '请按本场会议的类型提炼内容。先调用 meeting_read（meetingId={meetingId}）读完实录，然后：1) 用 meeting_write（meetingId={meetingId}）把决定与要点写入 points（kind 取 decision/point/risk/question）；2) 把明确的行动项写入 tasks（任务/负责人/时限/优先级，草稿，等人确认）；3) 需要存档时用 meeting_save_document 存一份 Markdown。只依据实录，不要编造；人名与术语不确定时保守处理并标注。',
       distillBriefing: '以下是本会话的晨会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再按晨会模板提炼：1) 昨日遗留：用 meeting_query（kind:"review", period:"yesterday", include:["tasks"]）查昨天复盘会留下的遗留事项，与实录对照后单独成段；2) 部署事项：每条写清「任务 / 负责人 / 时限 / 优先级」，区分决定（decision）与要求（point）；3) 用 meeting_write（meetingId={meetingId}）把要点写入 points、把部署写入 tasks（草稿，等人确认）。只依据实录，不要编造。写完用一句话说明提取了多少条。',
       distillReview: '以下是本会话的复盘会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，并按顺序做：1) 用 meeting_query（kind:"briefing", period:"today", include:["tasks"]）取今天晨会的任务，每条都带 #id 与它所属的 meetingId；2) 逐项核销：用 meeting_write 写回**晨会那份记录**（meetingId 填晨会的 id，tasks 里写 {id, done:true/false, source:"实录原句"}）——这是跨会写回，不要复制任务；3) 本会的问题与风险写入 points（kind 取 risk 或 question）；4) 遗留事项写入本会 tasks（草稿），标题注明「遗留」；5) 用 meeting_save_document 存一份「复盘盘点 · {period}」。只依据实录，不要编造。',
       distillWeekly: '以下是本会话的例会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再做两件事：1) 学习部分：主题、核心论点、体会启发、下一步实践，写入 points；2) 本周汇总：用 meeting_query（kind:"briefing" 与 kind:"review"，period:"this-week"，include:["tasks"]）取本周的晨会与复盘会，输出「完成事项 / 未完成事项 / 风险与问题」三份清单，每条注明来自哪场会议；最后用 meeting_save_document 存一份「本周纪要 · {period}」。只依据实录与查询结果。',
-      distillMonthly: '以下是本会话的总结会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再做：1) 用 meeting_query（period:"this-month", include:["tasks","points"]）取本月全部会议与任务，按人汇总完成情况；2) 结合本会实录逐人整理：课时/工作量、完成情况、亮点、待改进，每条给出依据（会议 id + 实录原句）；3) 每人写一条 point；4) 用 meeting_save_document 存一份「月度评分 · {period}」草稿表（Markdown 表格，含依据列），供人确认改分。评分依据必须来自实录与查询结果，不要凭空打分。',
+      distillMonthly: '以下是本会话的总结会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再做：1) 用 meeting_query（period:"this-month", include:["tasks","points"]）取本月全部会议与任务，按人汇总完成情况；2) 结合本会实录逐人整理：课时/工作量、完成情况、亮点、待改进，每条给出依据（会议 id + 实录原句）；3) 用 meeting_write（meetingId={meetingId}）把每人一行写进 scores（person/hours/completion/quality/learn/highlight/improve/basis，全部落为草稿，等人确认改分）；4) 再用 meeting_save_document 存一份「月度评分 · {period}」草稿表（Markdown 表格，含依据列）。评分依据必须来自实录与查询结果，不要凭空打分；面板「评分」页签可用「统计预填」补齐完成率。',
       generate: '生成要点与任务（本地）',
       extractEmpty: '没有识别出明显的要点或行动项。可在会话里直接对 Agent 说「读一下这场会议，给我要点和行动项」来精修。',
       noMeeting: '这个会话还没有会议记录。点「开始记录」录一场，再来生成要点与任务。',
@@ -397,11 +413,27 @@ registerProcessor('meeting-capture', MeetingCapture)
       meetingNameSkip: 'Skip naming',
       meetingNameNone: '(unnamed)',
       periodNone: '(no period)',
+      panelTabScores: 'Scores',
+      scoresPrefill: 'Pre-fill completion',
+      scoresExportCsv: 'Export CSV',
+      scoresExportXlsx: 'Export Excel',
+      scoresHint: 'Completion can be pre-filled from this period\'s tasks; quality and learning are scored by a person (1–10). Checked = confirmed. Total = quality 40% + completion 40% + learning 20%.',
+      scoresAddPerson: 'Add a person',
+      scoreHours: 'Hours',
+      scoreCompletion: 'Completion %',
+      scoreQuality: 'Quality 1–10',
+      scoreLearn: 'Learning 1–10',
+      scoreTotal: 'Total',
+      scoreHighlight: 'Highlight',
+      scoreImprove: 'To improve',
+      scoreBasis: 'Evidence',
+      scoresExported: 'Exported',
+      needPerson: 'Write the person\'s name first',
       distillGeneral: 'Distill this meeting according to its type. First call meeting_read (meetingId={meetingId}) for the full transcript, then: 1) write decisions and points with meeting_write (meetingId={meetingId}), kind being decision/point/risk/question; 2) write clear action items as tasks (title/owner/due/priority — drafts that a human confirms); 3) store a Markdown document with meeting_save_document when it should be archived. Use only the transcript; never invent content and mark anything uncertain.',
       distillBriefing: 'This session is a morning briefing (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) carry-over — call meeting_query (kind:"review", period:"yesterday", include:["tasks"]) for what yesterday\'s review left open, checked against the transcript and listed separately; 2) assignments, each with task / owner / due / priority, separating decisions from requests; 3) write points and tasks back with meeting_write (meetingId={meetingId}); tasks stay drafts. Use only the transcript and finish with one line saying how many entries you extracted.',
       distillReview: 'This session is a daily review (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then work in order: 1) meeting_query (kind:"briefing", period:"today", include:["tasks"]) for today\'s briefing tasks, each carrying its #id and the meetingId that owns it; 2) check them off by writing back to the BRIEFING record with meeting_write — that briefing\'s meetingId, tasks entries {id, done:true|false, source:"transcript words"}; never copy tasks between meetings; 3) this meeting\'s problems and risks go to points (kind risk or question); 4) carry-over items go to this meeting\'s tasks, marked "carry-over"; 5) save a "Review · {period}" document with meeting_save_document. Use only the transcript.',
       distillWeekly: 'This session is the weekly meeting (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) the learning part — topics, main arguments, takeaways, next practice — as points; 2) the week — meeting_query (kind:"briefing" and kind:"review", period:"this-week", include:["tasks"]) for this week\'s meetings, then three lists: finished / unfinished / risks and problems, each entry naming the meeting it came from; 3) save a "Week · {period}" document with meeting_save_document. Use only the transcript and the query results.',
-      distillMonthly: 'This session is the monthly review (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) meeting_query (period:"this-month", include:["tasks","points"]) for the month\'s meetings and tasks, summarised per person; 2) go person by person — hours/workload, completion, highlights, improvements — each with evidence (meeting id + transcript words); 3) one point per person; 4) save a "Monthly scores · {period}" draft table (Markdown, with an evidence column) through meeting_save_document so a human can confirm and adjust it. Scores must be grounded in the transcript and the query results.',
+      distillMonthly: 'This session is the monthly review (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) meeting_query (period:"this-month", include:["tasks","points"]) for the month\'s meetings and tasks, summarised per person; 2) go person by person — hours/workload, completion, highlights, improvements — each with evidence (meeting id + transcript words); 3) write one row per person into meeting_write\'s scores (person/hours/completion/quality/learn/highlight/improve/basis — every row lands as a draft a human then confirms); 4) also save a "Monthly scores · {period}" draft table (Markdown, with an evidence column) through meeting_save_document. Scores must be grounded in the transcript and the query results; the panel\'s Scores tab can pre-fill completion rates.',
       generate: 'Extract points and tasks (local)',
       extractEmpty: 'No obvious points or assignments were found. Ask the agent in the conversation to refine, e.g. "read this meeting and give me the key points and action items".',
       noMeeting: 'This session has no meeting yet. Start a recording first, then extract the points and tasks.',
@@ -1337,6 +1369,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       /** Voice labels found in this meeting and the real names assigned to them. */
       const [labels, setLabels] = React.useState([])
       const [speakers, setSpeakers] = React.useState({})
+      /** The monthly review's score table (FEATURES.md §5.1). */
+      const [scores, setScores] = React.useState([])
+      /** The person being added to that table by hand. */
+      const [newScorePerson, setNewScorePerson] = React.useState('')
       const [draftNames, setDraftNames] = React.useState({})
       const [playhead, setPlayhead] = React.useState(0)
       const [playing, setPlaying] = React.useState(false)
@@ -1379,6 +1415,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           setAudioName(value.meeting.audioName ?? '')
           setPoints(value.meeting.points)
           setTasks(value.meeting.tasks)
+          if (Array.isArray(value.meeting.scores)) setScores(value.meeting.scores)
           setMeta({
             kind: typeof value.meeting.kind === 'string' ? value.meeting.kind : '',
             period: typeof value.meeting.period === 'string' ? value.meeting.period : '',
@@ -1426,6 +1463,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             period: typeof value.period === 'string' ? value.period : '',
             title: typeof value.title === 'string' ? value.title : '',
           })
+          if (Array.isArray(value.scores)) setScores(value.scores)
           return {
             points: Array.isArray(value.points) ? value.points : [],
             tasks: Array.isArray(value.tasks) ? value.tasks : [],
@@ -1866,6 +1904,60 @@ registerProcessor('meeting-capture', MeetingCapture)
           setError(failure instanceof Error ? failure.message : String(failure))
         }
       }, [ensureMeeting, newTask, t])
+
+      /**
+       * Send one score-table request and take the settled table back. Every edit round-trips
+       * through the host, so totals and clamping stay in one place (FEATURES.md §2.4).
+       * @param body - request body without the meeting id.
+       */
+      const postScores = React.useCallback(async (body) => {
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/scores', { meetingId: id, ...body })
+          if (Array.isArray(reply.scores)) setScores(reply.scores)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
+
+      /** Patch one person's row. */
+      const editScore = React.useCallback((person, patch) => postScores({ person, patch }), [postScores])
+      /** Drop one person's row. */
+      const removeScore = React.useCallback((person) => postScores({ person, op: 'remove' }), [postScores])
+      /** Fill completion rates from the period's tasks (a confirmed row is never touched). */
+      const prefillScores = React.useCallback(() => postScores({ op: 'prefill' }), [postScores])
+
+      /** Add one person by hand; a meeting with no agent draft still gets a table. */
+      const addScore = React.useCallback(async () => {
+        const person = newScorePerson.trim()
+        if (person === '') {
+          setError(t('needPerson'))
+          return
+        }
+        setNewScorePerson('')
+        await postScores({ person, op: 'add' })
+      }, [newScorePerson, postScores, t])
+
+      /** Export the table: Excel is rendered by the host, CSV is written beside it. */
+      const exportScores = React.useCallback(async (format) => {
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/scores/export', { meetingId: id, format })
+          setNote(`${t('scoresExported')}: ${reply.name}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
 
       /** Open one stored document inline, without leaving the panel. */
       const openStoredDocument = React.useCallback(async (entry) => {
@@ -2516,12 +2608,21 @@ registerProcessor('meeting-capture', MeetingCapture)
         }),
         // One tab per kind of meeting content, so the panel shows one thing at a time instead
         // of the transcript, the points, the assignments and the voices stacked together.
-        h('div', { key: 'bodytabs', style: styles.tabs }, BODY_TAB_VALUES.map((value) => h('button', {
-          key: value,
-          type: 'button',
-          style: bodyTab === value ? styles.tabActive : styles.tab,
-          onClick: () => setBodyTab(value),
-        }, t(BODY_TAB_KEYS[value])))),
+        h('div', { key: 'bodytabs', style: styles.tabs }, [
+          ...BODY_TAB_VALUES.map((value) => h('button', {
+            key: value,
+            type: 'button',
+            style: bodyTab === value ? styles.tabActive : styles.tab,
+            onClick: () => setBodyTab(value),
+          }, t(BODY_TAB_KEYS[value]))),
+          // The score table belongs to the monthly review, so it appears with that type.
+          meta.kind !== 'monthly' ? null : h('button', {
+            key: 'scores',
+            type: 'button',
+            style: bodyTab === 'scores' ? styles.tabActive : styles.tab,
+            onClick: () => setBodyTab('scores'),
+          }, t('panelTabScores')),
+        ]),
         ]),
         h('div', { key: 'scroll', style: styles.panelScroll }, [
         helpOpen ? h('div', { key: 'help', style: styles.help }, t('helpBody')) : null,
@@ -2817,6 +2918,50 @@ registerProcessor('meeting-capture', MeetingCapture)
               style: styles.smallButton,
               onClick: () => { void addTask() },
             }, t('addEntry')),
+          ]),
+        ]),
+        bodyTab !== 'scores' ? null : h('div', { key: 'scores', style: styles.list }, [
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'title', style: styles.label }, `${t('panelTabScores')} (${scores.length})`),
+            h('button', { key: 'prefill', type: 'button', style: styles.button, onClick: () => { void prefillScores() } }, t('scoresPrefill')),
+            h('button', { key: 'csv', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('csv') } }, t('scoresExportCsv')),
+            h('button', { key: 'xlsx', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('xlsx') } }, t('scoresExportXlsx')),
+          ]),
+          h('span', { key: 'hint', style: styles.hint }, t('scoresHint')),
+          scores.length === 0 ? null : h('div', { key: 'rows', style: styles.list }, scores.map((row) => h('div', {
+            key: row.person,
+            style: row.status === 'confirmed' ? styles.segment : styles.taskDone,
+          }, [
+            h('input', {
+              key: 'confirmed',
+              type: 'checkbox',
+              checked: row.status === 'confirmed',
+              title: t('confirm'),
+              onChange: (event) => { void editScore(row.person, { status: event.target.checked ? 'confirmed' : 'draft' }) },
+            }),
+            h('span', { key: 'person', style: styles.chip }, row.person),
+            h('input', { key: 'hours', type: 'number', style: styles.inlineInput, defaultValue: String(row.hours ?? 0), title: t('scoreHours'), onBlur: (event) => { void editScore(row.person, { hours: Number(event.target.value) }) } }),
+            h('input', { key: 'completion', type: 'number', style: styles.inlineInput, defaultValue: String(row.completion ?? 0), title: t('scoreCompletion'), onBlur: (event) => { void editScore(row.person, { completion: Number(event.target.value) }) } }),
+            h('input', { key: 'quality', type: 'number', style: styles.inlineInput, defaultValue: String(row.quality ?? 0), title: t('scoreQuality'), onBlur: (event) => { void editScore(row.person, { quality: Number(event.target.value) }) } }),
+            h('input', { key: 'learn', type: 'number', style: styles.inlineInput, defaultValue: String(row.learn ?? 0), title: t('scoreLearn'), onBlur: (event) => { void editScore(row.person, { learn: Number(event.target.value) }) } }),
+            h('span', { key: 'total', style: styles.chip }, `${t('scoreTotal')} ${row.total ?? 0}`),
+            h('input', { key: 'highlight', type: 'text', style: styles.inlineWide, defaultValue: row.highlight ?? '', placeholder: t('scoreHighlight'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { highlight: event.target.value }) } }),
+            h('input', { key: 'improve', type: 'text', style: styles.inlineWide, defaultValue: row.improve ?? '', placeholder: t('scoreImprove'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { improve: event.target.value }) } }),
+            (row.basis ?? []).length === 0 ? null : h('span', { key: 'basis', style: styles.chip, title: (row.basis ?? []).join('\n') }, `${t('scoreBasis')} ${(row.basis ?? []).length}`),
+            h('button', { key: 'del', type: 'button', style: styles.smallButton, onClick: () => { void removeScore(row.person) } }, t('remove')),
+          ]))),
+          h('div', { key: 'add', style: styles.row }, [
+            h('input', {
+              key: 'person',
+              type: 'text',
+              style: styles.inlineWide,
+              value: newScorePerson,
+              placeholder: t('scoresAddPerson'),
+              spellCheck: false,
+              onChange: (event) => setNewScorePerson(event.target.value),
+              onKeyDown: (event) => { if (event.key === 'Enter') void addScore() },
+            }),
+            h('button', { key: 'add', type: 'button', style: styles.smallButton, onClick: () => { void addScore() } }, t('addEntry')),
           ]),
         ]),
         notes.length === 0 ? null : h('div', { key: 'notes', style: styles.list }, [

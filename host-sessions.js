@@ -53,6 +53,8 @@ export function newMeeting(sessionId, startedAt) {
     kind: '',
     period: '',
     title: '',
+    // Monthly reviews score people; every other meeting simply carries an empty table.
+    scores: [],
     controller: new AbortController(),
   }
 }

@@ -169,7 +169,7 @@ export function apply(ctx) {
 
   registerTool({
     name: 'meeting_write',
-    description: 'Record the structured reading of a meeting: key points (decisions, points, risks, open questions) and work assignments (tasks with owner and due date). Call it after reading the transcript with meeting_read. Entries are stored per meeting and shown in the meeting panel; a task stays a draft until a human confirms it. Returns a short confirmation, not the stored data.',
+    description: 'Record the structured reading of a meeting: key points (decisions, points, risks, open questions) and work assignments (tasks with owner and due date), plus — for a monthly review — one score row per person. Call it after reading the transcript with meeting_read. Entries are stored per meeting and shown in the meeting panel; a task or a score stays a draft until a human confirms it. A task entry carrying the id of an existing task updates it in place, which is how a review meeting checks off what a briefing assigned. Returns a short confirmation, not the stored data.',
     parameters: {
       type: 'object',
       properties: {
@@ -204,6 +204,25 @@ export function apply(ctx) {
               done: { type: 'boolean', description: 'Whether the work is finished; a human owns the final confirmation, so this is separate from the confirmed/draft state.' },
             },
             required: [],
+            additionalProperties: false,
+          },
+        },
+        scores: {
+          type: 'array',
+          description: 'Score rows for a monthly review, one per person; an entry naming an existing person updates that row. The total is recomputed from the numbers.',
+          items: {
+            type: 'object',
+            properties: {
+              person: { type: 'string', description: 'Whose score this is; matches an existing row by name.' },
+              hours: { type: 'number', description: 'Work or course hours contributed in the period.' },
+              completion: { type: 'number', description: 'Task completion rate 0–100; the panel can pre-fill it from the period\'s tasks.' },
+              quality: { type: 'number', description: 'Work quality 1–10.' },
+              learn: { type: 'number', description: 'Participation in learning 1–10.' },
+              highlight: { type: 'string', description: 'What went well, in one line.' },
+              improve: { type: 'string', description: 'What to improve, in one line.' },
+              basis: { type: 'array', items: { type: 'string' }, description: 'Evidence behind the numbers: transcript quotes or task ids. Never score without evidence.' },
+            },
+            required: ['person'],
             additionalProperties: false,
           },
         },

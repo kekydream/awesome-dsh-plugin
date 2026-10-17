@@ -60,6 +60,11 @@ import {
   readSettings,
   writeSettings,
   periodOf,
+  scoreTotal,
+  monthRangeOf,
+  ownerTaskStats,
+  scoresCsv,
+  writeScoresXlsx,
   pushTasks,
   relabelSpeakers,
   publicSegments,
@@ -274,6 +279,7 @@ export function createHandler(ctx) {
           kind: meeting.kind ?? '',
           period: meeting.period ?? '',
           title: meeting.title ?? '',
+          scores: meeting.scores ?? [],
           speakers: meeting.speakers,
           people: meeting.people ?? [],
           documents: meeting.documents ?? [],
@@ -296,6 +302,106 @@ export function createHandler(ctx) {
         if (typeof body.title === 'string') meeting.title = body.title.trim()
         meeting.period = periodOf(meeting.kind ?? '', meeting.startedAt)
         sendJson(res, 200, { kind: meeting.kind ?? '', period: meeting.period, title: meeting.title ?? '' })
+        return
+      }
+
+      if (method === 'POST' && route === '/scores') {
+        // The monthly review's table. The agent drafts rows through meeting_write; a human
+        // edits, confirms and exports them here (FEATURES §2.4, §3.4, §5.1).
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const meeting = meetings.get(typeof body.meetingId === 'string' ? body.meetingId : '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        if (!Array.isArray(meeting.scores)) meeting.scores = []
+        const person = typeof body.person === 'string' ? body.person.trim() : ''
+
+        if (body.op === 'add') {
+          if (person === '') {
+            sendJson(res, 400, { error: 'a score row needs a person' })
+            return
+          }
+          if (!meeting.scores.some((row) => row.person === person)) {
+            meeting.scores.push({
+              person, hours: 0, completion: 0, quality: 0, learn: 0, highlight: '', improve: '', basis: [], total: 0, status: 'draft',
+            })
+          }
+          sendJson(res, 200, { scores: meeting.scores })
+          return
+        }
+
+        if (body.op === 'prefill') {
+          // Completion comes from the tasks recorded inside the monthly period; a human
+          // still owns quality and learning, and a confirmed row is never overwritten.
+          const range = monthRangeOf(meeting.period ?? '')
+          const stats = range === undefined ? [] : ownerTaskStats(range.from, range.to)
+          for (const stat of stats) {
+            const existing = meeting.scores.find((row) => row.person === stat.person)
+            if (existing === undefined) {
+              const row = {
+                person: stat.person, hours: 0, completion: stat.completion, quality: 0, learn: 0,
+                highlight: '', improve: '', basis: [], status: 'draft', total: 0,
+              }
+              row.total = scoreTotal(row)
+              meeting.scores.push(row)
+            } else if (existing.status !== 'confirmed') {
+              existing.completion = stat.completion
+              existing.total = scoreTotal(existing)
+            }
+          }
+          sendJson(res, 200, { scores: meeting.scores, filled: stats.length })
+          return
+        }
+
+        const index = meeting.scores.findIndex((row) => row.person === person)
+        if (index < 0) {
+          sendJson(res, 404, { error: 'unknown person' })
+          return
+        }
+        if (body.op === 'remove') {
+          meeting.scores.splice(index, 1)
+          sendJson(res, 200, { scores: meeting.scores })
+          return
+        }
+        const row = meeting.scores[index]
+        const patch = body.patch !== null && typeof body.patch === 'object' ? body.patch : {}
+        // Only a human may confirm; the agent's drafts always arrive as drafts.
+        if (patch.status === 'draft' || patch.status === 'confirmed') row.status = patch.status
+        for (const [field, max] of [['hours', 10000], ['completion', 100], ['quality', 10], ['learn', 10]]) {
+          const value = Number(patch[field])
+          if (Number.isFinite(value)) row[field] = Math.min(Math.max(value, 0), max)
+        }
+        if (typeof patch.highlight === 'string') row.highlight = patch.highlight.trim()
+        if (typeof patch.improve === 'string') row.improve = patch.improve.trim()
+        row.total = scoreTotal(row)
+        sendJson(res, 200, { scores: meeting.scores })
+        return
+      }
+
+      if (method === 'POST' && route === '/scores/export') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const meeting = meetings.get(typeof body.meetingId === 'string' ? body.meetingId : '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        if ((meeting.scores ?? []).length === 0) {
+          sendJson(res, 400, { error: 'this meeting has no scores yet' })
+          return
+        }
+        const stamp = stampOf(meeting.startedAt)
+        if (body.format === 'xlsx') {
+          const name = await writeScoresXlsx(ctx, meeting, `${stamp}-scores.xlsx`)
+          sendJson(res, 200, { name })
+          return
+        }
+        const name = `${stamp}-scores.csv`
+        const content = scoresCsv(meeting)
+        const directory = exportDirectory()
+        await mkdir(directory, { recursive: true })
+        await writeFile(join(directory, name), content, 'utf8')
+        sendJson(res, 200, { name, content })
         return
       }
 
@@ -591,6 +697,7 @@ export function createHandler(ctx) {
             kind: meeting.kind ?? '',
             period: meeting.period ?? '',
             title: meeting.title ?? '',
+            scores: meeting.scores ?? [],
             speakers: meeting.speakers,
             labels: speakerLabels(meeting),
           },

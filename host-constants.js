@@ -75,6 +75,13 @@ export const KIND_PERIOD_UNITS = { briefing: 'day', review: 'day', weekly: 'week
 export const DEFAULT_QUERY_LIMIT = 20
 export const MAX_QUERY_LIMIT = 100
 
+/**
+ * Default weights behind one score row's total (FEATURES §2.4): work quality and task
+ * completion carry 40% each, participation in learning 20%. Quality and learning are
+ * 1–10 and read as percentages; completion is already a percentage.
+ */
+export const SCORE_WEIGHTS = { quality: 0.4, completion: 0.4, learn: 0.2 }
+
 /** Point kinds the model may use; anything else is stored as a plain point. */
 export const POINT_KINDS = ['decision', 'point', 'risk', 'question']
 
