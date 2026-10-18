@@ -171,6 +171,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       distillSent: '已把提炼请求发给对话',
       meetingNameTitle: '这场会议叫什么？',
       kindLabel: '会议类型',
+      panelTabMinutes: '会议纪要',
+      followNewest: '跟随最新',
+      jumpToNewest: '回到最新',
+      mergeHint: '勾选多条实录可合并为一个任务',
+      mergeSelected: '已选',
+      mergeToTask: '合并为任务',
+      clearSelection: '清除选择',
+      selectCue: '选中这条实录',
+      mergeStored: '已合并为一个任务草稿',
+      minutesTabEmpty: '还没有纪要。点「生成纪要」让 Agent 依据实录写一份。',
       needTranscript: '需要先有一段实录',
       historyGuardDiscard: '不保存并打开',
       meetingNameHint: '选一个常用名称，或自己写一个；名称会显示在面板、实录抬头与纪要里。',
@@ -450,6 +460,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       distillSent: 'Distill request sent to the conversation',
       meetingNameTitle: 'Name this meeting',
       kindLabel: 'Meeting type',
+      panelTabMinutes: 'Minutes',
+      followNewest: 'Follow newest',
+      jumpToNewest: 'Jump to newest',
+      mergeHint: 'Tick several cues to merge them into one task',
+      mergeSelected: 'selected',
+      mergeToTask: 'Merge into task',
+      clearSelection: 'Clear',
+      selectCue: 'Select this cue',
+      mergeStored: 'Merged into one draft task',
+      minutesTabEmpty: 'No minutes yet — choose Minutes to have the agent write them from the transcript.',
       needTranscript: 'needs a transcript first',
       historyGuardDiscard: 'Open without saving',
       meetingNameHint: 'Pick a common name or type your own; it shows in the panel, the transcript header and the minutes.',
@@ -741,6 +761,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         fontSize: '15px',
         fontWeight: 600,
       },
+      /** A box of cues that scrolls on its own, so following never moves the panel. */
+      transcriptBox: { display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '48vh', overflowY: 'auto' },
       recognized: { flex: 1, minWidth: '80px', fontSize: '12px', opacity: 0.9 },
       help: {
         display: 'block',
@@ -1574,8 +1596,8 @@ registerProcessor('meeting-capture', MeetingCapture)
     const HUB_TAB_KEYS = { records: 'hubTabRecords', terms: 'hubTabTerms', settings: 'hubTabSettings', people: 'hubTabPeople' }
 
     /** Panel body sections: the record first, then what was read out of it. */
-    const BODY_TAB_VALUES = ['transcript', 'points', 'tasks', 'names']
-    const BODY_TAB_KEYS = { transcript: 'panelTabTranscript', points: 'points', tasks: 'tasks', names: 'panelTabSpeakers' }
+    const BODY_TAB_VALUES = ['transcript', 'minutes', 'points', 'tasks', 'names']
+    const BODY_TAB_KEYS = { transcript: 'panelTabTranscript', minutes: 'panelTabMinutes', points: 'points', tasks: 'tasks', names: 'panelTabSpeakers' }
 
     /** The sentinel that switches the due field from a quick choice to a free picker. */
     const CUSTOM_DUE = '__custom__'
@@ -1821,6 +1843,12 @@ registerProcessor('meeting-capture', MeetingCapture)
        */
       const viewedRef = React.useRef(null)
       viewedRef.current = viewed
+      /** Whether the transcript keeps the newest cue in view (§5.7). */
+      const [follow, setFollow] = React.useState(true)
+      const followRef = React.useRef(true)
+      /** Cues ticked for merging into one assignment, and the box that holds them. */
+      const [selectedCueIds, setSelectedCueIds] = React.useState(() => new Set())
+      const listRef = React.useRef(null)
       /** The switch guard: the row to open once the countdown saved the current meeting. */
       const [switchPrompt, setSwitchPrompt] = React.useState(null)
       const audio = React.useRef(null)
@@ -2896,6 +2924,51 @@ registerProcessor('meeting-capture', MeetingCapture)
         if (row !== null && row !== undefined) row.scrollIntoView({ block: 'nearest' })
       }, [activeIndex, playing])
 
+      /** Tick or untick one cue for merging. */
+      const toggleCue = React.useCallback((id) => {
+        setSelectedCueIds((current) => {
+          const next = new Set(current)
+          if (next.has(id)) next.delete(id)
+          else next.add(id)
+          return next
+        })
+      }, [])
+
+      /**
+       * Turn the ticked cues into ONE assignment: several cues often describe a single piece
+       * of work, and the task should read as that one thing rather than as three (§5.7).
+       */
+      const mergeSelectedCues = React.useCallback(async () => {
+        const picked = visible.filter((segment) => selectedCueIds.has(segment.id))
+        if (picked.length === 0) return
+        const text = picked
+          .map((segment) => seenOf(segment).trim())
+          .filter((line) => line !== '')
+          .join('；')
+        if (text === '') return
+        const stored = await makeTaskFrom(text)
+        if (stored) {
+          setSelectedCueIds(new Set())
+          setNote(`${t('mergeStored')} · ${picked.length}`)
+        }
+      }, [makeTaskFrom, selectedCueIds, t, visible])
+
+      /** Keep following the newest cue; scrolling away hands control back to the reader. */
+      const onTranscriptScroll = React.useCallback((event) => {
+        const box = event.currentTarget
+        const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 48
+        followRef.current = atBottom
+        setFollow(atBottom)
+      }, [])
+
+      // Every new cue scrolls into view while following is on.
+      React.useEffect(() => {
+        if (followRef.current !== true) return
+        const box = listRef.current
+        if (box === null) return
+        box.scrollTop = box.scrollHeight
+      }, [segments.length])
+
       /** Release capture resources held by the current meeting. */
       const release = React.useCallback(async () => {
         const active = recorder.active
@@ -3522,34 +3595,95 @@ registerProcessor('meeting-capture', MeetingCapture)
         ]),
         bodyTab !== 'transcript' ? null : segments.length === 0
           ? h('p', { key: 'empty', style: styles.empty }, t('empty'))
-          : h('div', { key: 'list', style: styles.list }, visible.map((segment, index) => h('div', {
-            key: segment.id,
-            ref: (element) => { rows.current[index] = element },
-            style: index === activeIndex ? styles.segmentActive : styles.segment,
-            className: 'mr-hover',
-            title: t('seekHint'),
-            onClick: () => seekTo(segment.start),
-          }, [
-            h('span', { key: 'time', style: styles.stamp }, clock(segment.start)),
-            typeof segment.speaker === 'string' && segment.speaker !== ''
-              ? h('span', { key: 'speaker', style: styles.chip }, segment.speaker)
-              : null,
-            h('span', {
-              key: 'text',
-              title: seenOf(segment) === segment.text ? undefined : segment.text,
-            }, seenOf(segment)),
-            // Every cue is its own candidate assignment.
-            h(Btn, {
-              key: 'toTask',
-              type: 'button',
-              style: styles.smallButton,
-              onClick: (event) => {
-                // The row seeks the recording; making an assignment must not also seek.
-                event.stopPropagation()
-                void makeTaskFrom(seenOf(segment))
-              },
-            }, t('inkToTask')),
-          ]))),
+          : h('div', { key: 'transcript', style: styles.list }, [
+            // Two jobs in one bar: keep the newest voice in view, and let several cues become
+            // one assignment (§5.7).
+            h('div', { key: 'tools', style: styles.row }, [
+              h(Btn, {
+                key: 'follow',
+                type: 'button',
+                style: follow ? styles.buttonActive : styles.button,
+                'aria-pressed': follow,
+                onClick: () => {
+                  const next = follow !== true
+                  followRef.current = next
+                  setFollow(next)
+                  if (next) {
+                    const box = listRef.current
+                    if (box !== null) box.scrollTop = box.scrollHeight
+                  }
+                },
+              }, t('followNewest')),
+              selectedCueIds.size === 0
+                ? h('span', { key: 'hint', style: styles.hint }, t('mergeHint'))
+                : h('span', { key: 'count', style: styles.status }, `${t('mergeSelected')} ${selectedCueIds.size}`),
+              selectedCueIds.size < 2 ? null : h(Btn, {
+                key: 'merge',
+                type: 'button',
+                style: styles.button,
+                onClick: () => { void mergeSelectedCues() },
+              }, t('mergeToTask')),
+              selectedCueIds.size === 0 ? null : h(Btn, {
+                key: 'clear',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => setSelectedCueIds(new Set()),
+              }, t('clearSelection')),
+              follow ? null : h(Btn, {
+                key: 'jump',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => {
+                  followRef.current = true
+                  setFollow(true)
+                  const box = listRef.current
+                  if (box !== null) box.scrollTop = box.scrollHeight
+                },
+              }, t('jumpToNewest')),
+            ]),
+            h('div', {
+              key: 'list',
+              ref: listRef,
+              style: styles.transcriptBox,
+              onScroll: onTranscriptScroll,
+            }, visible.map((segment, index) => h('div', {
+              key: segment.id,
+              ref: (element) => { rows.current[index] = element },
+              style: index === activeIndex ? styles.segmentActive : styles.segment,
+              className: 'mr-hover',
+              title: t('seekHint'),
+              onClick: () => seekTo(segment.start),
+            }, [
+              // Ticking is how a group of cues becomes one task; it must not also seek.
+              h(Field, {
+                key: 'pick',
+                type: 'checkbox',
+                title: t('selectCue'),
+                checked: selectedCueIds.has(segment.id),
+                onClick: (event) => event.stopPropagation(),
+                onChange: () => toggleCue(segment.id),
+              }),
+              h('span', { key: 'time', style: styles.stamp }, clock(segment.start)),
+              typeof segment.speaker === 'string' && segment.speaker !== ''
+                ? h('span', { key: 'speaker', style: styles.chip }, segment.speaker)
+                : null,
+              h('span', {
+                key: 'text',
+                title: seenOf(segment) === segment.text ? undefined : segment.text,
+              }, seenOf(segment)),
+              // Every cue is its own candidate assignment.
+              h(Btn, {
+                key: 'toTask',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: (event) => {
+                  // The row seeks the recording; making an assignment must not also seek.
+                  event.stopPropagation()
+                  void makeTaskFrom(seenOf(segment))
+                },
+              }, t('inkToTask')),
+            ]))),
+          ]),
         bodyTab !== 'names' ? null : h('div', { key: 'names', style: styles.list }, [
           // The form is the page: naming voices is a straightforward task, and a button that
           // only revealed the fields was a step in the way.
@@ -3589,6 +3723,38 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t('robotSave')),
             ])),
           ]),
+        ]),
+        // Minutes are their own tab, beside the transcript they are written from (§5.7):
+        // the list of documents, the button that writes one, and the one being read.
+        bodyTab !== 'minutes' ? null : h('div', { key: 'minutes', style: styles.list }, [
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'title', style: styles.label }, `${t('panelTabMinutes')} (${documents.length})`),
+            viewed !== null ? null : h(Btn, {
+              key: 'write',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { void writeMinutes() },
+            }, t('minutes')),
+            viewed !== null || documents.length === 0 ? null : h(Btn, {
+              key: 'docx',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => { void writeMinutes('docx') },
+            }, t('minutesDocx')),
+          ]),
+          documents.length === 0
+            ? h('span', { key: 'empty', style: styles.hint }, t('minutesEmpty'))
+            : h('div', { key: 'docs', style: styles.list }, documents.map((entry) => h('div', { key: entry.id, style: styles.row }, [
+              h('span', { key: 'title', style: { flex: 1 } }, entry.title),
+              h('span', { key: 'name', style: styles.chip }, entry.name),
+              h(Btn, {
+                key: 'open',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => { void openStoredDocument(entry) },
+              }, t('openDocument')),
+            ]))),
+          openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
         ]),
         bodyTab !== 'points' ? null : h('div', { key: 'points', style: styles.list }, [
           h('div', { key: 'title', style: styles.label }, `${t('points')} (${points.length})`),
@@ -3855,20 +4021,6 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t('inkToTask')),
           ])),
         ]),
-        documents.length === 0 ? null : h('div', { key: 'docs', style: styles.list }, [
-          h('div', { key: 'label', style: styles.label }, `${t('documents')} (${documents.length})`),
-          ...documents.map((entry) => h('div', { key: entry.id, style: styles.row }, [
-            h('span', { key: 'title', style: { flex: 1 } }, entry.title),
-            h('span', { key: 'name', style: styles.chip }, entry.name),
-            h(Btn, {
-              key: 'open',
-              type: 'button',
-              style: styles.smallButton,
-              onClick: () => { void openStoredDocument(entry) },
-            }, t('openDocument')),
-          ])),
-        ]),
-        openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
         note === '' ? null : h('p', { key: 'note', style: styles.note }, note),
         speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [
           h('p', { style: styles.subtitle }, speech.requesting ? (speechDetail !== '' ? speechDetail : t('speechPreparing')) : speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechPrepareHint')),
