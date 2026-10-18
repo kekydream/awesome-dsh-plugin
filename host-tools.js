@@ -69,7 +69,7 @@ import { flushMeetings } from './host-persistence.js'
 
 import { meetingForSession } from './host-sessions.js'
 
-import { relabelFromRecording } from './host-speaker.js'
+import { relabelFromRecording, knownSpeakerLabels } from './host-speaker.js'
 
 // Re-export regex constants and seenText so consumers can import from this module.
 export {
@@ -1159,18 +1159,14 @@ export function displaySpeaker(meeting, label) {
 }
 
 /**
- * The voice labels that appear in this meeting, in first-spoken order.
+ * The voice labels that appear in this meeting: recorded as they were produced, still present
+ * on cues, and any label that carries a name. Reading all three is what lets a reopened
+ * meeting show the voices it identified, instead of claiming it never identified any.
  * @param meeting - Meeting record.
- * @returns the labels.
+ * @returns the labels, in S1, S2, … order.
  */
 export function speakerLabels(meeting) {
-  const labels = []
-  for (const segment of meeting.segments) {
-    if (typeof segment.speaker === 'string' && segment.speaker !== '' && !labels.includes(segment.speaker)) {
-      labels.push(segment.speaker)
-    }
-  }
-  return labels
+  return knownSpeakerLabels(meeting)
 }
 
 /**

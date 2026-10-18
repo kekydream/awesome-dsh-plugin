@@ -82,6 +82,7 @@ function seed(id, extra = {}) {
     notes: extra.notes ?? [],
     revisions: [],
     speakers: extra.speakers ?? {},
+    speakerLabels: extra.speakerLabels ?? [],
     people: [],
     documents: extra.documents ?? [],
     scores: extra.scores ?? [],
@@ -104,6 +105,26 @@ check('子代理会话不单独建会议', sessions.ensureMeetingForSession(ctx,
 check('分支会话（depth 0）另建一场', sessions.ensureMeetingForSession(ctx, { id: 's-fork', header: { createdAt: started, parentSession: 's-root' } })?.sessionId === 's-fork')
 sessions.reapMeetingForSession('s-fork')
 check('空会议回收后不再有记录', ![...meetings.values()].some((m) => m.sessionId === 's-fork'))
+
+// ---------------------------------------------------------------------------
+// 1b. 发言人标签随会议保存，重新打开仍能看到
+// ---------------------------------------------------------------------------
+const labeled = seed('m-labels', {
+  // A meeting whose cues lost their per-cue label — the model was still downloading, or the
+  // stop-time backfill is capped — but whose identified voices were noted on the record.
+  speakerLabels: ['S2', 'S1'],
+  segments: [{ id: 'c1', start: 0, end: 2, text: '说话内容', speaker: '' }],
+})
+check('没有逐条标签时也能列出已识别的发言人', tools.speakerLabels(labeled).join(',') === 'S1,S2')
+labeled.speakers.S1 = '张三'
+check('命名过的标签一定在列表里', tools.speakerLabels(labeled).includes('S1'))
+const stateLabels = await call('/state?meetingId=m-labels')
+check('/state 把标签回给面板', Array.isArray(stateLabels.value.labels) && stateLabels.value.labels.join(',') === 'S1,S2')
+check('给只存在于标签集的发言人命名被接受', (await call('/speaker/name', { meetingId: 'm-labels', label: 'S2', name: '李四' }, 'POST')).status === 200)
+check('命名后 speakers 里有两个人', labeled.speakers.S1 === '张三' && labeled.speakers.S2 === '李四')
+await persistence.flushMeetings(ctx)
+const storedLabels = JSON.parse(await fs.readFile(join(tmp, 'meeting-room', 'meetings', 'm-labels.json'), 'utf8'))
+check('标签集随会议落盘', Array.isArray(storedLabels.speakerLabels) && storedLabels.speakerLabels.includes('S1'))
 
 // ---------------------------------------------------------------------------
 // 2. 元数据：类型 / 周期 / 角色 / 名称

@@ -12,6 +12,46 @@ import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+/**
+ * Remember one voice label this meeting has produced. The per-cue speaker stays the primary
+ * record, but a cue's label can be missing — the model was still downloading, or a long
+ * meeting exceeded the stop-time backfill — and a reopened meeting would then claim it never
+ * identified anyone. This set is persisted with the meeting and read back when it is opened.
+ * @param meeting - Meeting record.
+ * @param label - Voice label such as S1.
+ */
+export function noteSpeakerLabel(meeting, label) {
+  if (meeting === undefined || typeof label !== 'string' || label === '') return
+  if (!Array.isArray(meeting.speakerLabels)) meeting.speakerLabels = []
+  if (!meeting.speakerLabels.includes(label)) meeting.speakerLabels.push(label)
+}
+
+/**
+ * Every voice label a meeting knows about, from each source that can hold one: labels noted as
+ * they were produced, labels still present on cues, and labels that carry a name (a name is
+ * only ever attached to a label that existed).
+ * @param meeting - Meeting record.
+ * @returns labels in S1, S2, … order.
+ */
+export function knownSpeakerLabels(meeting) {
+  const labels = new Set()
+  for (const label of Array.isArray(meeting.speakerLabels) ? meeting.speakerLabels : []) {
+    if (typeof label === 'string' && label !== '') labels.add(label)
+  }
+  for (const segment of meeting.segments ?? []) {
+    if (typeof segment.speaker === 'string' && segment.speaker !== '') labels.add(segment.speaker)
+  }
+  for (const label of Object.keys(meeting.speakers ?? {})) {
+    if (label !== '') labels.add(label)
+  }
+  return [...labels].sort((left, right) => {
+    const leftNumber = Number(String(left).replace(/\D/gu, ''))
+    const rightNumber = Number(String(right).replace(/\D/gu, ''))
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) return leftNumber - rightNumber
+    return left < right ? -1 : 1
+  })
+}
+
 import { SPEAKER_MODEL, SPEAKER_MODEL_ORIGINS, SPEAKER_THRESHOLD, SPEAKER_WORKER_RESTARTS, SAMPLE_RATE } from './host-constants.js'
 import { exportDirectory } from './host-helpers.js'
 
@@ -316,6 +356,7 @@ export async function relabelFromRecording(ctx, meeting, options = {}) {
       const result = await labelCue(ctx, buffer)
       if (result.speaker === '') continue
       segment.speaker = result.speaker
+      noteSpeakerLabel(meeting, result.speaker)
       if (result.embedding !== '') segment.embedding = result.embedding
       judged += 1
     }

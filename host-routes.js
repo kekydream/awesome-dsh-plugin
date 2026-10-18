@@ -46,7 +46,7 @@ import {
   pythonExecutable,
 } from './host-helpers.js'
 
-import { speakerState, prepareSpeakers, labelCue, relabelFromRecording } from './host-speaker.js'
+import { speakerState, prepareSpeakers, labelCue, relabelFromRecording, noteSpeakerLabel } from './host-speaker.js'
 import { handwritingState, recognizeHandwriting, prepareHandwriting } from './host-handwriting.js'
 import { flushMeetings, meetingIsEmpty } from './host-persistence.js'
 
@@ -240,7 +240,12 @@ export function createHandler(ctx) {
         // case keeps the dominant voice and is a documented limitation.
         if (meeting.segments.length > before) {
           const judged = await labelCue(ctx, pcm)
-          if (judged.speaker !== '') meeting.segments[before].speaker = judged.speaker
+          if (judged.speaker !== '') {
+            meeting.segments[before].speaker = judged.speaker
+            // Noted on the meeting as well: a reopened record must still know this voice
+            // existed, even when a later cue's label could not be produced.
+            noteSpeakerLabel(meeting, judged.speaker)
+          }
           // The embedding is kept for the end-of-meeting pass, which merges voices the online
           // gallery could not; it never leaves this process.
           if (judged.embedding !== '') meeting.segments[before].embedding = judged.embedding
@@ -503,6 +508,9 @@ export function createHandler(ctx) {
           return
         }
         const name = typeof body.name === 'string' ? body.name.trim() : ''
+        // The label is noted independently of the name, so clearing a name never erases the
+        // fact that this voice was identified.
+        noteSpeakerLabel(meeting, label)
         // An empty name clears the assignment and the label shows again.
         if (name === '') delete meeting.speakers[label]
         else meeting.speakers[label] = name

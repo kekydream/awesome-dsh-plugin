@@ -43,6 +43,9 @@ export function newMeeting(sessionId, startedAt) {
     notes: [],
     revisions: [],
     speakers: {},
+    // Voice labels this meeting has produced, kept even when a cue cannot carry its own label,
+    // so a reopened meeting still lists the speakers it identified.
+    speakerLabels: [],
     people: [],
     documents: [],
     sessionId,
