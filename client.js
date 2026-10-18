@@ -46,6 +46,13 @@ window.__ModuleLoader__.load({
     /** Route prefix owned by the host half. */
     const PREFIX = '/meeting-room'
 
+    /**
+     * A meeting the management page asked the panel to show, handed over through this
+     * one-slot register: the page switches the conversation first, and the panel that then
+     * mounts next to it reads the slot and opens the meeting it names.
+     */
+    const pendingMeeting = { current: null }
+
     /** Main-panel key and left-sidebar row id; the row id addresses this page. */
     const PANEL_ID = 'meeting-room'
 
@@ -130,7 +137,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubEmpty: '还没有会议记录。开一场会后就会出现在这里。',
       hubSend: '发送到新对话',
       hubSendHint: '新建一个对话，把这场会议的实录放进去，确认后发送',
-      hubOpenSession: '打开对话',
+      hubOpenSession: '打开会议',
+      hubOpenMeetingHint: '切换到这场会议的对话，并在右侧打开它的会议记录',
       hubNoMeeting: '这条记录没有对应的会议',
       hubNoWorkspace: '当前界面不支持新建对话',
       hubClose: '关闭',
@@ -390,7 +398,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubEmpty: 'No meetings recorded yet — hold one and it appears here.',
       hubSend: 'Send to new chat',
       hubSendHint: 'Open a new conversation with this meeting\'s transcript, ready to send',
-      hubOpenSession: 'Open chat',
+      hubOpenSession: 'Open meeting',
+      hubOpenMeetingHint: 'Switch to this meeting\'s conversation and open its record in the right panel',
       hubNoMeeting: 'This record has no meeting behind it',
       hubNoWorkspace: 'This shell cannot start a new conversation',
       hubClose: 'Close',
@@ -883,7 +892,9 @@ registerProcessor('meeting-capture', MeetingCapture)
    selected chip look like the panel background once the pointer left it. Only the weight
    is added, so the host's own "this one is chosen" colour stays visible. */
 .mr-ui.mr-layout-active { font-weight: 600; }
-.mr-ui.mr-layout-link { text-decoration: underline; }
+.mr-ui.mr-layout-link { text-decoration: underline; justify-content: flex-start; text-align: left; }
+/* The fallback skin for the same variant, so a link is left-aligned on either path. */
+.mr-btn--link { text-align: left; }
 .mr-ui.mr-layout-menu { display: block; width: 100%; text-align: left; white-space: nowrap; }
 .mr-ui.mr-layout-tab, .mr-ui.mr-layout-tab-active { border-radius: 6px 6px 0 0; }
 .mr-ui.mr-layout-tab { opacity: .68; }
@@ -2649,6 +2660,22 @@ registerProcessor('meeting-capture', MeetingCapture)
           setError(failure instanceof Error ? failure.message : String(failure))
         }
       }, [])
+
+      // The management page can hand over a meeting to open: switch the panel to it once.
+      // This sits after `openHistorical` is defined, because the effect's dependency list is
+      // built during render and a later const would not exist yet.
+      React.useEffect(() => {
+        const pending = pendingMeeting.current
+        if (pending === null || pending.sessionId !== sessionId) return
+        pendingMeeting.current = null
+        void (async () => {
+          const adopted = await adopt()
+          // Its own meeting is already the one on screen; nothing to switch to.
+          if (adopted !== null && adopted.meetingId === pending.meetingId) return
+          await openHistorical({ meetingId: pending.meetingId, sessionId: pending.sessionId, title: '' })
+          setBodyTab('transcript')
+        })()
+      }, [adopt, openHistorical, sessionId])
 
       /** Write the current meeting now, so switching away cannot lose it. */
       const saveNow = React.useCallback(async () => {
@@ -4868,6 +4895,27 @@ registerProcessor('meeting-capture', MeetingCapture)
       React.useEffect(() => { void refresh() }, [refresh])
 
       /**
+       * Open one meeting from the management page: remember it, switch to the conversation it
+       * belongs to, and open the panel column — the panel then loads exactly this meeting.
+       * @param row - The meeting row the page is showing.
+       */
+      const openMeeting = React.useCallback(async (row) => {
+        setError('')
+        if (row.sessionId === '') {
+          setError(t('hubNoMeeting'))
+          return
+        }
+        pendingMeeting.current = { sessionId: row.sessionId, meetingId: row.meetingId }
+        const opened = typeof props.openConversation === 'function' ? props.openConversation(row.sessionId) : false
+        if (opened === false) {
+          pendingMeeting.current = null
+          setError(t('hubNoWorkspace'))
+          return
+        }
+        if (typeof props.openMeetingPanel === 'function') props.openMeetingPanel()
+      }, [props, t])
+
+      /**
        * Read one meeting into the preview area: its timed cues when it has a recording, so
        * the synchronized player can follow along, and its stored document otherwise.
        * @param row - The meeting row as the history list reports it.
@@ -5144,7 +5192,10 @@ registerProcessor('meeting-capture', MeetingCapture)
                   key: 'session',
                   type: 'button',
                   style: styles.smallButton,
-                  onClick: () => { props.openConversation(row.sessionId) },
+                  // Switch to that conversation AND open this meeting in the panel beside it:
+                  // the record's own meeting is what the person clicked for.
+                  title: t('hubOpenMeetingHint'),
+                  onClick: () => { void openMeeting(row) },
                 }, t('hubOpenSession')),
               ]),
             ]))),
@@ -5408,6 +5459,20 @@ registerProcessor('meeting-capture', MeetingCapture)
               if (workspace === undefined || sessionId === '') return false
               workspace.openSession({ sessionId })
               return true
+            },
+            /**
+             * Open the meeting panel column beside whichever conversation is showing, so the
+             * page's "open meeting" lands on the record itself rather than only the chat.
+             * @returns whether the column could be opened.
+             */
+            openMeetingPanel: () => {
+              try {
+                if (!ctx.sidebarRight.isExpanded()) ctx.sidebarRight.openTab(TAB_KIND)
+                return true
+              } catch (failure) {
+                console.warn('meeting-room: the meeting panel could not be opened', failure)
+                return false
+              }
             },
           }),
         }, MeetingHubPage))
