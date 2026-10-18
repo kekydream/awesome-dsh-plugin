@@ -867,6 +867,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       termsArea: { width: '100%', flex: 1, minHeight: '320px', padding: '6px', borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px', resize: 'vertical', boxSizing: 'border-box' },
       setupOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
       setupCard: { position: 'relative', background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '12px', padding: '18px 20px', maxWidth: '460px', width: 'calc(100% - 40px)', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' },
+      /** The same card for a dialog that has more to read (the tutorial). */
+      setupCardWide: { position: 'relative', background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '12px', padding: '18px 22px', maxWidth: '820px', width: 'min(92vw, 820px)', maxHeight: '82vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' },
       setupTitle: { margin: 0, fontSize: '16px', fontWeight: 600 },
       setupFeature: { fontSize: '13px', lineHeight: 1.6 },
       setupFoot: { display: 'flex', gap: '8px', justifyContent: 'flex-end' },
@@ -948,6 +950,9 @@ registerProcessor('meeting-capture', MeetingCapture)
 .mr-dialog-body { display: flex; flex-direction: column; gap: 12px; }
 .mr-dialog-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .mr-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* A long read such as the tutorial gets a wider card than an ordinary prompt. */
+.mr-dialog-wide { width: min(92vw, 820px) !important; max-width: min(92vw, 820px) !important; }
+.mr-dialog-wide .mr-dialog-body { max-height: 70vh; overflow-y: auto; }
 /* A one-line field, whatever height the host input would otherwise take. */
 .mr-input-compact { height: 26px; min-height: 26px; padding-top: 0; padding-bottom: 0; line-height: 1.4; }
 .mr-ufield.mr-layout-title { flex: 1 1 auto; min-width: 0; }
@@ -1135,13 +1140,22 @@ registerProcessor('meeting-capture', MeetingCapture)
      * @returns the dialog.
      */
     function Dialog(props) {
-      const { title, description, onClose, children, footer } = props
+      const { title, description, onClose, children, footer, wide } = props
       // The body and the footer bring their own layout, so the host's Modal and the plugin's
       // own card both end up with the same stacked body and right-aligned, wrapping buttons.
       const body = h('div', { className: 'mr-dialog-body' }, children)
       const foot = footer === undefined ? undefined : h('div', { className: 'mr-dialog-foot' }, footer)
       if (HostModal !== null) {
-        return h(HostModal, { open: true, onClose, title, description, children: body, footer: foot })
+        return h(HostModal, {
+          open: true,
+          onClose,
+          title,
+          description,
+          children: body,
+          footer: foot,
+          // A long read such as the tutorial asks for the wider card; the class carries that.
+          className: wide === true ? 'mr-dialog-wide' : undefined,
+        })
       }
       return h('div', {
         style: styles.setupOverlay,
@@ -1149,7 +1163,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         'aria-modal': 'true',
         'aria-label': title,
       }, [
-        h('div', { key: 'card', style: styles.setupCard }, [
+        h('div', { key: 'card', style: wide === true ? styles.setupCardWide : styles.setupCard }, [
           h('h2', { key: 'title', style: styles.setupTitle }, title),
           description === undefined ? null : h('p', { key: 'hint', style: styles.note }, description),
           body,
@@ -1847,6 +1861,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       /** Cues ticked for merging into one assignment, and the box that holds them. */
       const [selectedCueIds, setSelectedCueIds] = React.useState(() => new Set())
       const listRef = React.useRef(null)
+      /** Where the meeting dropdown sits: measured from the panel, so it spans its width. */
+      const [pickerRect, setPickerRect] = React.useState(null)
       /** The switch guard: the row to open once the countdown saved the current meeting. */
       const [switchPrompt, setSwitchPrompt] = React.useState(null)
       const audio = React.useRef(null)
@@ -3230,21 +3246,17 @@ registerProcessor('meeting-capture', MeetingCapture)
               onClick: () => { void closeViewed() },
             }, t('historyBack')),
           ]),
-          // Meeting identity: name, type, the derived period, and this kind's one-click
-          // distill (FEATURES.md §2.1, §3, §5.1). Hidden while viewing a historical meeting.
+          // Meeting identity: type, the derived period, and this kind's one-click distill
+          // (FEATURES.md §2.1, §3, §5.1). The name is set in the dialog where the meeting
+          // starts, so the console is not also a form. Hidden while viewing a historical one.
           viewed !== null ? null : h('div', { key: 'metabar', style: styles.row }, [
-            h(Field, {
-              key: `title-${meta.title}`,
-              type: 'text',
-              style: styles.inlineWide,
-              defaultValue: meta.title,
-              placeholder: t('meetingNamePlaceholder'),
-              spellCheck: false,
-              onBlur: (event) => {
-                const next = event.target.value.trim()
-                if (next !== meta.title) void saveMeta({ title: next })
-              },
-            }),
+            // The name is shown, not edited: the dialog owns it, and the console still says
+            // which meeting this is.
+            meta.title === '' ? null : h('span', {
+              key: 'title',
+              style: { fontWeight: 600, fontSize: '13px' },
+              title: t('meetingNameTitle'),
+            }, meta.title),
             h(Picker, {
               key: 'kind',
               style: styles.inlineInput,
@@ -3336,15 +3348,35 @@ registerProcessor('meeting-capture', MeetingCapture)
               type: 'button',
               style: picker.open === true ? styles.buttonActive : styles.button,
               'aria-expanded': picker.open === true,
-              onClick: () => {
+              onClick: (event) => {
                 const open = picker.open !== true
+                if (open) {
+                  // The dropdown is as wide as the panel it lives in, measured rather than
+                  // guessed, and fixed so the panel's own scrolling cannot clip it.
+                  const section = event.currentTarget.closest('section')
+                  const box = (section ?? event.currentTarget).getBoundingClientRect()
+                  setPickerRect({
+                    left: box.left + 8,
+                    top: event.currentTarget.getBoundingClientRect().bottom + 6,
+                    width: Math.max(260, box.width - 16),
+                  })
+                }
                 setPicker((value) => ({ ...value, open }))
                 if (open) void loadHistory(picker.query)
               },
             }, t('historyOpen')),
             picker.open !== true ? null : h('div', {
               key: 'pickerlist',
-              style: styles.historyPanel,
+              // Fixed and measured: the list spans the panel's width instead of hugging the
+              // button it was opened from (§5.4).
+              style: pickerRect === null ? styles.historyPanel : {
+                ...styles.historyPanel,
+                position: 'fixed',
+                left: `${pickerRect.left}px`,
+                top: `${pickerRect.top}px`,
+                width: `${pickerRect.width}px`,
+                right: 'auto',
+              },
               onScroll: onPickerScroll,
             }, [
               // The platform's Input: the same field the built-in model picker searches with,
@@ -4034,6 +4066,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         helpOpen ? h(Dialog, {
           key: 'helpdialog',
           title: t('helpToggle'),
+          // The tutorial is the one dialog with a page of text in it.
+          wide: true,
           onClose: () => setHelpOpen(false),
           children: h('p', { key: 'body', style: styles.help }, t('helpBody')),
           footer: [h(Btn, {
