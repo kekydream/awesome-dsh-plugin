@@ -814,6 +814,10 @@ export function createHandler(ctx) {
             scores: meeting.scores ?? [],
             speakers: meeting.speakers,
             labels: speakerLabels(meeting),
+            // The rest of what the panel renders, so a reload restores it from one answer.
+            role: meeting.role ?? '',
+            documents: meeting.documents ?? [],
+            terms: meeting.terms ?? '',
           },
         })
         return

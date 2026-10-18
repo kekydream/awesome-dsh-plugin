@@ -1974,6 +1974,15 @@ registerProcessor('meeting-capture', MeetingCapture)
           setPoints(value.meeting.points)
           setTasks(value.meeting.tasks)
           if (Array.isArray(value.meeting.scores)) setScores(value.meeting.scores)
+          // A reload or a session switch is exactly when this payload is the ONLY source of
+          // what the panel shows. Leaving these out is what made a reopened meeting claim it
+          // had never identified a speaker: the labels were in the answer, unread.
+          if (Array.isArray(value.meeting.notes)) setNotes(value.meeting.notes)
+          if (Array.isArray(value.meeting.labels)) setLabels(value.meeting.labels)
+          if (value.meeting.speakers !== null && typeof value.meeting.speakers === 'object') setSpeakers(value.meeting.speakers)
+          if (typeof value.meeting.role === 'string') setRole(value.meeting.role)
+          if (Array.isArray(value.meeting.documents)) setDocuments(value.meeting.documents)
+          if (typeof value.meeting.terms === 'string' && value.meeting.terms !== '') setTermsText(value.meeting.terms)
           setMeta({
             kind: typeof value.meeting.kind === 'string' ? value.meeting.kind : '',
             period: typeof value.meeting.period === 'string' ? value.meeting.period : '',

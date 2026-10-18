@@ -120,6 +120,18 @@ labeled.speakers.S1 = '张三'
 check('命名过的标签一定在列表里', tools.speakerLabels(labeled).includes('S1'))
 const stateLabels = await call('/state?meetingId=m-labels')
 check('/state 把标签回给面板', Array.isArray(stateLabels.value.labels) && stateLabels.value.labels.join(',') === 'S1,S2')
+// The panel restores itself from /current after a reload or a session switch, so that answer
+// must carry everything it renders — the labels were in it but went unread on the client.
+labeled.role = 'host'
+labeled.documents = [{ id: 'd1', title: '复盘', name: 'a.md' }]
+labeled.terms = '亳州=博州'
+const current = await call(`/current?sessionId=${encodeURIComponent(labeled.sessionId)}`)
+check('/current 带上标签、角色、文档与术语', current.status === 200
+  && current.value.meeting !== null
+  && Array.isArray(current.value.meeting.labels) && current.value.meeting.labels.join(',') === 'S1,S2'
+  && current.value.meeting.role === 'host'
+  && current.value.meeting.documents.length === 1
+  && current.value.meeting.terms === '亳州=博州')
 check('给只存在于标签集的发言人命名被接受', (await call('/speaker/name', { meetingId: 'm-labels', label: 'S2', name: '李四' }, 'POST')).status === 200)
 check('命名后 speakers 里有两个人', labeled.speakers.S1 === '张三' && labeled.speakers.S2 === '李四')
 await persistence.flushMeetings(ctx)
