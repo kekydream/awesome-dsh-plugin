@@ -283,6 +283,7 @@ export function createHandler(ctx) {
           kind: meeting.kind ?? '',
           period: meeting.period ?? '',
           title: meeting.title ?? '',
+          summary: meeting.summary ?? '',
           scores: meeting.scores ?? [],
           speakers: meeting.speakers,
           people: meeting.people ?? [],
@@ -722,6 +723,24 @@ export function createHandler(ctx) {
         }
         meeting.role = body.role
         sendJson(res, 200, { role: meeting.role })
+        return
+      }
+
+      if (method === 'POST' && route === '/summary') {
+        // The meeting's short summary: typed in the start dialog, or polished there by the
+        // model and written back. It is what a reader sees before the transcript.
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const meeting = meetings.get(body.meetingId)
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        if (typeof body.summary !== 'string') {
+          sendJson(res, 400, { error: 'summary must be text' })
+          return
+        }
+        meeting.summary = body.summary.trim()
+        sendJson(res, 200, { summary: meeting.summary })
         return
       }
 

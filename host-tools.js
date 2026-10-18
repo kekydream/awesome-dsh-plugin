@@ -1183,6 +1183,7 @@ export function transcriptText(meeting, limit) {
     '会议实录（本地语音识别，可能含错字；如需订正请对照术语表）',
     `会议：${meeting.id}`,
     `名称：${meeting.title === undefined || meeting.title === '' ? '（未命名）' : meeting.title}　类型：${meeting.kind === undefined || meeting.kind === '' ? '通用' : meeting.kind}　周期：${meeting.period === undefined || meeting.period === '' ? '（无）' : meeting.period}`,
+    `概要：${meeting.summary === undefined || meeting.summary === '' ? '（未填写）' : meeting.summary}`,
     `会话：${meeting.sessionId === '' ? '（未知）' : meeting.sessionId}`,
     `开始：${new Date(meeting.startedAt).toLocaleString()}`,
     `时长：${clockOf(meeting.seconds)} 段落：${all.length}`,
@@ -1593,6 +1594,11 @@ export async function writeAnalysis(args, exec) {
   if (request.mode === 'replace') {
     meeting.points = []
     meeting.tasks = []
+  }
+  // The meeting's short summary: the person types one in the start dialog and the model may
+  // polish it, or write one from the transcript (FEATURES §2.1).
+  if (typeof request.summary === 'string' && request.summary.trim() !== '') {
+    meeting.summary = request.summary.trim()
   }
   let storedPoints = 0
   for (const item of Array.isArray(request.points) ? request.points : []) {

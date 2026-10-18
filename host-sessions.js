@@ -53,6 +53,9 @@ export function newMeeting(sessionId, startedAt) {
     kind: '',
     period: '',
     title: '',
+    // A short summary of what the meeting is about, written by hand or polished by the
+    // model from the start dialog (FEATURES §2.1).
+    summary: '',
     // Monthly reviews score people; every other meeting simply carries an empty table.
     scores: [],
     controller: new AbortController(),

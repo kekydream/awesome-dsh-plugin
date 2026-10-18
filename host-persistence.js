@@ -57,6 +57,7 @@ export function meetingIsEmpty(meeting) {
   }
   if (typeof meeting.audioName === 'string' && meeting.audioName !== '') return false
   if (typeof meeting.role === 'string' && meeting.role !== '') return false
+  if (typeof meeting.summary === 'string' && meeting.summary !== '') return false
   if (typeof meeting.terms === 'string' && meeting.terms !== '') return false
   if (meeting.speakers !== null && typeof meeting.speakers === 'object' && !Array.isArray(meeting.speakers) && Object.keys(meeting.speakers).length > 0) return false
   return true

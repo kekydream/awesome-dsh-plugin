@@ -215,6 +215,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardBody: '3 秒后自动保存，然后打开所选会议；也可以立即保存或取消。',
       historyGuardNow: '立即保存并打开',
       meetingSetup: '会议名称与角色',
+      summaryLabel: '会议概要',
+      summaryPlaceholder: '这场会议要谈什么？一两句话即可。',
+      summaryPolish: '一键优化',
+      summaryPolishHint: '交给模型润色后写回本会',
+      summaryPolishing: '已请 Agent 润色概要；完成后点「更多 → 刷新」即可看到。',
+      summaryMissing: '（还没有写概要，请根据会议名称与类型写一段）',
+      summaryPolishPrompt: '请把下面这场会议的概要润色成简洁、准确的一两句中文（保留原有要点，不要添加未提及的信息）：\n\n会议名称：{title}\n当前概要：{summary}\n\n润色后用 meeting_write 把结果写入本会的 summary 字段（只写 summary，不要动要点与任务），然后回一句确认。',
       historyAll: '已全部显示',
       historyMore: '滚动加载更多…',
       distillGeneral: '请按本场会议的类型提炼内容。先调用 meeting_read（meetingId={meetingId}）读完实录，然后：1) 用 meeting_write（meetingId={meetingId}）把决定与要点写入 points（kind 取 decision/point/risk/question）；2) 把明确的行动项写入 tasks（任务/负责人/时限/优先级，草稿，等人确认）；3) 需要存档时用 meeting_save_document 存一份 Markdown。只依据实录，不要编造；人名与术语不确定时保守处理并标注。',
@@ -341,7 +348,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabInk: '手写板',
       tabSystem: '系统手写',
       tabTerms: '会议术语',
-      notesToggle: '笔记',
+      notesToggle: '手写笔记',
       helpToggle: '使用说明',
       helpBody: '【手写板】\n· 「笔」「橡皮」「撤销」「清空」是书写工具。\n· 淡蓝色虚线框是自动发现的一个个字：轻点某个字就能选中它，不必画圈。\n· 长按画布约 0.6 秒可直接开始圈选，继续拖动即可圈住一片内容。\n· 选中或识别出文字后，下方出现同一排动作：「识别选中」只读圈住的字；「转为任务」把文字直接建成待确认任务；「清除」清空选择与识别结果。\n· 「识别为文字」按行识别整页：本地模型、离线、约 43 毫秒一行，多行会自动分行，识别完下方直接给出「转为任务」。\n· 「保存为图片」把整页存成 PNG 进会议记录。\n· 「发送到对话」交给 Agent 识别，较慢且需要登录。\n\n【系统手写】\n· 用 Windows 自带手写面板输入文字，再点「存为笔记」。\n· 需要系统先开启手写功能：设置 → 时间和语言 → 语言和区域 → 中文(简体) → 语言选项 → 安装「手写」。\n· 本环境是 Electron，可能唤不出系统面板；那就直接在这个输入框里打字。\n\n【会议术语】\n· 每行一条。写成「错词=正确词」可在转写里自动替换；只写词则作为热词。\n· 内容会自动保存到本场会议。\n\n【没有开始录音也能用】\n· 写笔记、识别、转任务都不需要先点「开始记录」；第一次写入时会自动建一条会议记录，之后录音会并入同一条。',
       inkRecognizing: '已请求识别，Agent 完成后会显示',
@@ -491,6 +498,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardBody: 'It is saved automatically in 3 seconds, then the chosen meeting opens; you can also save now or cancel.',
       historyGuardNow: 'Save and open now',
       meetingSetup: 'Meeting name & role',
+      summaryLabel: 'Meeting summary',
+      summaryPlaceholder: 'What is this meeting about? One or two sentences is enough.',
+      summaryPolish: 'Polish with model',
+      summaryPolishHint: 'the model rewrites it and writes it back',
+      summaryPolishing: 'Asked the agent to polish the summary; use More → Refresh to see it.',
+      summaryMissing: '(nothing written yet — write a sentence from the meeting name and type)',
+      summaryPolishPrompt: 'Polish the summary of the meeting below into one or two precise sentences (keep the existing points, add nothing that was not said):\n\nMeeting name: {title}\nCurrent summary: {summary}\n\nThen write the result into this meeting\'s summary field with meeting_write (summary only — leave points and tasks alone) and answer with a short confirmation.',
       historyAll: 'All shown',
       historyMore: 'Scroll for more…',
       distillGeneral: 'Distill this meeting according to its type. First call meeting_read (meetingId={meetingId}) for the full transcript, then: 1) write decisions and points with meeting_write (meetingId={meetingId}), kind being decision/point/risk/question; 2) write clear action items as tasks (title/owner/due/priority — drafts that a human confirms); 3) store a Markdown document with meeting_save_document when it should be archived. Use only the transcript; never invent content and mark anything uncertain.',
@@ -616,7 +630,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabInk: 'Pad',
       tabSystem: 'System input',
       tabTerms: 'Terms',
-      notesToggle: 'Notes',
+      notesToggle: 'Handwritten note',
       helpToggle: 'Help',
       helpBody: '【Handwriting pad】\n· Pen, eraser, undo and clear are the drawing tools.\n· Faint dashed boxes are characters found from the ink alone: tap one to select it, no lasso needed.\n· Long-press the pad for about 0.6 s to start a lasso, then drag to circle an area.\n· A selection or a recognized result shows one action row: "Recognize selection" reads only the circled characters, "To task" turns the text straight into a draft task, and "Clear" empties both.\n· "Recognize as text" reads the page line by line locally, offline, about 43 ms per line, splitting lines automatically, and offers "To task" right below.\n· "Save as image" stores the page as a PNG in the meeting record.\n· "Send to the conversation" asks the agent instead; it is slower and needs a signed-in session.\n\n【System handwriting】\n· Type with the Windows handwriting panel, then store it as a note.\n· Windows must have handwriting installed: Settings → Time & language → Language & region → Chinese (Simplified) → Language options → install Handwriting.\n· This Electron shell may not summon the system panel; the text box here always works.\n\n【Meeting terms】\n· One entry per line. Write "wrong=right" to replace it in transcripts; a bare word is a hint.\n· Entries save automatically.\n\n【Works without recording】\n· Notes, recognition and tasks need no recording; the first write creates the meeting record, and a later recording joins it.',
       inkRecognizing: 'Recognition requested; the result appears when the agent finishes',
@@ -690,6 +704,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       headerButton: { padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' },
       status: { fontSize: '12px', opacity: 0.8 },
       label: { display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '2px' },
+      /** A labelled field that stacks instead of sitting in one row (the summary block). */
+      fieldBlock: { display: 'flex', flexDirection: 'column', gap: '4px' },
       hint: { display: 'block', fontSize: '11px', opacity: 0.6, marginBottom: '4px', lineHeight: 1.5 },
       taskEdit: {
         display: 'flex',
@@ -912,6 +928,10 @@ registerProcessor('meeting-capture', MeetingCapture)
 /* A choice is a Menu behind a Button: keep the trigger as narrow as the select was. */
 .mr-choice { max-width: 168px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mr-choice.mr-choice--tight { max-width: 108px; }
+/* Dialog bodies and chip rows lay themselves out, whatever container renders them. */
+.mr-dialog-body { display: flex; flex-direction: column; gap: 12px; }
+.mr-dialog-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.mr-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .mr-ufield.mr-layout-title { flex: 1 1 auto; min-width: 0; }
 .mr-hover { transition: background .12s ease; }
 .mr-hover:hover { background: var(--dsw-alias-bg-layer-2); }
@@ -963,7 +983,9 @@ registerProcessor('meeting-capture', MeetingCapture)
     /** The host Button preset each of our variants means. */
     const BTN_PRESET = {
       default: { variant: 'outline', size: 'md' },
-      active: { variant: 'outline', size: 'md' },
+      // A chosen chip or a toggled-on button must read as chosen at a glance, and the host's
+      // primary variant is exactly that statement.
+      active: { variant: 'primary', size: 'md' },
       small: { variant: 'outline', size: 'sm' },
       link: { variant: 'ghost', size: 'sm' },
       menu: { variant: 'ghost', size: 'md' },
@@ -1096,8 +1118,12 @@ registerProcessor('meeting-capture', MeetingCapture)
      */
     function Dialog(props) {
       const { title, description, onClose, children, footer } = props
+      // The body and the footer bring their own layout, so the host's Modal and the plugin's
+      // own card both end up with the same stacked body and right-aligned, wrapping buttons.
+      const body = h('div', { className: 'mr-dialog-body' }, children)
+      const foot = footer === undefined ? undefined : h('div', { className: 'mr-dialog-foot' }, footer)
       if (HostModal !== null) {
-        return h(HostModal, { open: true, onClose, title, description, children, footer })
+        return h(HostModal, { open: true, onClose, title, description, children: body, footer: foot })
       }
       return h('div', {
         style: styles.setupOverlay,
@@ -1108,8 +1134,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         h('div', { key: 'card', style: styles.setupCard }, [
           h('h2', { key: 'title', style: styles.setupTitle }, title),
           description === undefined ? null : h('p', { key: 'hint', style: styles.note }, description),
-          children,
-          footer === undefined ? null : h('div', { key: 'foot', style: styles.setupFoot }, footer),
+          body,
+          foot,
         ]),
       ])
     }
@@ -1769,7 +1795,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [playhead, setPlayhead] = React.useState(0)
       const [playing, setPlaying] = React.useState(false)
       /** The meeting's name, type and derived period (FEATURES.md §2.1). */
-      const [meta, setMeta] = React.useState({ kind: '', period: '', title: '' })
+      const [meta, setMeta] = React.useState({ kind: '', period: '', title: '', summary: '' })
       /** The start-of-recording name dialog; null when it is closed (§5.5). */
       const [namePrompt, setNamePrompt] = React.useState(null)
       /** The same kind's neighbouring meetings, for series navigation (FEATURES.md §5.1). */
@@ -1839,6 +1865,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             kind: typeof value.meeting.kind === 'string' ? value.meeting.kind : '',
             period: typeof value.meeting.period === 'string' ? value.meeting.period : '',
             title: typeof value.meeting.title === 'string' ? value.meeting.title : '',
+            summary: typeof value.meeting.summary === 'string' ? value.meeting.summary : '',
           })
           return value.meeting
         } catch (failure) {
@@ -1911,6 +1938,8 @@ registerProcessor('meeting-capture', MeetingCapture)
             kind: typeof value.kind === 'string' ? value.kind : '',
             period: typeof value.period === 'string' ? value.period : '',
             title: typeof value.title === 'string' ? value.title : '',
+            // The summary is read back here too, so a model-polished one shows up on refresh.
+            summary: typeof value.summary === 'string' ? value.summary : '',
           })
           if (Array.isArray(value.scores)) setScores(value.scores)
           return {
@@ -1975,6 +2004,52 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [ensureMeeting, relabeling, t])
 
       /**
+       * Store the meeting's summary. It is what a reader sees before the transcript, and it
+       * is typed in the start dialog or polished there by the model (FEATURES §2.1).
+       * @param text - the summary to store.
+       * @returns whether the write landed.
+       */
+      const saveSummary = React.useCallback(async (text) => {
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return false
+        }
+        try {
+          const reply = await post('/summary', { meetingId: id, summary: text })
+          setMeta((current) => ({ ...current, summary: typeof reply.summary === 'string' ? reply.summary : text }))
+          return true
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+          return false
+        }
+      }, [ensureMeeting, t])
+
+      /**
+       * Ask the conversation to polish a summary draft. The answer comes back through
+       * `meeting_write`, so the text lands in the meeting rather than only in the chat.
+       * @param draft - the summary as it stands, or '' when nothing was written yet.
+       */
+      const polishSummary = React.useCallback(async (draft) => {
+        setError('')
+        if (sessionId === '') {
+          setError(t('needSession'))
+          return
+        }
+        const prompt = t('summaryPolishPrompt')
+          .replace('{title}', meta.title === '' ? t('meetingNameNone') : meta.title)
+          .replace('{summary}', draft.trim() === '' ? t('summaryMissing') : draft.trim())
+        const asked = await props.askText(sessionId, prompt)
+        if (asked.ok !== true) {
+          setError(`${t('reviewNoSession')}: ${asked.error}`)
+          return
+        }
+        setNamePrompt(null)
+        setNote(t('summaryPolishing'))
+      }, [meta.title, props, sessionId, t])
+
+      /**
        * Store the meeting's type and/or name. The host derives the period from the type,
        * so the panel never asks the user for it (FEATURES.md §2.1).
        * @param patch - `kind` and/or `title` to store.
@@ -1989,11 +2064,13 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
         try {
           const reply = await post('/kind', { meetingId: id, ...patch })
-          setMeta({
+          setMeta((current) => ({
             kind: typeof reply.kind === 'string' ? reply.kind : '',
             period: typeof reply.period === 'string' ? reply.period : '',
             title: typeof reply.title === 'string' ? reply.title : '',
-          })
+            // The kind route does not carry the summary; keeping it avoids a visible blank.
+            summary: current.summary,
+          }))
           return true
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
@@ -2595,6 +2672,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             kind: typeof value.kind === 'string' ? value.kind : '',
             period: typeof value.period === 'string' ? value.period : '',
             title: typeof value.title === 'string' ? value.title : row.title,
+            summary: typeof value.summary === 'string' ? value.summary : '',
           })
           setPlayhead(0)
         } catch (failure) {
@@ -3273,7 +3351,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               // Name the meeting once before the first recording (§5.5). The dialog also
               // carries the role, so the seat is chosen where the meeting starts.
               if (meta.title !== '') { void start(); return }
-              setNamePrompt({ text: '', kind: meta.kind, role: role === '' ? 'attendee' : role, start: true })
+              setNamePrompt({ text: '', kind: meta.kind, role: role === '' ? 'attendee' : role, summary: meta.summary, start: true })
             },
           }, recording ? t('stop') : t('start')),
           // Pause sits beside Stop: a pause keeps the meeting open, Stop ends it (§5.6).
@@ -3303,8 +3381,9 @@ registerProcessor('meeting-capture', MeetingCapture)
           }, t('minutes')),
           // The overflow is a dropdown under its own button: the action row keeps one line,
           // and 「生成要点与任务」 sits with the other occasional actions instead of shouting
-          // in the bar.
-          hasContent ? h('div', { key: 'morewrap', style: styles.menuWrap }, [
+          // in the bar. The button itself is always there — an action that comes and goes
+          // reads as a bug, so only the items inside depend on there being content.
+          h('div', { key: 'morewrap', style: styles.menuWrap }, [
             h(Btn, {
               key: 'more',
               type: 'button',
@@ -3355,11 +3434,11 @@ registerProcessor('meeting-capture', MeetingCapture)
                 key: 'setup', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => {
                   setMoreOpen(false)
-                  setNamePrompt({ text: meta.title, kind: meta.kind, role: role === '' ? 'attendee' : role, start: false })
+                  setNamePrompt({ text: meta.title, kind: meta.kind, role: role === '' ? 'attendee' : role, summary: meta.summary, start: false })
                 },
               }, t('meetingSetup')),
             ]) : null,
-          ]) : null,
+          ]),
           h(Btn, {
             key: 'help',
             type: 'button',
@@ -3890,6 +3969,30 @@ registerProcessor('meeting-capture', MeetingCapture)
               spellCheck: false,
               onChange: (event) => setNamePrompt((current) => ({ ...current, text: event.target.value })),
             }),
+            // The summary sits under the name: a sentence about what this meeting is for, which
+            // the model can polish in place (§2.1). The button hands the draft to the
+            // conversation, and the answer comes back through meeting_write.
+            h('div', { key: 'summaryblock', style: styles.fieldBlock }, [
+              h('span', { key: 'label', style: styles.label }, t('summaryLabel')),
+              h(Field, {
+                key: 'summary',
+                style: styles.textarea,
+                value: namePrompt.summary ?? '',
+                placeholder: t('summaryPlaceholder'),
+                spellCheck: false,
+                onChange: (event) => setNamePrompt((current) => ({ ...current, summary: event.target.value })),
+              }),
+              h('div', { key: 'row', style: styles.row }, [
+                h(Btn, {
+                  key: 'polish',
+                  type: 'button',
+                  style: styles.linkButton,
+                  disabled: sessionId === '',
+                  onClick: () => { void polishSummary(namePrompt.summary ?? '') },
+                }, t('summaryPolish')),
+                h('span', { key: 'hint', style: styles.hint }, t('summaryPolishHint')),
+              ]),
+            ]),
             // The seat steers the review prompt, so it is chosen here — with the name the
             // meeting is starting under (§5.5).
             h('div', { key: 'rolerow', style: styles.row }, [
@@ -3901,7 +4004,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                 onChange: (event) => setNamePrompt((current) => ({ ...current, role: event.target.value })),
               }, ['host', 'attendee', 'observer'].map((seat) => h('option', { key: seat, value: seat }, t(ROLE_LABEL_KEYS[seat])))),
             ]),
-            h('div', { key: 'chips', style: styles.row }, KIND_VALUES.map((value) => h(Btn, {
+            h('div', { key: 'chips', className: 'mr-chips' }, KIND_VALUES.map((value) => h(Btn, {
               key: value === '' ? 'general' : value,
               type: 'button',
               style: namePrompt.kind === value ? styles.buttonActive : styles.button,
@@ -3931,6 +4034,9 @@ registerProcessor('meeting-capture', MeetingCapture)
                   if (draft.text.trim() !== '' || draft.kind !== '') {
                     await saveMeta({ title: draft.text.trim(), kind: draft.kind })
                   }
+                  // The summary is stored with the name, so both land before recording.
+                  const nextSummary = typeof draft.summary === 'string' ? draft.summary.trim() : ''
+                  if (nextSummary !== meta.summary.trim()) await saveSummary(nextSummary)
                   // Opened from the menu it only saves; opened by Start it also records.
                   if (draft.start !== false) await start()
                 })()
