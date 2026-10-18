@@ -1047,6 +1047,35 @@ registerProcessor('meeting-capture', MeetingCapture)
     }
 
     /**
+     * Float a dropdown only when its place is known; without coordinates it stays in the
+     * panel, where absolute positioning still puts it under its button.
+     * @param measured - whether a placement was measured.
+     * @param node - the dropdown element.
+     * @returns the element, portalled when a placement exists.
+     */
+    function floatWhen(measured, node) {
+      return measured === true ? float(node) : node
+    }
+
+    /**
+     * Where a dropdown belongs, measured from the element that opened it: directly under it,
+     * right-aligned to the panel, and no wider than the panel. It measures the event's own
+     * element — never a ref, because the host Button forwards none, and a ref-based
+     * measurement silently yields nothing.
+     * @param element - the clicked element.
+     * @param maxWidth - the widest the dropdown may become.
+     * @returns fixed-position coordinates, or null when the element cannot be measured.
+     */
+    function measureUnder(element, maxWidth) {
+      if (element === null || element === undefined || typeof element.getBoundingClientRect !== 'function') return null
+      const section = typeof element.closest === 'function' ? element.closest('section') : null
+      const box = (section ?? element).getBoundingClientRect()
+      const rect = element.getBoundingClientRect()
+      const width = Math.min(maxWidth, Math.max(200, box.width - 16))
+      return { top: rect.bottom + 6, left: Math.max(8, box.right - 8 - width), width }
+    }
+
+    /**
      * One button: the host's Button when this host has one, the plugin's own markup
      * otherwise. The caller's props and handlers pass straight through, and a style object
      * the map does not know (a width, a flex) is still honoured.
@@ -1875,9 +1904,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       const listRef = React.useRef(null)
       /** Where the meeting dropdown sits: measured from the panel, so it spans its width. */
       const [pickerRect, setPickerRect] = React.useState(null)
-      /** Where the overflow menu sits, measured after it opened and the button resized. */
+      /** Where the overflow menu sits, measured from the button that opened it. */
       const [moreRect, setMoreRect] = React.useState(null)
-      const moreButton = React.useRef(null)
       /** The switch guard: the row to open once the countdown saved the current meeting. */
       const [switchPrompt, setSwitchPrompt] = React.useState(null)
       const audio = React.useRef(null)
@@ -2557,26 +2585,6 @@ registerProcessor('meeting-capture', MeetingCapture)
           document.removeEventListener('click', close)
           document.removeEventListener('keydown', onKey)
         }
-      }, [moreOpen])
-
-      // Measure the menu's place AFTER the open render: the button carries its active style
-      // by then, so the row is settled and the menu lands under the button as it looks now.
-      React.useLayoutEffect(() => {
-        if (!moreOpen) {
-          setMoreRect(null)
-          return
-        }
-        const button = moreButton.current
-        if (button === null || typeof button.getBoundingClientRect !== 'function') return
-        const section = typeof button.closest === 'function' ? button.closest('section') : null
-        const box = (section ?? button).getBoundingClientRect()
-        const rect = button.getBoundingClientRect()
-        const width = Math.min(300, Math.max(200, box.width - 16))
-        setMoreRect({
-          top: rect.bottom + 6,
-          left: Math.max(8, box.right - 8 - width),
-          width,
-        })
       }, [moreOpen])
 
       /** Load one slice of the picker's rows; scrolling to the bottom asks for the next one. */
@@ -3382,15 +3390,21 @@ registerProcessor('meeting-capture', MeetingCapture)
             h(Btn, {
               key: 'more',
               type: 'button',
-              ref: moreButton,
               style: moreOpen ? styles.buttonActive : styles.button,
               'aria-expanded': moreOpen,
-              onClick: () => setMoreOpen((value) => !value),
+              // Measured from the click's own element, exactly like the meeting picker. The
+              // host Button forwards no ref, so measuring through one never ran — the menu
+              // then fell back to coordinates relative to the whole page.
+              onClick: (event) => {
+                const open = moreOpen !== true
+                if (open) setMoreRect(measureUnder(event.currentTarget, 300))
+                setMoreOpen(open)
+              },
             }, t('more')),
-            // Measured placement (the button changes size when it turns active, so the
-            // measurement happens after that render, in the layout effect below) and
-            // rendered at the document root, so nothing in the panel can cover it.
-            moreOpen ? float(h('div', {
+            // Rendered at the document root, so nothing in the panel can cover it; if the
+            // button could not be measured the menu stays in the panel instead of floating
+            // to a place nobody asked for.
+            moreOpen ? floatWhen(moreRect !== null, h('div', {
               key: 'moremenu',
               style: moreRect === null ? styles.menu : {
                 ...styles.menu,
