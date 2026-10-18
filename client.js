@@ -53,6 +53,9 @@ window.__ModuleLoader__.load({
      */
     const pendingMeeting = { current: null }
 
+    /** How many times the shell refused to open the right panel; used to log the reason once. */
+    let panelOpenFailures = 0
+
     /** Main-panel key and left-sidebar row id; the row id addresses this page. */
     const PANEL_ID = 'meeting-room'
 
@@ -4129,6 +4132,25 @@ registerProcessor('meeting-capture', MeetingCapture)
      * @returns the header button.
      */
     function OpenMeetingButton(props) {
+      // The management page cannot open the right column: the shell refuses to address it
+      // until a conversation surface is mounted, and that page is holding the main area. This
+      // button sits in the conversation's own header, so it is mounted exactly when opening
+      // is possible — it watches for a meeting the page asked to open and opens the column.
+      React.useEffect(() => {
+        const timer = setInterval(() => {
+          const pending = pendingMeeting.current
+          if (pending === null || pending.openedByHeader === true) return
+          pending.openedByHeader = true
+          console.info('meeting-room: header opens the panel for', pending.meetingId)
+          try {
+            if (typeof props.openOnly === 'function') props.openOnly()
+            else props.open()
+          } catch (failure) {
+            console.warn('meeting-room: the header could not open the meeting panel', failure)
+          }
+        }, 300)
+        return () => clearInterval(timer)
+      }, [props])
       return h(Btn, {
         type: 'button',
         style: styles.headerButton,
@@ -4917,7 +4939,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             setError(t('hubNoMeeting'))
             return
           }
-          pendingMeeting.current = { sessionId: row.sessionId, meetingId: row.meetingId }
+          pendingMeeting.current = { sessionId: row.sessionId, meetingId: row.meetingId, openedByHeader: false }
           setSettingsNote(`${t('hubOpeningMeeting')} …`)
           console.info('meeting-room: open meeting requested', row.meetingId, 'in session', row.sessionId)
           const opened = typeof props.openConversation === 'function' ? props.openConversation(row.sessionId) : false
@@ -4926,19 +4948,19 @@ registerProcessor('meeting-capture', MeetingCapture)
             setError(t('hubNoWorkspace'))
             return
           }
-          // Switching conversations rebuilds the surface the right column hangs on. Until that
-          // surface is mounted, `openTab` refuses ("no session surface is mounted"), so keep
-          // asking briefly, stop the moment it takes, and say what to do if it never does.
-          let attempts = 0
+          // The right column can only be addressed while a conversation surface is mounted and
+          // adopted, and the management page is occupying the main area when this runs. Ask
+          // repeatedly — up to a minute — and stop the moment the panel takes the meeting.
+          const startedAt = Date.now()
           const tryFocus = () => {
+            if (pendingMeeting.current === null) return
             if (typeof props.openMeetingPanel !== 'function') return
-            attempts += 1
             if (props.openMeetingPanel() === true) return
-            if (attempts < 24) {
-              setTimeout(tryFocus, 250)
+            if (Date.now() - startedAt < 60000) {
+              setTimeout(tryFocus, 400)
               return
             }
-            console.warn('meeting-room: the right panel could not be opened; the conversation is open')
+            console.warn('meeting-room: the right panel never opened; the conversation is open')
             setSettingsNote(t('hubOpenPanelManual'))
           }
           tryFocus()
@@ -5382,12 +5404,26 @@ registerProcessor('meeting-capture', MeetingCapture)
             if (savedRightbar !== null) setRightbarWidth(savedRightbar)
             return
           }
-          if (readRailCollapsed() === false) ctx.layout.toggleSidebar()
+          openMeetingFocus()
+        }
+
+        /**
+         * Open the meeting panel without ever closing it. `focus` (the default, used by a
+         * click on the header button) also collapses the workspace rail and widens the column;
+         * the automatic open that follows a click in the management page passes false, so the
+         * person keeps their rail and their panel width.
+         * @param focus - whether to take over the frame as well.
+         * @returns whether the column accepted the tab.
+         */
+        function openMeetingFocus(focus = true) {
+          if (focus && readRailCollapsed() === false) ctx.layout.toggleSidebar()
           // Opening expands the column and seeds its default width when it never had one.
           ctx.sidebarRight.openTab(TAB_KIND)
+          if (focus !== true) return true
           const info = layoutStore()?.getSnapshot?.()?.layoutInfo
           savedRightbar = typeof info?.rightbar === 'number' ? info.rightbar : null
           setRightbarWidth(info?.viewportWidth ?? window.innerWidth)
+          return true
         }
 
         /**
@@ -5480,7 +5516,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           id: 'meeting-room.open',
           order: 20,
           locale: NS,
-          inject: () => ({ open: () => toggleMeetingFocus() }),
+          inject: () => ({ open: () => toggleMeetingFocus(), openOnly: () => openMeetingFocus(false) }),
         }, OpenMeetingButton))
 
         // The left-sidebar row and its main-panel page share one id: the row addresses the page.
@@ -5532,9 +5568,14 @@ registerProcessor('meeting-capture', MeetingCapture)
                 // left whatever other tab was showing in place of the meeting.
                 ctx.sidebarRight.openTab(TAB_KIND)
                 return true
-              } catch {
-                // Expected for the moment the surface needs to mount: the caller retries,
-                // so logging every attempt would only be noise.
+              } catch (failure) {
+                // The shell needs a mounted, adopted session surface — one exists only while
+                // the conversation is on screen. Report the real reason occasionally, not on
+                // every poll.
+                panelOpenFailures += 1
+                if (panelOpenFailures === 1 || panelOpenFailures % 40 === 0) {
+                  console.warn('meeting-room: the right panel refused the tab', failure)
+                }
                 return false
               }
             },
