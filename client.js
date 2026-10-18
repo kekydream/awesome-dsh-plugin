@@ -3231,68 +3231,6 @@ registerProcessor('meeting-capture', MeetingCapture)
         // player and the content tabs; only what follows it scrolls, so a long transcript
         // cannot push those controls out of reach.
         h('div', { key: 'head', style: styles.panelHead }, [
-          viewed === null ? null : h('div', { key: 'viewer', style: styles.row }, [
-            h('span', { key: 'label', style: styles.status }, `${t('historyViewing')}: ${meta.title === '' ? t('meetingNameNone') : meta.title}${meta.period === '' ? '' : ` · ${meta.period}`}`),
-            typeof props.openConversation !== 'function' || viewed.sessionId === '' ? null : h(Btn, {
-              key: 'session',
-              type: 'button',
-              style: styles.smallButton,
-              onClick: () => openSeries({ sessionId: viewed.sessionId }),
-            }, t('historyOpenSession')),
-            h(Btn, {
-              key: 'back',
-              type: 'button',
-              style: styles.button,
-              onClick: () => { void closeViewed() },
-            }, t('historyBack')),
-          ]),
-          // Meeting identity: type, the derived period, and this kind's one-click distill
-          // (FEATURES.md §2.1, §3, §5.1). The name is set in the dialog where the meeting
-          // starts, so the console is not also a form. Hidden while viewing a historical one.
-          viewed !== null ? null : h('div', { key: 'metabar', style: styles.row }, [
-            // The name is shown, not edited: the dialog owns it, and the console still says
-            // which meeting this is.
-            meta.title === '' ? null : h('span', {
-              key: 'title',
-              style: { fontWeight: 600, fontSize: '13px' },
-              title: t('meetingNameTitle'),
-            }, meta.title),
-            h(Picker, {
-              key: 'kind',
-              style: styles.inlineInput,
-              value: meta.kind,
-              onChange: (event) => { void saveMeta({ kind: event.target.value }) },
-            }, KIND_VALUES.map((value) => h('option', { key: value === '' ? 'general' : value, value }, t(KIND_LABEL_KEYS[value])))),
-            meta.period === '' ? null : h('span', { key: 'period', style: styles.chip }, meta.period),
-            series.prev === null ? null : h(Btn, {
-              key: 'prev',
-              type: 'button',
-              style: styles.smallButton,
-              title: `${series.prev.title === '' ? t('meetingNameNone') : series.prev.title}${series.prev.period === '' ? '' : ` · ${series.prev.period}`}`,
-              onClick: () => openSeries(series.prev),
-            }, t('seriesPrev')),
-            series.next === null ? null : h(Btn, {
-              key: 'next',
-              type: 'button',
-              style: styles.smallButton,
-              title: `${series.next.title === '' ? t('meetingNameNone') : series.next.title}${series.next.period === '' ? '' : ` · ${series.next.period}`}`,
-              onClick: () => openSeries(series.next),
-            }, t('seriesNext')),
-            h(Btn, {
-              key: 'distill',
-              type: 'button',
-              style: styles.button,
-              onClick: () => { void distill() },
-            }, t(DISTILL_BUTTON_KEYS[meta.kind] ?? 'distillButtonGeneral')),
-          ]),
-          // A briefing starts by accounting for what yesterday's review left open (§3.1).
-          carry.items.length === 0 || viewed !== null ? null : h('div', { key: 'carry', style: styles.row }, [
-            h('span', { key: 'hint', style: styles.hint }, `${t('carryOverHint')} ${carry.items.length}`),
-            h(Btn, { key: 'handle', type: 'button', style: styles.smallButton, onClick: () => { void handleCarryOver() } }, t('carryOverAction')),
-            carry.review === null ? null : h(Btn, { key: 'open', type: 'button', style: styles.smallButton, onClick: () => openSeries(carry.review) }, t('carryOverOpen')),
-          ]),
-          // Recording and the meeting's own actions belong to the session's meeting, so they
-          // step aside while a historical meeting is being read (§5.4).
           viewed !== null ? null : h('div', { key: 'notebar', style: styles.row }, [
           h(Btn, {
             key: 'toggle',
@@ -3504,6 +3442,68 @@ registerProcessor('meeting-capture', MeetingCapture)
             onClick: () => setHelpOpen((value) => !value),
           }, '?'),
         ]),
+          viewed === null ? null : h('div', { key: 'viewer', style: styles.row }, [
+            h('span', { key: 'label', style: styles.status }, `${t('historyViewing')}: ${meta.title === '' ? t('meetingNameNone') : meta.title}${meta.period === '' ? '' : ` · ${meta.period}`}`),
+            typeof props.openConversation !== 'function' || viewed.sessionId === '' ? null : h(Btn, {
+              key: 'session',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => openSeries({ sessionId: viewed.sessionId }),
+            }, t('historyOpenSession')),
+            h(Btn, {
+              key: 'back',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { void closeViewed() },
+            }, t('historyBack')),
+          ]),
+          // Meeting identity: type, the derived period, and this kind's one-click distill
+          // (FEATURES.md §2.1, §3, §5.1). The name is set in the dialog where the meeting
+          // starts, so the console is not also a form. Hidden while viewing a historical one.
+          viewed !== null ? null : h('div', { key: 'metabar', style: styles.row }, [
+            // The name is shown, not edited: the dialog owns it, and the console still says
+            // which meeting this is.
+            meta.title === '' ? null : h('span', {
+              key: 'title',
+              style: { fontWeight: 600, fontSize: '13px' },
+              title: t('meetingNameTitle'),
+            }, meta.title),
+            h(Picker, {
+              key: 'kind',
+              style: styles.inlineInput,
+              value: meta.kind,
+              onChange: (event) => { void saveMeta({ kind: event.target.value }) },
+            }, KIND_VALUES.map((value) => h('option', { key: value === '' ? 'general' : value, value }, t(KIND_LABEL_KEYS[value])))),
+            meta.period === '' ? null : h('span', { key: 'period', style: styles.chip }, meta.period),
+            series.prev === null ? null : h(Btn, {
+              key: 'prev',
+              type: 'button',
+              style: styles.smallButton,
+              title: `${series.prev.title === '' ? t('meetingNameNone') : series.prev.title}${series.prev.period === '' ? '' : ` · ${series.prev.period}`}`,
+              onClick: () => openSeries(series.prev),
+            }, t('seriesPrev')),
+            series.next === null ? null : h(Btn, {
+              key: 'next',
+              type: 'button',
+              style: styles.smallButton,
+              title: `${series.next.title === '' ? t('meetingNameNone') : series.next.title}${series.next.period === '' ? '' : ` · ${series.next.period}`}`,
+              onClick: () => openSeries(series.next),
+            }, t('seriesNext')),
+            h(Btn, {
+              key: 'distill',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { void distill() },
+            }, t(DISTILL_BUTTON_KEYS[meta.kind] ?? 'distillButtonGeneral')),
+          ]),
+          // A briefing starts by accounting for what yesterday's review left open (§3.1).
+          carry.items.length === 0 || viewed !== null ? null : h('div', { key: 'carry', style: styles.row }, [
+            h('span', { key: 'hint', style: styles.hint }, `${t('carryOverHint')} ${carry.items.length}`),
+            h(Btn, { key: 'handle', type: 'button', style: styles.smallButton, onClick: () => { void handleCarryOver() } }, t('carryOverAction')),
+            carry.review === null ? null : h(Btn, { key: 'open', type: 'button', style: styles.smallButton, onClick: () => openSeries(carry.review) }, t('carryOverOpen')),
+          ]),
+          // Recording and the meeting's own actions belong to the session's meeting, so they
+          // step aside while a historical meeting is being read (§5.4).
         h('span', { key: 'status', style: styles.status }, status),
         notesOpen ? h('div', { key: 'tabs', style: styles.tabs }, [
           h(Btn, {
