@@ -759,9 +759,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       actions: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
       hub: { padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '860px' },
       hubTitle: { margin: 0, fontSize: '18px', fontWeight: 600 },
-      hubCard: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderRadius: '8px', border: '1px solid var(--dsw-alias-border-l1)' },
-      hubList: { display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '260px', overflowY: 'auto' },
-      hubRow: { display: 'flex', alignItems: 'baseline', gap: '10px', justifyContent: 'space-between' },
       linkButton: { padding: 0, border: 'none', background: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit' },
       pre: { margin: 0, maxHeight: '320px', overflow: 'auto', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
       audio: { width: '100%' },
@@ -904,6 +901,14 @@ registerProcessor('meeting-capture', MeetingCapture)
 .mr-ui.mr-layout-tab-active { box-shadow: inset 0 -2px 0 var(--dsw-alias-brand-primary); font-weight: 600; }
 .mr-ufield.mr-layout-wide { flex: 1 1 120px; min-width: 0; }
 .mr-ufield.mr-layout-tight { width: 76px; }
+/* Surfaces: one card, one list, one row — shared by the panel and the left-sidebar page. */
+.mr-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); }
+.mr-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.mr-row { display: flex; align-items: baseline; gap: 8px; padding: 3px 6px; border-radius: 6px;
+  transition: background .12s ease; }
+.mr-row:hover { background: var(--dsw-alias-bg-layer-2); }
+.mr-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mr-ufield.mr-layout-title { flex: 1 1 auto; min-width: 0; }
 .mr-hover { transition: background .12s ease; }
 .mr-hover:hover { background: var(--dsw-alias-bg-layer-2); }
@@ -3918,7 +3923,7 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       render() {
         if (this.state.failed) {
-          return h('div', { style: styles.hubCard }, [
+          return h('div', { className: 'mr-card' }, [
             h('div', { style: styles.label }, 'meeting-room render error'),
             h('pre', { style: styles.pre }, this.state.message),
           ])
@@ -4756,7 +4761,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       return h(Boundary, null, h('section', { style: styles.hub }, [
         h('h1', { key: 'title', style: styles.hubTitle }, t('hubTitle')),
         h('p', { key: 'intro', style: styles.subtitle }, t('hubIntro')),
-        h('div', { key: 'status', style: styles.hubCard }, [
+        h('div', { key: 'status', className: 'mr-card' }, [
           h('div', { key: 'line', style: styles.label }, t('hubCurrent')),
           h('div', { key: 'value', style: styles.status }, sessionId === ''
             ? t('hubNoSession')
@@ -4781,7 +4786,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             onChange: (event) => setTermsText(event.target.value),
           }),
         ]) : null,
-        hubTab === 'settings' ? h('div', { key: 'settings', style: styles.hubCard }, [
+        hubTab === 'settings' ? h('div', { key: 'settings', className: 'mr-card' }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, t('robotSettings')),
           ]),
@@ -4845,7 +4850,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             ]),
           ]),
         ]) : null,
-        hubTab === 'people' ? h('div', { key: 'people', style: styles.hubCard }, [
+        hubTab === 'people' ? h('div', { key: 'people', className: 'mr-card' }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, t('peopleTitle')),
             h('span', { key: 'count', style: styles.stamp }, `${settings.people.length} ${t('peopleUnit')}`),
@@ -4934,21 +4939,22 @@ registerProcessor('meeting-capture', MeetingCapture)
             ]),
           ]),
         ]) : null,
-        hubTab === 'records' ? h('div', { key: 'records', style: styles.hubCard }, [
+        hubTab === 'records' ? h('div', { key: 'records', className: 'mr-card' }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, t('hubRecords')),
             h(Btn, { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void refresh() } }, t('hubRefresh')),
           ]),
           files.length === 0
             ? h('p', { key: 'empty', style: styles.empty }, t('hubEmpty'))
-            : h('div', { key: 'list', style: styles.hubList }, files.map((file) => h('div', {
+            : h('div', { key: 'list', className: 'mr-list' }, files.map((file) => h('div', {
               key: file.name,
-              style: styles.hubRow,
+              className: 'mr-row',
             }, [
               h(Btn, {
                 key: 'open',
                 type: 'button',
                 style: styles.linkButton,
+                className: 'mr-row-name',
                 onClick: () => { void open(file.name) },
               }, file.name),
               h('span', { key: 'meta', style: styles.stamp }, `${Math.max(1, Math.round(file.size / 1024))} KB · ${absoluteOf(file.modified)}`),
@@ -4973,7 +4979,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               }, t('hubReveal')),
             ]))),
         ]) : null,
-        hubTab === 'records' && preview !== null ? h('div', { key: 'preview', style: styles.hubCard }, [
+        hubTab === 'records' && preview !== null ? h('div', { key: 'preview', className: 'mr-card' }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'name', style: styles.label }, preview.name),
             h(Btn, { key: 'close', type: 'button', style: styles.button, onClick: () => setPreview(null) }, t('hubClose')),
