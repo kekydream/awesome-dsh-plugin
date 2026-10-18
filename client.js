@@ -164,6 +164,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       kindMonthly: '总结会',
       meetingNameTitle: '这场会议叫什么？',
       kindLabel: '会议类型',
+      roleOtherPlaceholder: '其他角色…',
       panelTabMinutes: '会议纪要',
       followNewest: '跟随最新',
       jumpToNewest: '回到最新',
@@ -439,6 +440,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       kindMonthly: 'Monthly review',
       meetingNameTitle: 'Name this meeting',
       kindLabel: 'Meeting type',
+      roleOtherPlaceholder: 'Other role…',
       panelTabMinutes: 'Minutes',
       followNewest: 'Follow newest',
       jumpToNewest: 'Jump to newest',
@@ -2093,7 +2095,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           const focusKey = seat === 'host' ? 'roleHostFocus' : seat === 'observer' ? 'roleObserverFocus' : 'roleAttendeeFocus'
           const sectionKey = seat === 'host' ? 'roleHostSection' : seat === 'observer' ? 'roleObserverSection' : 'roleAttendeeSection'
           const prompt = t('reviewPrompt')
-            .replaceAll('{role}', t(ROLE_LABEL_KEYS[seat]))
+            .replaceAll('{role}', ROLE_LABEL_KEYS[seat] === undefined ? seat : t(ROLE_LABEL_KEYS[seat]))
             .replaceAll('{focus}', t(focusKey))
             .replaceAll('{section}', t(sectionKey))
             .replaceAll('{transcript}', transcript)
@@ -3192,7 +3194,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               // Name the meeting once before the first recording (§5.5). The dialog also
               // carries the role, so the seat is chosen where the meeting starts.
               if (meta.title !== '') { void start(); return }
-              setNamePrompt({ text: '', kind: meta.kind, role: role === '' ? 'attendee' : role, start: true })
+              setNamePrompt({ text: '', kind: meta.kind, role: role === '' ? 'attendee' : role, roleOther: '', start: true })
             },
           }, recording ? t('stop') : t('start')),
           // Pause sits beside Stop: a pause keeps the meeting open, Stop ends it (§5.6). The
@@ -3377,7 +3379,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                 key: 'setup', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => {
                   setMoreOpen(false)
-                  setNamePrompt({ text: meta.title, kind: meta.kind, role: role === '' ? 'attendee' : role, start: false })
+                  setNamePrompt({ text: meta.title, kind: meta.kind, role: role === '' ? 'attendee' : role, roleOther: '', start: false })
                 },
               }, t('meetingSetup')),
             ]) : null,
@@ -4042,15 +4044,30 @@ registerProcessor('meeting-capture', MeetingCapture)
               onChange: (event) => setNamePrompt((current) => ({ ...current, text: event.target.value })),
             }),
             // The seat steers the review prompt, so it is chosen here — with the name the
-            // meeting is starting under (§5.5).
-            h('div', { key: 'rolerow', style: styles.row }, [
-              h('span', { key: 'rolelabel', style: styles.status }, t('roleLabel')),
-              h(Picker, {
-                key: 'role',
-                style: styles.inlineInput,
-                value: namePrompt.role ?? 'attendee',
-                onChange: (event) => setNamePrompt((current) => ({ ...current, role: event.target.value })),
-              }, ['host', 'attendee', 'observer'].map((seat) => h('option', { key: seat, value: seat }, t(ROLE_LABEL_KEYS[seat])))),
+            // meeting is starting under (§5.5). Three buttons cover the usual seats; the
+            // narrow field next to them is for a seat of one's own, and it wins when filled.
+            h('div', { key: 'roleblock', style: styles.fieldBlock }, [
+              h('span', { key: 'rolelabel', style: styles.label }, t('roleLabel')),
+              h('div', { key: 'seats', className: 'mr-chips' }, [
+                ...['host', 'attendee', 'observer'].map((seat) => h(Btn, {
+                  key: seat,
+                  type: 'button',
+                  style: (namePrompt.roleOther ?? '').trim() === '' && (namePrompt.role ?? 'attendee') === seat
+                    ? styles.buttonActive
+                    : styles.button,
+                  onClick: () => setNamePrompt((current) => ({ ...current, role: seat, roleOther: '' })),
+                }, t(ROLE_LABEL_KEYS[seat]))),
+                h(Field, {
+                  key: 'roleother',
+                  type: 'text',
+                  style: styles.inlineInput,
+                  className: 'mr-input-compact',
+                  value: namePrompt.roleOther ?? '',
+                  placeholder: t('roleOtherPlaceholder'),
+                  spellCheck: false,
+                  onChange: (event) => setNamePrompt((current) => ({ ...current, roleOther: event.target.value })),
+                }),
+              ]),
             ]),
             // The type row carries its own label, so the five chips read as one question rather
             // than as five more buttons in the dialog.
@@ -4063,10 +4080,9 @@ registerProcessor('meeting-capture', MeetingCapture)
               onClick: () => setNamePrompt((current) => ({
                 ...current,
                 kind: value,
-                // A chip fills the default name only while nothing was typed yet.
-                text: current.text.trim() === ''
-                  ? `${t(KIND_LABEL_KEYS[value])} · ${new Date().toLocaleDateString()}`
-                  : current.text,
+                // Choosing a type names the meeting after it: the title is a default the
+                // person can still edit, and a name left over from another type is worse.
+                text: `${t(KIND_LABEL_KEYS[value])} · ${new Date().toLocaleDateString()}`,
               })),
             }, t(KIND_LABEL_KEYS[value])))),
             ]),
@@ -4081,8 +4097,10 @@ registerProcessor('meeting-capture', MeetingCapture)
                 setNamePrompt(null)
                 void (async () => {
                   if (draft === null) return
-                  // The seat is stored with the name, so both land before recording starts.
-                  const nextRole = typeof draft.role === 'string' && draft.role !== '' ? draft.role : role
+                  // The seat is stored with the name, so both land before recording starts. A
+                  // seat typed in the "other" field is the seat.
+                  const typedSeat = typeof draft.roleOther === 'string' ? draft.roleOther.trim() : ''
+                  const nextRole = typedSeat !== '' ? typedSeat : (typeof draft.role === 'string' && draft.role !== '' ? draft.role : role)
                   if (nextRole !== role) await chooseRole(nextRole)
                   if (draft.text.trim() !== '' || draft.kind !== '') {
                     await saveMeta({ title: draft.text.trim(), kind: draft.kind })

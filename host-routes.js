@@ -27,7 +27,6 @@ import {
   SPEAKER_THRESHOLD,
   SPEAKER_MODEL,
   MEETING_KINDS,
-  ROLES,
   ROLE_LABELS,
   seenText,
 } from './host-constants.js'
@@ -717,11 +716,14 @@ export function createHandler(ctx) {
           sendJson(res, 404, { error: 'unknown meeting' })
           return
         }
-        if (!ROLES.includes(body.role)) {
-          sendJson(res, 400, { error: 'unknown role' })
+        // The three common seats are offered as buttons, but a person may describe their own
+        // seat in a few words, so the value is text — bounded, and never empty.
+        const nextRole = typeof body.role === 'string' ? body.role.trim() : ''
+        if (nextRole === '' || nextRole.length > 24) {
+          sendJson(res, 400, { error: 'role must be 1-24 characters of text' })
           return
         }
-        meeting.role = body.role
+        meeting.role = nextRole
         sendJson(res, 200, { role: meeting.role })
         return
       }
