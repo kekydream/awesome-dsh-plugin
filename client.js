@@ -22,6 +22,19 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
+    /**
+     * Platform UI primitives. The shared Input is the field the built-in model picker
+     * searches with, so it is the one that behaves under an IME; the plugin falls back to a
+     * plain input (with its own composition handling) if the module is absent.
+     */
+    let primitives = {}
+    try {
+      primitives = require('@deepseek-ai/dsh-client-ui-primitives') ?? {}
+    } catch {
+      primitives = {}
+    }
+    const SearchInput = typeof primitives.Input === 'function' || typeof primitives.Input === 'object' ? primitives.Input : 'input'
+
     /** Locale namespace owned by this plugin. */
     const NS = 'meetingRoom'
 
@@ -1506,6 +1519,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       /** The same state for callbacks, so paging always sees the live list. */
       const pickerRef = React.useRef(null)
       pickerRef.current = picker
+      /** True while an IME is composing: the text in the field is not a search yet. */
+      const composingRef = React.useRef(false)
+      /** The short pause between a keystroke and the search it triggers. */
+      const searchTimer = React.useRef(0)
       /** The historical meeting the panel is viewing; null means this session's own. */
       const [viewed, setViewed] = React.useState(null)
       /**
@@ -2243,6 +2260,25 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [])
 
+      /**
+       * Take one keystroke into the field and search after a short pause. While an IME is
+       * composing, the text is kept but nothing is searched or re-rendered around it — a
+       * fetch in the middle of composition is what swallows Chinese characters.
+       */
+      const onQueryChange = React.useCallback((value) => {
+        setPicker((current) => ({ ...current, query: value, open: true }))
+        if (composingRef.current) return
+        window.clearTimeout(searchTimer.current)
+        searchTimer.current = window.setTimeout(() => { void loadHistory(value) }, 150)
+      }, [loadHistory])
+
+      /** Search the moment the composition commits, so the list follows the real text. */
+      const onQueryComposed = React.useCallback((event) => {
+        composingRef.current = false
+        window.clearTimeout(searchTimer.current)
+        void loadHistory(event.target.value)
+      }, [loadHistory])
+
       /** Load more when the dropdown is scrolled near its bottom (lazy loading). */
       const onPickerScroll = React.useCallback((event) => {
         const box = event.currentTarget
@@ -2821,15 +2857,21 @@ registerProcessor('meeting-capture', MeetingCapture)
             onClick: (event) => event.stopPropagation(),
           }, [
           h('div', { key: 'pickerbar', style: styles.row }, [
-            h('input', {
+            // The platform's Input: the same field the built-in model picker searches with,
+            // so an IME behaves; a plain input is the fallback when primitives are absent.
+            h(SearchInput, {
               key: 'query',
               type: 'text',
               style: styles.inlineWide,
               value: picker.query,
               placeholder: t('historyPlaceholder'),
               spellCheck: false,
+              role: 'searchbox',
+              'aria-label': t('historyPlaceholder'),
               onFocus: () => { void loadHistory(picker.query) },
-              onChange: (event) => { void loadHistory(event.target.value) },
+              onChange: (event) => onQueryChange(event.target.value),
+              onCompositionStart: () => { composingRef.current = true },
+              onCompositionEnd: onQueryComposed,
               onKeyDown: (event) => { if (event.key === 'Escape') setPicker((value) => ({ ...value, open: false })) },
             }),
             h('button', {
