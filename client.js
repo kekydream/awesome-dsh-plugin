@@ -202,6 +202,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardTitle: '当前会议有未保存内容',
       historyGuardBody: '3 秒后自动保存，然后打开所选会议；也可以立即保存或取消。',
       historyGuardNow: '立即保存并打开',
+      meetingSetup: '会议名称与角色',
+      historyAll: '已全部显示',
+      historyMore: '滚动加载更多…',
       distillGeneral: '请按本场会议的类型提炼内容。先调用 meeting_read（meetingId={meetingId}）读完实录，然后：1) 用 meeting_write（meetingId={meetingId}）把决定与要点写入 points（kind 取 decision/point/risk/question）；2) 把明确的行动项写入 tasks（任务/负责人/时限/优先级，草稿，等人确认）；3) 需要存档时用 meeting_save_document 存一份 Markdown。只依据实录，不要编造；人名与术语不确定时保守处理并标注。',
       distillBriefing: '以下是本会话的晨会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再按晨会模板提炼：1) 昨日遗留：用 meeting_query（kind:"review", period:"yesterday", include:["tasks"]）查昨天复盘会留下的遗留事项，与实录对照后单独成段；2) 部署事项：每条写清「任务 / 负责人 / 时限 / 优先级」，区分决定（decision）与要求（point）；3) 用 meeting_write（meetingId={meetingId}）把要点写入 points、把部署写入 tasks（草稿，等人确认）。只依据实录，不要编造。写完用一句话说明提取了多少条。',
       distillReview: '以下是本会话的复盘会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，并按顺序做：1) 用 meeting_query（kind:"briefing", period:"today", include:["tasks"]）取今天晨会的任务，每条都带 #id 与它所属的 meetingId；2) 逐项核销：用 meeting_write 写回**晨会那份记录**（meetingId 填晨会的 id，tasks 里写 {id, done:true/false, source:"实录原句"}）——这是跨会写回，不要复制任务；3) 本会的问题与风险写入 points（kind 取 risk 或 question）；4) 遗留事项写入本会 tasks（草稿），标题注明「遗留」；5) 用 meeting_save_document 存一份「复盘盘点 · {period}」。只依据实录，不要编造。',
@@ -475,6 +478,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardTitle: 'This meeting has unsaved content',
       historyGuardBody: 'It is saved automatically in 3 seconds, then the chosen meeting opens; you can also save now or cancel.',
       historyGuardNow: 'Save and open now',
+      meetingSetup: 'Meeting name & role',
+      historyAll: 'All shown',
+      historyMore: 'Scroll for more…',
       distillGeneral: 'Distill this meeting according to its type. First call meeting_read (meetingId={meetingId}) for the full transcript, then: 1) write decisions and points with meeting_write (meetingId={meetingId}), kind being decision/point/risk/question; 2) write clear action items as tasks (title/owner/due/priority — drafts that a human confirms); 3) store a Markdown document with meeting_save_document when it should be archived. Use only the transcript; never invent content and mark anything uncertain.',
       distillBriefing: 'This session is a morning briefing (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) carry-over — call meeting_query (kind:"review", period:"yesterday", include:["tasks"]) for what yesterday\'s review left open, checked against the transcript and listed separately; 2) assignments, each with task / owner / due / priority, separating decisions from requests; 3) write points and tasks back with meeting_write (meetingId={meetingId}); tasks stay drafts. Use only the transcript and finish with one line saying how many entries you extracted.',
       distillReview: 'This session is a daily review (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then work in order: 1) meeting_query (kind:"briefing", period:"today", include:["tasks"]) for today\'s briefing tasks, each carrying its #id and the meetingId that owns it; 2) check them off by writing back to the BRIEFING record with meeting_write — that briefing\'s meetingId, tasks entries {id, done:true|false, source:"transcript words"}; never copy tasks between meetings; 3) this meeting\'s problems and risks go to points (kind risk or question); 4) carry-over items go to this meeting\'s tasks, marked "carry-over"; 5) save a "Review · {period}" document with meeting_save_document. Use only the transcript.',
@@ -794,6 +800,25 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyHead: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' },
       historyName: { fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: '2px' },
       historyExcerpt: { fontSize: '12px', opacity: 0.75, lineHeight: 1.5, wordBreak: 'break-word' },
+      /** The picker: a field with results floating under it, scrollable and paged. */
+      pickerWrap: { position: 'relative', display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' },
+      historyPanel: {
+        position: 'absolute',
+        top: 'calc(100% + 4px)',
+        left: 0,
+        right: 0,
+        zIndex: 20,
+        maxHeight: '320px',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+        padding: '4px',
+        background: 'var(--dsw-alias-bg-base)',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '8px',
+        boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
+      },
       taskDone: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', opacity: 0.55 },
       ink: { display: 'block', width: '100%', height: '320px', touchAction: 'none', border: '1px dashed rgba(127,127,127,0.45)', borderRadius: '8px', cursor: 'crosshair' },
       inkShot: { maxWidth: '100%', borderRadius: '8px', border: '1px solid rgba(127,127,127,0.25)' },
@@ -1476,8 +1501,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [paused, setPaused] = React.useState(false)
       const pausedAt = React.useRef(0)
       const pauseWarned = React.useRef(false)
-      /** The meeting picker: open flag, query and rows (FEATURES.md §5.4). */
-      const [picker, setPicker] = React.useState({ open: false, query: '', rows: [], loading: false })
+      /** The meeting picker: open flag, query and the slices loaded so far (FEATURES.md §5.4). */
+      const [picker, setPicker] = React.useState({ open: false, query: '', rows: [], total: 0, loading: false, loadingMore: false })
+      /** The same state for callbacks, so paging always sees the live list. */
+      const pickerRef = React.useRef(null)
+      pickerRef.current = picker
       /** The historical meeting the panel is viewing; null means this session's own. */
       const [viewed, setViewed] = React.useState(null)
       /**
@@ -2193,17 +2221,53 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [moreOpen])
 
-      /** Load the picker's rows, optionally filtered (FEATURES.md §5.4). */
-      const loadHistory = React.useCallback(async (query) => {
-        setPicker((value) => ({ ...value, loading: true, open: true }))
+      /** Load one slice of the picker's rows; scrolling to the bottom asks for the next one. */
+      const loadHistory = React.useCallback(async (query, append = false) => {
+        setPicker((value) => (append
+          ? { ...value, loadingMore: true, open: true }
+          : { ...value, loading: true, open: true, rows: [] }))
         try {
-          const reply = await get(`/history?query=${encodeURIComponent(query)}&limit=50`)
-          setPicker((value) => ({ ...value, rows: Array.isArray(reply.meetings) ? reply.meetings : [], loading: false }))
+          const offset = append ? (pickerRef.current?.rows.length ?? 0) : 0
+          const reply = await get(`/history?query=${encodeURIComponent(query)}&limit=30&offset=${offset}`)
+          const incoming = Array.isArray(reply.meetings) ? reply.meetings : []
+          setPicker((value) => ({
+            ...value,
+            rows: append ? [...value.rows, ...incoming] : incoming,
+            total: typeof reply.total === 'number' ? reply.total : incoming.length,
+            loading: false,
+            loadingMore: false,
+          }))
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
-          setPicker((value) => ({ ...value, loading: false }))
+          setPicker((value) => ({ ...value, loading: false, loadingMore: false }))
         }
       }, [])
+
+      /** Load more when the dropdown is scrolled near its bottom (lazy loading). */
+      const onPickerScroll = React.useCallback((event) => {
+        const box = event.currentTarget
+        if (box.scrollTop + box.clientHeight < box.scrollHeight - 24) return
+        const state = pickerRef.current
+        if (state === null || state.loading === true || state.loadingMore === true) return
+        if (state.rows.length >= state.total) return
+        void loadHistory(state.query, true)
+      }, [loadHistory])
+
+      // The picker is a dropdown as well: an outside click or Escape closes it.
+      React.useEffect(() => {
+        if (picker.open !== true) return undefined
+        const close = () => setPicker((value) => ({ ...value, open: false }))
+        const onKey = (event) => { if (event.key === 'Escape') setPicker((value) => ({ ...value, open: false })) }
+        const timer = setTimeout(() => {
+          document.addEventListener('click', close)
+          document.addEventListener('keydown', onKey)
+        }, 0)
+        return () => {
+          clearTimeout(timer)
+          document.removeEventListener('click', close)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [picker.open])
 
       /**
        * Show one historical meeting in this panel. Only the view changes: the session keeps
@@ -2750,7 +2814,13 @@ registerProcessor('meeting-capture', MeetingCapture)
         h('div', { key: 'head', style: styles.panelHead }, [
           // The meeting picker: search every meeting on this machine and open one for
           // reading. Switching the view never changes which meeting the session owns (§5.4).
-          h('div', { key: 'picker', style: styles.row }, [
+          h('div', {
+            key: 'pickerwrap',
+            style: styles.pickerWrap,
+            // Clicks inside the dropdown must not reach the document listener that closes it.
+            onClick: (event) => event.stopPropagation(),
+          }, [
+          h('div', { key: 'pickerbar', style: styles.row }, [
             h('input', {
               key: 'query',
               type: 'text',
@@ -2773,7 +2843,13 @@ registerProcessor('meeting-capture', MeetingCapture)
               },
             }, picker.open ? t('hubClose') : t('historyOpen')),
           ]),
-          picker.open !== true ? null : h('div', { key: 'pickerlist', style: styles.list }, [
+          // The results float under the field, scroll and page in as they are read: the
+          // dropdown is a component, not a block that pushes the panel around.
+          picker.open !== true ? null : h('div', {
+            key: 'pickerlist',
+            style: styles.historyPanel,
+            onScroll: onPickerScroll,
+          }, [
             picker.rows.length === 0
               ? h('p', { key: 'none', style: styles.empty }, picker.loading === true ? t('historyLoading') : t('historyEmpty'))
               : null,
@@ -2805,6 +2881,11 @@ registerProcessor('meeting-capture', MeetingCapture)
               // squeezes it.
               row.excerpt === '' ? null : h('div', { key: 'excerpt', style: styles.historyExcerpt }, row.excerpt.length > 120 ? `${row.excerpt.slice(0, 120)}…` : row.excerpt),
             ])),
+            // The footer says where the paging stands: more to come, or everything shown.
+            picker.rows.length === 0 ? null : h('div', { key: 'more', style: styles.hint }, picker.rows.length >= picker.total
+              ? t('historyAll')
+              : (picker.loadingMore === true ? t('historyLoading') : t('historyMore'))),
+          ]),
           ]),
           viewed === null ? null : h('div', { key: 'viewer', style: styles.row }, [
             h('span', { key: 'label', style: styles.status }, `${t('historyViewing')}: ${meta.title === '' ? t('meetingNameNone') : meta.title}${meta.period === '' ? '' : ` · ${meta.period}`}`),
@@ -2873,18 +2954,6 @@ registerProcessor('meeting-capture', MeetingCapture)
           // Recording and the meeting's own actions belong to the session's meeting, so they
           // step aside while a historical meeting is being read (§5.4).
           viewed !== null ? null : h('div', { key: 'notebar', style: styles.row }, [
-          h('span', { key: 'rolelabel', style: styles.status }, t('roleLabel')),
-          // A dropdown rather than three buttons: the seat is one choice, and the row is
-          // already carrying the meeting's actions.
-          h('select', {
-            key: 'role',
-            style: styles.inlineInput,
-            value: role === '' ? 'attendee' : role,
-            onChange: (event) => { void chooseRole(event.target.value) },
-          }, ['host', 'attendee', 'observer'].map((seat) => h('option', {
-            key: seat,
-            value: seat,
-          }, t(ROLE_LABEL_KEYS[seat])))),
           h('button', {
             key: 'toggle',
             type: 'button',
@@ -2892,9 +2961,10 @@ registerProcessor('meeting-capture', MeetingCapture)
             disabled: phase === 'starting' || pendingStart,
             onClick: () => {
               if (recording) { void stop(); return }
-              // Name the meeting once before the first recording (§5.5).
+              // Name the meeting once before the first recording (§5.5). The dialog also
+              // carries the role, so the seat is chosen where the meeting starts.
               if (meta.title !== '') { void start(); return }
-              setNamePrompt({ text: '', kind: meta.kind })
+              setNamePrompt({ text: '', kind: meta.kind, role: role === '' ? 'attendee' : role, start: true })
             },
           }, recording ? t('stop') : t('start')),
           // Pause sits beside Stop: a pause keeps the meeting open, Stop ends it (§5.6).
@@ -2970,6 +3040,15 @@ registerProcessor('meeting-capture', MeetingCapture)
                 key: 'push', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void push() },
               }, t('push')),
+              // Name and role live in one dialog; this brings it back after the meeting
+              // was named, so the seat stays changeable (FEATURES §5.5).
+              h('button', {
+                key: 'setup', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => {
+                  setMoreOpen(false)
+                  setNamePrompt({ text: meta.title, kind: meta.kind, role: role === '' ? 'attendee' : role, start: false })
+                },
+              }, t('meetingSetup')),
             ]) : null,
           ]) : null,
           h('button', {
@@ -3507,13 +3586,25 @@ registerProcessor('meeting-capture', MeetingCapture)
               value: namePrompt.text,
               placeholder: t('meetingNamePlaceholder'),
               spellCheck: false,
-              onChange: (event) => setNamePrompt((value) => ({ ...value, text: event.target.value })),
+              onChange: (event) => setNamePrompt((current) => ({ ...current, text: event.target.value })),
             }),
+            // The seat steers the review prompt, so it is chosen here — with the name the
+            // meeting is starting under (§5.5).
+            h('div', { key: 'rolerow', style: styles.row }, [
+              h('span', { key: 'rolelabel', style: styles.status }, t('roleLabel')),
+              h('select', {
+                key: 'role',
+                style: styles.inlineInput,
+                value: namePrompt.role ?? 'attendee',
+                onChange: (event) => setNamePrompt((current) => ({ ...current, role: event.target.value })),
+              }, ['host', 'attendee', 'observer'].map((seat) => h('option', { key: seat, value: seat }, t(ROLE_LABEL_KEYS[seat])))),
+            ]),
             h('div', { key: 'chips', style: styles.row }, KIND_VALUES.map((value) => h('button', {
               key: value === '' ? 'general' : value,
               type: 'button',
               style: namePrompt.kind === value ? styles.buttonActive : styles.button,
               onClick: () => setNamePrompt((current) => ({
+                ...current,
                 kind: value,
                 // A chip fills the default name only while nothing was typed yet.
                 text: current.text.trim() === ''
@@ -3530,14 +3621,19 @@ registerProcessor('meeting-capture', MeetingCapture)
                   const draft = namePrompt
                   setNamePrompt(null)
                   void (async () => {
-                    if (draft !== null && (draft.text.trim() !== '' || draft.kind !== '')) {
+                    if (draft === null) return
+                    // The seat is stored with the name, so both land before recording starts.
+                    const nextRole = typeof draft.role === 'string' && draft.role !== '' ? draft.role : role
+                    if (nextRole !== role) await chooseRole(nextRole)
+                    if (draft.text.trim() !== '' || draft.kind !== '') {
                       await saveMeta({ title: draft.text.trim(), kind: draft.kind })
                     }
-                    await start()
+                    // Opened from the menu it only saves; opened by Start it also records.
+                    if (draft.start !== false) await start()
                   })()
                 },
-              }, t('start')),
-              h('button', {
+              }, namePrompt.start === false ? t('saveEntry') : t('start')),
+              namePrompt.start === false ? null : h('button', {
                 key: 'skip',
                 type: 'button',
                 style: styles.button,

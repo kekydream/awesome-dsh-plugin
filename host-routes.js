@@ -438,6 +438,9 @@ export function createHandler(ctx) {
         const query = (url.searchParams.get('query') ?? '').trim().toLowerCase()
         const asked = Number(url.searchParams.get('limit') ?? 50)
         const limit = Number.isFinite(asked) && asked > 0 ? Math.min(Math.floor(asked), 200) : 50
+        // Paging: the picker scrolls and asks for the next slice instead of loading everything.
+        const askedOffset = Number(url.searchParams.get('offset') ?? 0)
+        const offset = Number.isFinite(askedOffset) && askedOffset > 0 ? Math.floor(askedOffset) : 0
         const rows = []
         for (const meeting of meetings.values()) {
           const points = meeting.points ?? []
@@ -475,7 +478,7 @@ export function createHandler(ctx) {
           })
         }
         rows.sort((left, right) => right.startedAt - left.startedAt)
-        sendJson(res, 200, { meetings: rows.slice(0, limit), total: rows.length })
+        sendJson(res, 200, { meetings: rows.slice(offset, offset + limit), total: rows.length, offset, limit })
         return
       }
 
