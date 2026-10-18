@@ -927,11 +927,20 @@ registerProcessor('meeting-capture', MeetingCapture)
 /* A long read such as the tutorial gets a wider card than an ordinary prompt. */
 .mr-dialog-wide { width: min(92vw, 820px) !important; max-width: min(92vw, 820px) !important; }
 .mr-dialog-wide .mr-dialog-body { max-height: 70vh; overflow-y: auto; }
-/* A one-field prompt: one-line title, tight stack, no towering header. */
-.mr-dialog-title { font-size: 14px; font-weight: 600; line-height: 1.5; }
-.mr-dialog-body:has(> .mr-dialog-title) { gap: 8px; }
-/* A one-line field, whatever height the host input would otherwise take. */
-.mr-input-compact { height: 26px; min-height: 26px; padding-top: 0; padding-bottom: 0; line-height: 1.4; }
+/* A one-line field, whatever height the host input would otherwise take. The rule reaches
+   the host's own wrapper as well, because that wrapper — not the inner <input> — is what
+   carries the tall box. */
+.mr-input-compact,
+.mr-input-compact > *,
+.mr-input-compact input {
+  height: 26px !important;
+  min-height: 26px !important;
+  max-height: 26px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  line-height: 1.4 !important;
+}
+.mr-input-compact > * { display: flex; align-items: center; }
 .mr-ufield.mr-layout-title { flex: 1 1 auto; min-width: 0; }
 .mr-hover { transition: background .12s ease; }
 .mr-hover:hover { background: var(--dsw-alias-bg-layer-2); }
@@ -1117,29 +1126,20 @@ registerProcessor('meeting-capture', MeetingCapture)
      * @returns the dialog.
      */
     function Dialog(props) {
-      const { title, description, onClose, children, footer, wide, compact } = props
+      const { title, description, onClose, children, footer, wide } = props
       // The body and the footer bring their own layout, so the host's Modal and the plugin's
       // own card both end up with the same stacked body and right-aligned, wrapping buttons.
-      // A `compact` dialog is a prompt rather than a page: it drops the host's title header —
-      // which is sized for a full dialog and towered over one input — and prints its own
-      // one-line title inside the body instead.
-      const body = compact === true
-        ? h('div', { className: 'mr-dialog-body' }, [
-          h('span', { key: 'heading', className: 'mr-dialog-title' }, title),
-          children,
-        ])
-        : h('div', { className: 'mr-dialog-body' }, children)
+      const body = h('div', { className: 'mr-dialog-body' }, children)
       const foot = footer === undefined ? undefined : h('div', { className: 'mr-dialog-foot' }, footer)
       if (HostModal !== null) {
         return h(HostModal, {
           open: true,
           onClose,
-          headless: compact === true,
-          title: compact === true ? undefined : title,
-          description: compact === true ? undefined : description,
+          title,
+          description,
           children: body,
           footer: foot,
-          // One width for every card: the class carries whatever the caller asked for.
+          // The wider card: every dialog uses the same width, so none looks like another app.
           className: wide === true ? 'mr-dialog-wide' : undefined,
         })
       }
@@ -1150,8 +1150,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         'aria-label': title,
       }, [
         h('div', { key: 'card', style: wide === true ? styles.setupCardWide : styles.setupCard }, [
-          compact === true ? null : h('h2', { key: 'title', style: styles.setupTitle }, title),
-          description === undefined || compact === true ? null : h('p', { key: 'hint', style: styles.note }, description),
+          h('h2', { key: 'title', style: styles.setupTitle }, title),
+          description === undefined ? null : h('p', { key: 'hint', style: styles.note }, description),
           body,
           foot,
         ]),
@@ -4027,8 +4027,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           // One line of title, nothing else: the description line pushed the fields down
           // and read as noise once the name was the only thing being asked for.
           title: t('meetingNameTitle'),
-          // A prompt, not a page: a compact header, and the same width as every other card.
-          compact: true,
+          // The same width as every other card; the fields inside stay compact.
           wide: true,
           onClose: () => setNamePrompt(null),
           children: [
