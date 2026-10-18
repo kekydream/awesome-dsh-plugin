@@ -917,6 +917,9 @@ export function minutesText(meeting) {
     '# 会议纪要',
     '',
     `- 会议编号：${meeting.id}`,
+    // A minutes file travels on its own, so it has to say which meeting it is.
+    `- 名称：${meeting.title === undefined || meeting.title === '' ? '（未命名）' : meeting.title}`,
+    `- 类型：${kindText(meeting.kind ?? '')}${meeting.period === undefined || meeting.period === '' ? '' : `　周期：${meeting.period}`}`,
     `- 开始时间：${new Date(meeting.startedAt).toLocaleString()}`,
     `- 时长：${clockOf(meeting.seconds)}`,
     `- 段落数：${meeting.segments.length}`,

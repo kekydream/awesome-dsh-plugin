@@ -240,7 +240,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       inkClear: '清空',
       inkSave: '保存为笔记',
       inkSaved: '笔记已保存',
-      inkClose: '收起手写板',
       inkLocal: '识别为文字',
       inkLocalEmpty: '没有识别出文字，写大一点再试',
       inkLasso: '圈选',
@@ -328,16 +327,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       reviseSending: '已请 Agent 做会终二次纠错，完成后实录会自动更新',
       minutesDone: '纪要已写入导出目录',
       minutesEmpty: '这场会议还没有内容可以成文',
-      inkSystem: '系统手写输入',
-      inkStore: '存为笔记',
-      inkSystemHint: '此功能依赖 Windows 自带的手写面板，先在系统里开启：\n① 设置 → 时间和语言 → 语言和区域 → 中文(简体) → 语言选项 → 安装「手写」\n② 设置 → 蓝牙和设备 → 触摸键盘 → 打开「未连接键盘时显示触摸键盘」\n③ 设置 → 蓝牙和设备 → 笔和 Windows Ink → 手写 → 打开识别\n开启后点下面的按钮重试；本环境是 Electron，也可能仍然唤不出，那就直接在此输入。',
-      inkSystemOpen: '唤起系统手写面板',
-      tabInk: '手写板',
-      tabSystem: '系统手写',
       tabTerms: '会议术语',
       notesToggle: '手写笔记',
       helpToggle: '使用说明',
-      helpBody: '【手写板】\n· 「笔」「橡皮」「撤销」「清空」是书写工具。\n· 淡蓝色虚线框是自动发现的一个个字：轻点某个字就能选中它，不必画圈。\n· 长按画布约 0.6 秒可直接开始圈选，继续拖动即可圈住一片内容。\n· 选中或识别出文字后，下方出现同一排动作：「识别选中」只读圈住的字；「转为任务」把文字直接建成待确认任务；「清除」清空选择与识别结果。\n· 「识别为文字」按行识别整页：本地模型、离线、约 43 毫秒一行，多行会自动分行，识别完下方直接给出「转为任务」。\n· 「保存为图片」把整页存成 PNG 进会议记录。\n\n【系统手写】\n· 用 Windows 自带手写面板输入文字，再点「存为笔记」。\n· 需要系统先开启手写功能：设置 → 时间和语言 → 语言和区域 → 中文(简体) → 语言选项 → 安装「手写」。\n· 本环境是 Electron，可能唤不出系统面板；那就直接在这个输入框里打字。\n\n【会议术语】\n· 每行一条。写成「错词=正确词」可在转写里自动替换；只写词则作为热词。\n· 内容会自动保存到本场会议。\n\n【没有开始录音也能用】\n· 写笔记、识别、转任务都不需要先点「开始记录」；第一次写入时会自动建一条会议记录，之后录音会并入同一条。',
+      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听，或自己在「其他」里写）、选会议类型（通用／晨会／复盘会／例会／总结会，选类型会自动把标题填成「类型 · 日期」）。\n· 不想命名就点「暂不命名并开始记录」。一个会话对应一场会议；分叉出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟提醒一次。\n· 状态行显示已录时长与当前发言人；「?」以外的按钮都在最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你自己往上滚就自动取消跟随，出现「回到最新」可一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx，两者都会弹出浏览器的下载保存对话框；纪要同时存在会议里，可随时打开重看。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n\n【发言人】\n· 每个声纹标签直接填姓名（可从名单里选）；「重新识别发言人」会从录音重新判断，用于模型当时还没就绪的情况。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时是只读的（历史内容不会被改动），可「打开原会话」或「返回本会话」。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要，可直接「发送到新对话」或「打开对话」。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式。\n· 人员：共享名单（姓名／手机／用户 ID），可从钉钉通讯录同步部门。\n· 术语：与「更多 → 会议术语」同一份内容。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
       inkNote: '笔记文字',
       documents: '会议文档',
       openDocument: '查看',
@@ -507,7 +500,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       inkClear: 'Clear',
       inkSave: 'Save as note',
       inkSaved: 'Note saved',
-      inkClose: 'Hide the pad',
       inkLocal: 'Recognize as text',
       inkLocalEmpty: 'Nothing was recognized; write larger and retry',
       inkLasso: 'Lasso',
@@ -595,15 +587,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       reviseSending: 'The agent is making the second correction pass; the transcript updates when it finishes',
       minutesDone: 'Minutes written to the export directory',
       minutesEmpty: 'This meeting has nothing to write up yet',
-      inkSystem: 'System handwriting input',
-      inkStore: 'Store as note',
-      inkSystemHint: 'This needs the Windows handwriting panel; enable it first:\n1) Settings → Time & language → Language & region → Chinese → Language options → install "Handwriting"\n2) Settings → Bluetooth & devices → Touch keyboard → show it when no keyboard is attached\n3) Settings → Bluetooth & devices → Pen & Windows Ink → Handwriting → turn recognition on\nThen retry below. Electron may still refuse to show it, in which case type here.',
-      tabInk: 'Pad',
-      tabSystem: 'System input',
       tabTerms: 'Terms',
       notesToggle: 'Handwritten note',
       helpToggle: 'Help',
-      helpBody: '【Handwriting pad】\n· Pen, eraser, undo and clear are the drawing tools.\n· Faint dashed boxes are characters found from the ink alone: tap one to select it, no lasso needed.\n· Long-press the pad for about 0.6 s to start a lasso, then drag to circle an area.\n· A selection or a recognized result shows one action row: "Recognize selection" reads only the circled characters, "To task" turns the text straight into a draft task, and "Clear" empties both.\n· "Recognize as text" reads the page line by line locally, offline, about 43 ms per line, splitting lines automatically, and offers "To task" right below.\n· "Save as image" stores the page as a PNG in the meeting record.\n· "Send to the conversation" asks the agent instead; it is slower and needs a signed-in session.\n\n【System handwriting】\n· Type with the Windows handwriting panel, then store it as a note.\n· Windows must have handwriting installed: Settings → Time & language → Language & region → Chinese (Simplified) → Language options → install Handwriting.\n· This Electron shell may not summon the system panel; the text box here always works.\n\n【Meeting terms】\n· One entry per line. Write "wrong=right" to replace it in transcripts; a bare word is a hint.\n· Entries save automatically.\n\n【Works without recording】\n· Notes, recognition and tasks need no recording; the first write creates the meeting record, and a later recording joins it.',
+      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer, or your own words under Other) and the type (general / briefing / review / weekly / monthly — choosing a type fills the title as "type · date").\n· Choose "Skip naming and start recording" to begin without one. One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with a reminder after 10 minutes.\n· The status line shows elapsed time and who is speaking. Every control lives in the top row.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n\n[Speakers]\n· Each voice label takes a name (the roster is offered as suggestions); "Identify speakers again" re-reads the recording, for when the model was not ready during the meeting.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session".\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview, plus "Send to new chat" and "Open chat".\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed.\n· People: the shared roster (name / phone / user id), with a department sync from DingTalk.\n· Terms: the same list as More → Meeting terms.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
       inkNote: 'Note text',
       documents: 'Meeting documents',
       openDocument: 'Open',
@@ -745,6 +732,12 @@ registerProcessor('meeting-capture', MeetingCapture)
       actions: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
       hub: { padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '860px' },
       hubTitle: { margin: 0, fontSize: '18px', fontWeight: 600 },
+      /** One meeting in the management page: fixed columns, so the rows line up. */
+      hubRecord: { display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
+      hubRecordWhen: { flex: '0 0 128px', fontSize: '11px', opacity: 0.7, fontVariantNumeric: 'tabular-nums' },
+      hubRecordMain: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
+      hubRecordExcerpt: { fontSize: '11px', opacity: 0.65, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      hubRecordActions: { flex: '0 0 auto', display: 'flex', gap: '4px', alignItems: 'center' },
       linkButton: { padding: 0, border: 'none', background: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit' },
       pre: { margin: 0, maxHeight: '320px', overflow: 'auto', fontSize: '12px', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
       audio: { width: '100%' },
@@ -1915,11 +1908,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       const audio = React.useRef(null)
       const rows = React.useRef([])
       const noteSeq = React.useRef(0)
-      const [tab, setTab] = React.useState('ink')
+      /** Whether the terminology dialog is open (it used to be a tab in the note pad). */
+      const [termsOpen, setTermsOpen] = React.useState(false)
       const [notesOpen, setNotesOpen] = React.useState(false)
       const [helpOpen, setHelpOpen] = React.useState(false)
-      const [systemText, setSystemText] = React.useState('')
-      const systemField = React.useRef(null)
 
       // These write through to the shared recorder: the capture callback keeps updating
       // them after this panel unmounts, so returning to the panel shows the whole meeting.
@@ -2782,32 +2774,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [ensureMeeting, refreshAnalysis, t])
 
       /**
-       * Store text recognised by the system handwriting panel or typed here. This path
-       * never reaches the agent, so it is the fast one.
-       * @param text - The note text.
-       */
-      const saveText = React.useCallback(async (text) => {
-        const trimmed = text.trim()
-        if (trimmed === '') return
-        setError('')
-        try {
-          const target = await ensureMeeting()
-          if (target === '') {
-            setError(t('needSession'))
-            return
-          }
-          const reply = await post('/note', { text: trimmed, meetingId: target, source: 'system' })
-          if (Array.isArray(reply.notes)) setNotes(reply.notes)
-          // Typed or system-panel text can become an assignment the same way a recognized
-          // drawing can.
-          setLastNote(trimmed)
-          setNote(t('inkSaved'))
-        } catch (failure) {
-          setError(failure instanceof Error ? failure.message : String(failure))
-        }
-      }, [ensureMeeting, t])
-
-      /**
        * Move the recording to a cue's start and play from there, which is what clicking a
        * transcript line asks for: hear this sentence again.
        * @param seconds - Offset into the recording.
@@ -3398,6 +3364,12 @@ registerProcessor('meeting-capture', MeetingCapture)
                 key: 'minutesdocx', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void writeMinutes('docx') },
               }, t('minutesDocx')),
+              // The terminology list is an occasional setting, so it opens from here rather
+              // than occupying a tab in the note pad.
+              h(Btn, {
+                key: 'terms', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); setTermsOpen(true) },
+              }, t('tabTerms')),
             ])) : null,
           ]),
           h(Btn, {
@@ -3434,29 +3406,11 @@ registerProcessor('meeting-capture', MeetingCapture)
           // Recording and the meeting's own actions belong to the session's meeting, so they
           // step aside while a historical meeting is being read (§5.4).
         h('span', { key: 'status', style: styles.status }, status),
-        notesOpen ? h('div', { key: 'tabs', style: styles.tabs }, [
-          h(Btn, {
-            key: 'ink',
-            type: 'button',
-            style: tab === 'ink' ? styles.tabActive : styles.tab,
-            onClick: () => setTab('ink'),
-          }, t('tabInk')),
-          h(Btn, {
-            key: 'system',
-            type: 'button',
-            style: tab === 'system' ? styles.tabActive : styles.tab,
-            onClick: () => setTab('system'),
-          }, t('tabSystem')),
-          h(Btn, {
-            key: 'terms',
-            type: 'button',
-            style: tab === 'terms' ? styles.tabActive : styles.tab,
-            onClick: () => setTab('terms'),
-          }, t('tabTerms')),
-        ]) : null,
-        // One fixed-height body so switching tabs never resizes the panel.
+        // The note pad is the handwriting pad and nothing else: one tool, one body, no tabs to
+        // switch between. The terminology list lives with the other occasional settings, in
+        // the More menu.
         notesOpen ? h('div', { key: 'tabbody', style: styles.tabBody }, [
-          tab === 'ink' ? h(InkPad, {
+          h(InkPad, {
             key: 'ink',
             t,
             onSave: saveNote,
@@ -3464,50 +3418,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             recognizedText: lastNote,
             onRecognizedToTask: (text) => { void noteToTask(text) },
             onDismissRecognized: () => setLastNote(''),
-          }) : null,
-          tab === 'system' ? h('div', { key: 'system', style: styles.list }, [
-            h('span', { key: 'hint', style: styles.hintLines }, t('inkSystemHint')),
-            h(Btn, {
-              key: 'open',
-              type: 'button',
-              style: styles.button,
-              onClick: () => {
-                const field = systemField.current
-                if (field !== null) field.focus()
-                try {
-                  navigator.virtualKeyboard?.show?.()
-                } catch (failure) {
-                  console.warn('meeting-room: the system handwriting panel did not open', failure)
-                }
-              },
-            }, t('inkSystemOpen')),
-            h(Field, {
-              key: 'field',
-              ref: systemField,
-              style: styles.textarea,
-              value: systemText,
-              placeholder: t('inkStore'),
-              onChange: (event) => setSystemText(event.target.value),
-            }),
-            h(Btn, {
-              key: 'store',
-              type: 'button',
-              style: styles.button,
-              disabled: systemText.trim() === '',
-              onClick: () => { void saveText(systemText) },
-            }, t('inkStore')),
-          ]) : null,
-          tab === 'terms' ? h('div', { key: 'terms', style: styles.list }, [
-            h('span', { key: 'hint', style: styles.hint }, t('termsHint')),
-            h(Field, {
-              key: 'input',
-              id: 'meeting-room-terms',
-              style: styles.termsArea,
-              value: termsText,
-              spellCheck: false,
-              onChange: (event) => setTermsText(event.target.value),
-            }),
-          ]) : null,
+          }),
         ]) : null,
         audioName === '' ? null : h('audio', {
           key: 'audio',
@@ -3989,6 +3900,30 @@ registerProcessor('meeting-capture', MeetingCapture)
             typeof props.openVoiceInputBundle === 'function' && !speech.requesting && !pendingStart ? h(Btn, { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null,
           ]),
         ]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        // The terminology list: a dialog now, opened from the More menu. Edits land in the
+        // meeting as they are typed, so closing it is the whole save story.
+        termsOpen ? h(Dialog, {
+          key: 'termsdialog',
+          title: t('tabTerms'),
+          wide: true,
+          onClose: () => setTermsOpen(false),
+          children: [
+            h('span', { key: 'hint', style: styles.hint }, t('termsHint')),
+            h(Field, {
+              key: 'input',
+              style: styles.termsArea,
+              value: termsText,
+              spellCheck: false,
+              onChange: (event) => setTermsText(event.target.value),
+            }),
+          ],
+          footer: [h(Btn, {
+            key: 'ok',
+            type: 'button',
+            style: styles.button,
+            onClick: () => setTermsOpen(false),
+          }, t('hubClose'))],
+        }) : null,
         // The tutorial is a dialog, not a block inside the panel: it is read once, and it
         // should not push the meeting's own content down while it is open.
         helpOpen ? h(Dialog, {
@@ -5175,9 +5110,12 @@ registerProcessor('meeting-capture', MeetingCapture)
             // files are artifacts of it (FEATURES §5.4's rule, applied to this page too).
             : h('div', { key: 'list', className: 'mr-list' }, records.map((row) => h('div', {
               key: row.meetingId,
-              className: 'mr-row',
+              style: styles.hubRecord,
             }, [
-              h('div', { key: 'id', style: styles.fieldBlock }, [
+              // Fixed columns — when, what, what it holds, what can be done with it — so the
+              // rows line up down the page instead of drifting with the length of a name.
+              h('span', { key: 'when', style: styles.hubRecordWhen }, new Date(row.startedAt).toLocaleString()),
+              h('div', { key: 'main', style: styles.hubRecordMain }, [
                 h(Btn, {
                   key: 'open',
                   type: 'button',
@@ -5185,29 +5123,30 @@ registerProcessor('meeting-capture', MeetingCapture)
                   onClick: () => { void openTranscript(row) },
                 }, row.title === '' ? t('meetingNameNone') : row.title),
                 h('span', { key: 'meta', style: styles.hint }, [
-                  new Date(row.startedAt).toLocaleString(),
-                  row.kind === '' ? null : ` · ${t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')}`,
+                  row.kind === '' ? t('kindGeneral') : t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral'),
                   row.period === '' ? null : ` · ${row.period}`,
                   ` · ${t('panelTabTranscript')} ${row.counts.segments}`,
                   ` · ${t('points')} ${row.counts.points}`,
                   ` · ${t('tasks')} ${row.counts.tasks}`,
                   row.counts.documents === 0 ? null : ` · ${t('panelTabMinutes')} ${row.counts.documents}`,
                 ].filter((part) => part !== null).join('')),
+                row.excerpt === '' ? null : h('span', { key: 'excerpt', style: styles.hubRecordExcerpt }, row.excerpt.length > 60 ? `${row.excerpt.slice(0, 60)}…` : row.excerpt),
               ]),
-              h('span', { key: 'stamp', style: styles.stamp }, row.excerpt === '' ? t('historyBlank') : (row.excerpt.length > 28 ? `${row.excerpt.slice(0, 28)}…` : row.excerpt)),
-              h(Btn, {
-                key: 'send',
-                type: 'button',
-                style: styles.smallButton,
-                title: t('hubSendHint'),
-                onClick: () => { void sendToNewConversation({ meetingId: row.meetingId }) },
-              }, t('hubSend')),
-              row.sessionId === '' ? null : h(Btn, {
-                key: 'session',
-                type: 'button',
-                style: styles.smallButton,
-                onClick: () => { props.openConversation(row.sessionId) },
-              }, t('hubOpenSession')),
+              h('div', { key: 'actions', style: styles.hubRecordActions }, [
+                h(Btn, {
+                  key: 'send',
+                  type: 'button',
+                  style: styles.smallButton,
+                  title: t('hubSendHint'),
+                  onClick: () => { void sendToNewConversation({ meetingId: row.meetingId }) },
+                }, t('hubSend')),
+                row.sessionId === '' ? null : h(Btn, {
+                  key: 'session',
+                  type: 'button',
+                  style: styles.smallButton,
+                  onClick: () => { props.openConversation(row.sessionId) },
+                }, t('hubOpenSession')),
+              ]),
             ]))),
         ]) : null,
         hubTab === 'records' && preview !== null ? h('div', { key: 'preview', className: 'mr-card' }, [
