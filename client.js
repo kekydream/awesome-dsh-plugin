@@ -125,13 +125,12 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubSessionOpen: '会话已在前台 —— 点标题栏的「会议记录」开始录制。',
       hubSessionBackground: '当前会话不在前台 —— 切回会话后即可开始录制。',
       hubHowTo: '录制在会话作用域进行：它需要会话身份，才能让 Agent 用 meeting_read 读到这场实录。',
-      hubRecords: '历史实录（本机 meetings 目录）',
+      hubRecords: '会议记录（每场会议一条）',
       hubRefresh: '刷新',
-      hubEmpty: '还没有导出的实录。录完一场并点「保存为文件」后就会出现在这里。',
+      hubEmpty: '还没有会议记录。开一场会后就会出现在这里。',
       hubSend: '发送到新对话',
       hubSendHint: '新建一个对话，把这场会议的实录放进去，确认后发送',
       hubOpenSession: '打开对话',
-      hubReveal: '定位文件',
       hubNoMeeting: '这条记录没有对应的会议',
       hubNoWorkspace: '当前界面不支持新建对话',
       hubClose: '关闭',
@@ -414,13 +413,12 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubSessionOpen: 'The session is in the foreground — open the header button to start recording.',
       hubSessionBackground: 'The session is in the background — switch back to it to start recording.',
       hubHowTo: 'Recording runs in the session scope: the session identity is what lets the agent read this meeting through meeting_read.',
-      hubRecords: 'Past records (this machine\'s meetings directory)',
+      hubRecords: 'Meetings (one row per meeting)',
       hubRefresh: 'Refresh',
-      hubEmpty: 'No record has been exported yet. Finish a meeting and choose "Save files" to see it here.',
+      hubEmpty: 'No meetings recorded yet — hold one and it appears here.',
       hubSend: 'Send to new chat',
       hubSendHint: 'Open a new conversation with this meeting\'s transcript, ready to send',
       hubOpenSession: 'Open chat',
-      hubReveal: 'Show file',
       hubNoMeeting: 'This record has no meeting behind it',
       hubNoWorkspace: 'This shell cannot start a new conversation',
       hubClose: 'Close',
@@ -4820,7 +4818,7 @@ registerProcessor('meeting-capture', MeetingCapture)
      */
     function MeetingHubPage(props) {
       const t = props.t
-      const [files, setFiles] = React.useState([])
+      const [records, setRecords] = React.useState([])
       const [preview, setPreview] = React.useState(null)
       const [error, setError] = React.useState('')
       const [termsText, setTermsText] = React.useState(readTerms)
@@ -4956,14 +4954,35 @@ registerProcessor('meeting-capture', MeetingCapture)
       const refresh = React.useCallback(async () => {
         setError('')
         try {
-          const value = await get('/list')
-          setFiles(value.files)
+          const value = await get('/history?limit=200')
+          setRecords(Array.isArray(value.meetings) ? value.meetings : [])
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
         }
       }, [])
 
       React.useEffect(() => { void refresh() }, [refresh])
+
+      /**
+       * Read one meeting into the preview area: its timed cues when it has a recording, so
+       * the synchronized player can follow along, and its stored document otherwise.
+       * @param row - The meeting row as the history list reports it.
+       */
+      const openTranscript = React.useCallback(async (row) => {
+        setError('')
+        try {
+          const value = await get(`/state?meetingId=${encodeURIComponent(row.meetingId)}`)
+          setPreview({
+            name: row.title === '' ? row.meetingId : row.title,
+            image: false,
+            markdown: '',
+            segments: Array.isArray(value.segments) ? value.segments : [],
+            audioName: typeof value.audioName === 'string' ? value.audioName : '',
+          })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
 
       /**
        * Open one record: pair its recording and transcript by shared name, then hand the
@@ -4994,49 +5013,6 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [props, t])
 
-      /**
-       * Show one artifact in the operating system's file manager.
-       * @param name - File name inside the export directory.
-       */
-      const reveal = React.useCallback(async (name) => {
-        setError('')
-        try {
-          await post('/reveal', { name })
-        } catch (failure) {
-          setError(failure instanceof Error ? failure.message : String(failure))
-        }
-      }, [])
-
-      const open = React.useCallback(async (name) => {
-        setError('')
-        // A drawing is shown as an image; nothing to parse.
-        if (name.endsWith('.png')) {
-          setPreview({ name, audioName: '', image: true, segments: [], markdown: '' })
-          return
-        }
-        const base = name.replace(/\.(srt|md|wav)$/u, '')
-        const has = (candidate) => files.some((file) => file.name === candidate)
-        const audioName = has(`${base}.wav`) ? `${base}.wav` : ''
-        const srtName = has(`${base}.srt`) ? `${base}.srt` : ''
-        const mdName = has(`${base}.md`) ? `${base}.md` : ''
-        const load = async (target) => {
-          if (target === '') return ''
-          const value = await get(`/file?name=${encodeURIComponent(target)}`)
-          return typeof value.content === 'string' ? value.content : ''
-        }
-        try {
-          const srtText = await load(srtName)
-          const markdown = await load(mdName)
-          setPreview({
-            name,
-            audioName,
-            segments: srtText === '' ? [] : parseSrt(srtText),
-            markdown,
-          })
-        } catch (failure) {
-          setError(failure instanceof Error ? failure.message : String(failure))
-        }
-      }, [files])
 
       return h(Boundary, null, h('section', { style: styles.hub }, [
         h('h1', { key: 'title', style: styles.hubTitle }, t('hubTitle')),
@@ -5224,39 +5200,45 @@ registerProcessor('meeting-capture', MeetingCapture)
             h('span', { key: 'label', style: styles.label }, t('hubRecords')),
             h(Btn, { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void refresh() } }, t('hubRefresh')),
           ]),
-          files.length === 0
+          records.length === 0
             ? h('p', { key: 'empty', style: styles.empty }, t('hubEmpty'))
-            : h('div', { key: 'list', className: 'mr-list' }, files.map((file) => h('div', {
-              key: file.name,
+            // One row per MEETING, not per exported file: the meeting is the record, and its
+            // files are artifacts of it (FEATURES §5.4's rule, applied to this page too).
+            : h('div', { key: 'list', className: 'mr-list' }, records.map((row) => h('div', {
+              key: row.meetingId,
               className: 'mr-row',
             }, [
-              h(Btn, {
-                key: 'open',
-                type: 'button',
-                style: styles.linkButton,
-                className: 'mr-row-name',
-                onClick: () => { void open(file.name) },
-              }, file.name),
-              h('span', { key: 'meta', style: styles.stamp }, `${Math.max(1, Math.round(file.size / 1024))} KB · ${absoluteOf(file.modified)}`),
+              h('div', { key: 'id', style: styles.fieldBlock }, [
+                h(Btn, {
+                  key: 'open',
+                  type: 'button',
+                  style: styles.linkButton,
+                  onClick: () => { void openTranscript(row) },
+                }, row.title === '' ? t('meetingNameNone') : row.title),
+                h('span', { key: 'meta', style: styles.hint }, [
+                  new Date(row.startedAt).toLocaleString(),
+                  row.kind === '' ? null : ` · ${t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')}`,
+                  row.period === '' ? null : ` · ${row.period}`,
+                  ` · ${t('panelTabTranscript')} ${row.counts.segments}`,
+                  ` · ${t('points')} ${row.counts.points}`,
+                  ` · ${t('tasks')} ${row.counts.tasks}`,
+                  row.counts.documents === 0 ? null : ` · ${t('panelTabMinutes')} ${row.counts.documents}`,
+                ].filter((part) => part !== null).join('')),
+              ]),
+              h('span', { key: 'stamp', style: styles.stamp }, row.excerpt === '' ? t('historyBlank') : (row.excerpt.length > 28 ? `${row.excerpt.slice(0, 28)}…` : row.excerpt)),
               h(Btn, {
                 key: 'send',
                 type: 'button',
                 style: styles.smallButton,
                 title: t('hubSendHint'),
-                onClick: () => { void sendToNewConversation(file) },
+                onClick: () => { void sendToNewConversation({ meetingId: row.meetingId }) },
               }, t('hubSend')),
-              file.sessionId === '' ? null : h(Btn, {
+              row.sessionId === '' ? null : h(Btn, {
                 key: 'session',
                 type: 'button',
                 style: styles.smallButton,
-                onClick: () => { props.openConversation(file.sessionId) },
+                onClick: () => { props.openConversation(row.sessionId) },
               }, t('hubOpenSession')),
-              h(Btn, {
-                key: 'reveal',
-                type: 'button',
-                style: styles.smallButton,
-                onClick: () => { void reveal(file.name) },
-              }, t('hubReveal')),
             ]))),
         ]) : null,
         hubTab === 'records' && preview !== null ? h('div', { key: 'preview', className: 'mr-card' }, [
