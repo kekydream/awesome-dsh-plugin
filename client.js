@@ -142,7 +142,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       speakerOff: '发言人识别未启用（准备约需下载 27 MB）',
       points: '要点',
       tasks: '工作安排',
-      refresh: '刷新要点/任务',
       point_decision: '决定',
       point_point: '要点',
       point_risk: '风险',
@@ -219,10 +218,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardTitle: '当前会议有未保存内容',
       historyGuardBody: '3 秒后自动保存，然后打开所选会议；也可以立即保存或取消。',
       historyGuardNow: '立即保存并打开',
-      meetingSetup: '会议名称与角色',
       historyAll: '已全部显示',
       historyMore: '滚动加载更多…',
-      generate: '生成要点与任务（本地）',
       extractEmpty: '没有识别出明显的要点或行动项。可在会话里直接对 Agent 说「读一下这场会议，给我要点和行动项」来精修。',
       noMeeting: '这个会话还没有会议记录。点「开始记录」录一场，再来生成要点与任务。',
       seekHint: '点击跳到这一句',
@@ -244,7 +241,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       inkSave: '保存为笔记',
       inkSaved: '笔记已保存',
       inkClose: '收起手写板',
-      inkRecognize: '发送到对话（较慢）',
       inkLocal: '识别为文字',
       inkLocalEmpty: '没有识别出文字，写大一点再试',
       inkLasso: '圈选',
@@ -261,7 +257,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       roleObserver: '旁听',
       roleHint: '复盘时会按这个角色组织内容',
       review: '复盘会议',
-      push: '同步任务',
       pushDone: '已推送到机器人',
       robotSettings: '机器人设置',
       robotHint: '填入钉钉 / 企业微信机器人的 Webhook 地址，留空表示不推送；只推送【已确认】的任务。地址保存在本机。',
@@ -329,7 +324,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       minutes: '生成纪要',
       minutesDocx: '导出 Word',
       minutesDocxDone: 'Word 已写入导出目录',
-      revise: '二次纠错',
       revisePrompt: '本场会议已经结束。请先调用 meeting_read 读取这场会议的完整实录（每段都带 #编号），再以会议上下文为依据做一次统一订正：同一个人名/公司名/术语前后一致；明显听错的同音词改成正确写法；明显的错字修正。然后用 meeting_revise 提交订正，corrections 每一项写 {id, text}——id 用实录里的 #编号，text 给该段订正后的完整文本。只订正上下文能支撑的地方，不要编造内容，拿不准的保持原样。完成后用一段话说明改了哪些地方。',
       reviseSending: '已请 Agent 做会终二次纠错，完成后实录会自动更新',
       minutesDone: '纪要已写入导出目录',
@@ -343,13 +337,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: '会议术语',
       notesToggle: '手写笔记',
       helpToggle: '使用说明',
-      helpBody: '【手写板】\n· 「笔」「橡皮」「撤销」「清空」是书写工具。\n· 淡蓝色虚线框是自动发现的一个个字：轻点某个字就能选中它，不必画圈。\n· 长按画布约 0.6 秒可直接开始圈选，继续拖动即可圈住一片内容。\n· 选中或识别出文字后，下方出现同一排动作：「识别选中」只读圈住的字；「转为任务」把文字直接建成待确认任务；「清除」清空选择与识别结果。\n· 「识别为文字」按行识别整页：本地模型、离线、约 43 毫秒一行，多行会自动分行，识别完下方直接给出「转为任务」。\n· 「保存为图片」把整页存成 PNG 进会议记录。\n· 「发送到对话」交给 Agent 识别，较慢且需要登录。\n\n【系统手写】\n· 用 Windows 自带手写面板输入文字，再点「存为笔记」。\n· 需要系统先开启手写功能：设置 → 时间和语言 → 语言和区域 → 中文(简体) → 语言选项 → 安装「手写」。\n· 本环境是 Electron，可能唤不出系统面板；那就直接在这个输入框里打字。\n\n【会议术语】\n· 每行一条。写成「错词=正确词」可在转写里自动替换；只写词则作为热词。\n· 内容会自动保存到本场会议。\n\n【没有开始录音也能用】\n· 写笔记、识别、转任务都不需要先点「开始记录」；第一次写入时会自动建一条会议记录，之后录音会并入同一条。',
-      inkRecognizing: '已请求识别，Agent 完成后会显示',
-      inkRecognizeFailed: '识别请求失败',
+      helpBody: '【手写板】\n· 「笔」「橡皮」「撤销」「清空」是书写工具。\n· 淡蓝色虚线框是自动发现的一个个字：轻点某个字就能选中它，不必画圈。\n· 长按画布约 0.6 秒可直接开始圈选，继续拖动即可圈住一片内容。\n· 选中或识别出文字后，下方出现同一排动作：「识别选中」只读圈住的字；「转为任务」把文字直接建成待确认任务；「清除」清空选择与识别结果。\n· 「识别为文字」按行识别整页：本地模型、离线、约 43 毫秒一行，多行会自动分行，识别完下方直接给出「转为任务」。\n· 「保存为图片」把整页存成 PNG 进会议记录。\n\n【系统手写】\n· 用 Windows 自带手写面板输入文字，再点「存为笔记」。\n· 需要系统先开启手写功能：设置 → 时间和语言 → 语言和区域 → 中文(简体) → 语言选项 → 安装「手写」。\n· 本环境是 Electron，可能唤不出系统面板；那就直接在这个输入框里打字。\n\n【会议术语】\n· 每行一条。写成「错词=正确词」可在转写里自动替换；只写词则作为热词。\n· 内容会自动保存到本场会议。\n\n【没有开始录音也能用】\n· 写笔记、识别、转任务都不需要先点「开始记录」；第一次写入时会自动建一条会议记录，之后录音会并入同一条。',
       inkNote: '笔记文字',
       documents: '会议文档',
       openDocument: '查看',
-      inkPrompt: '这是一张会议手写笔记的图片。请识别其中的文字，然后用 meeting_note_write 把识别结果写回本场会议（作为草稿）。字迹不清的部分请如实标注，不要猜测。',
       setupTitle: '首次使用会联网下载模型',
       setupBody: '以下功能在第一次用到时需要联网下载本地模型（音频始终不出本机）：',
       setupTranscribe: '语音转写（SenseVoice，本机识别）',
@@ -418,7 +409,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       speakerOff: 'Speaker labels are off (about 27 MB to prepare)',
       points: 'Key points',
       tasks: 'Work assignments',
-      refresh: 'Refresh points and tasks',
       point_decision: 'Decision',
       point_point: 'Point',
       point_risk: 'Risk',
@@ -495,10 +485,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardTitle: 'This meeting has unsaved content',
       historyGuardBody: 'It is saved automatically in 3 seconds, then the chosen meeting opens; you can also save now or cancel.',
       historyGuardNow: 'Save and open now',
-      meetingSetup: 'Meeting name & role',
       historyAll: 'All shown',
       historyMore: 'Scroll for more…',
-      generate: 'Extract points and tasks (local)',
       extractEmpty: 'No obvious points or assignments were found. Ask the agent in the conversation to refine, e.g. "read this meeting and give me the key points and action items".',
       noMeeting: 'This session has no meeting yet. Start a recording first, then extract the points and tasks.',
       seekHint: 'Click to jump to this cue',
@@ -520,7 +508,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       inkSave: 'Save as note',
       inkSaved: 'Note saved',
       inkClose: 'Hide the pad',
-      inkRecognize: 'Send to the conversation (slow)',
       inkLocal: 'Recognize as text',
       inkLocalEmpty: 'Nothing was recognized; write larger and retry',
       inkLasso: 'Lasso',
@@ -537,7 +524,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       roleObserver: 'Observer',
       roleHint: 'Reviews are organised around this role',
       review: 'Review the meeting',
-      push: 'Push tasks',
       pushDone: 'Pushed to the group robot',
       robotSettings: 'Robot settings',
       robotHint: 'Paste the DingTalk / WeCom robot webhook addresses; leave one empty to skip it. Only confirmed tasks are pushed, and the addresses stay on this machine.',
@@ -605,7 +591,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       minutes: 'Generate minutes',
       minutesDocx: 'Export Word',
       minutesDocxDone: 'Word written to the export directory',
-      revise: 'Second-pass correction',
       revisePrompt: 'This meeting has finished. First call meeting_read to read the full transcript (each cue carries a #id), then make one consistent correction pass using the meeting context: the same person, company and terminology written the same way; words clearly misheard as homophones fixed; obvious misrecognitions repaired. Then submit the corrections with meeting_revise, where each entry is {id, text} — the id from the transcript and the full corrected text for that cue. Correct only what the context supports, never invent content, and leave anything uncertain as it is. Finish with a short note saying what you changed.',
       reviseSending: 'The agent is making the second correction pass; the transcript updates when it finishes',
       minutesDone: 'Minutes written to the export directory',
@@ -619,12 +604,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       notesToggle: 'Handwritten note',
       helpToggle: 'Help',
       helpBody: '【Handwriting pad】\n· Pen, eraser, undo and clear are the drawing tools.\n· Faint dashed boxes are characters found from the ink alone: tap one to select it, no lasso needed.\n· Long-press the pad for about 0.6 s to start a lasso, then drag to circle an area.\n· A selection or a recognized result shows one action row: "Recognize selection" reads only the circled characters, "To task" turns the text straight into a draft task, and "Clear" empties both.\n· "Recognize as text" reads the page line by line locally, offline, about 43 ms per line, splitting lines automatically, and offers "To task" right below.\n· "Save as image" stores the page as a PNG in the meeting record.\n· "Send to the conversation" asks the agent instead; it is slower and needs a signed-in session.\n\n【System handwriting】\n· Type with the Windows handwriting panel, then store it as a note.\n· Windows must have handwriting installed: Settings → Time & language → Language & region → Chinese (Simplified) → Language options → install Handwriting.\n· This Electron shell may not summon the system panel; the text box here always works.\n\n【Meeting terms】\n· One entry per line. Write "wrong=right" to replace it in transcripts; a bare word is a hint.\n· Entries save automatically.\n\n【Works without recording】\n· Notes, recognition and tasks need no recording; the first write creates the meeting record, and a later recording joins it.',
-      inkRecognizing: 'Recognition requested; the result appears when the agent finishes',
-      inkRecognizeFailed: 'Recognition request failed',
       inkNote: 'Note text',
       documents: 'Meeting documents',
       openDocument: 'Open',
-      inkPrompt: 'This image is a handwritten meeting note. Read the text in it, then call meeting_note_write to store the result on this meeting as a draft. Mark anything illegible honestly instead of guessing.',
       setupTitle: 'Models download on first use',
       setupBody: 'These features download their local models the first time you use them (audio never leaves this machine):',
       setupTranscribe: 'Speech transcription (SenseVoice, on-device)',
@@ -1055,6 +1037,22 @@ registerProcessor('meeting-capture', MeetingCapture)
      */
     function floatWhen(measured, node) {
       return measured === true ? float(node) : node
+    }
+
+    /**
+     * Ask the browser to save a produced artifact. The host serves it with an attachment
+     * disposition, so the person gets the usual download rather than a path to go and find.
+     * @param name - file name inside the export directory.
+     */
+    function downloadArtifact(name) {
+      if (typeof name !== 'string' || name === '' || typeof document === 'undefined') return
+      const link = document.createElement('a')
+      link.href = `${PREFIX}/download?name=${encodeURIComponent(name)}`
+      link.download = name
+      link.rel = 'noopener'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
     }
 
     /**
@@ -2176,21 +2174,6 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [ensureMeeting, props, role, sessionId, t])
 
-      /** Ask the agent for a context-aware correction pass over the finished transcript. */
-      const revise = React.useCallback(async () => {
-        setError('')
-        setNote('')
-        if (sessionId === '') {
-          setError(t('reviewNoSession'))
-          return
-        }
-        const asked = await props.askText(sessionId, t('revisePrompt'))
-        if (!asked.ok) {
-          setError(`${t('reviewNoSession')}: ${asked.error}`)
-          return
-        }
-        setNote(t('reviseSending'))
-      }, [props, sessionId, t])
 
       /**
        * Attach a real name to a voice label. The label itself never changes, so assigned
@@ -2218,25 +2201,6 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [ensureMeeting, t])
 
-      /** Send the confirmed assignments to the configured group robots. Nothing leaves this
-       * machine until the user both confirms a task and presses this.
-       */
-      const push = React.useCallback(async () => {
-        setError('')
-        setNote('')
-        const id = await ensureMeeting()
-        if (id === '') {
-          setError(t('needSession'))
-          return
-        }
-        try {
-          const reply = await post('/push', { meetingId: id })
-          const lines = reply.results.map((entry) => `${entry.kind}: ${entry.ok ? t('pushDone') : entry.message}`)
-          setNote(lines.join('；'))
-        } catch (failure) {
-          setError(failure instanceof Error ? failure.message : String(failure))
-        }
-      }, [ensureMeeting, t])
 
       /** Load the shared roster once, to suggest owners in task editing. */
       React.useEffect(() => {
@@ -2270,36 +2234,14 @@ registerProcessor('meeting-capture', MeetingCapture)
         try {
           const reply = await post('/minutes', { meetingId: id, format })
           setNote(`${format === 'docx' ? t('minutesDocxDone') : t('minutesDone')}: ${reply.name}`)
+          // The host writes the file and answers with its name; the browser is then handed
+          // the save dialog, which is what "导出" has to mean for the person clicking it.
+          downloadArtifact(reply.name)
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
         }
       }, [ensureMeeting, t])
 
-      /**
-       * Derive draft points and tasks locally — no model, no login. The agent can refine
-       * them later through the conversation; until then this path always works.
-       */
-      const extract = React.useCallback(async () => {
-        setError('')
-        setNote('')
-        let id = meetingId
-        if (id === '') {
-          const adopted = await adopt()
-          if (adopted === null) {
-            setNote(t('noMeeting'))
-            return
-          }
-          id = adopted.meetingId
-        }
-        try {
-          const reply = await post('/extract', { meetingId: id })
-          setPoints(reply.points)
-          setTasks(reply.tasks)
-          setNote(reply.points.length + reply.tasks.length === 0 ? t('extractEmpty') : t('agentDone'))
-        } catch (failure) {
-          setError(failure instanceof Error ? failure.message : String(failure))
-        }
-      }, [adopt, meetingId, t])
 
       /**
        * Confirm, edit, or remove one stored entry. Only a human reaches this path, which
@@ -2798,26 +2740,6 @@ registerProcessor('meeting-capture', MeetingCapture)
           setError(failure instanceof Error ? failure.message : String(failure))
         }
       }, [ensureMeeting, startedAt, t])
-
-      /**
-       * Ask the agent to read a drawing and store the text. The image travels as a prompt
-       * attachment because only user messages may carry images in this build.
-       * @param pngBase64 - The drawing as base64 PNG bytes.
-       */
-      const recognize = React.useCallback(async (pngBase64) => {
-        setError('')
-        setNote('')
-        if (sessionId === '') {
-          setError(t('inkRecognizeFailed'))
-          return
-        }
-        const asked = await props.askNote(sessionId, t('inkPrompt'), pngBase64)
-        if (!asked.ok) {
-          setError(`${t('inkRecognizeFailed')}: ${asked.error}`)
-          return
-        }
-        setNote(t('inkRecognizing'))
-      }, [props, sessionId, t])
 
       /**
        * Recognize a drawing locally and keep the text on this meeting. No agent, no
@@ -3451,11 +3373,8 @@ registerProcessor('meeting-capture', MeetingCapture)
               },
               role: 'menu',
             }, [
-              h(Btn, {
-                disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
-                key: 'extract', type: 'button', style: styles.menuItem, role: 'menuitem',
-                onClick: () => { setMoreOpen(false); void extract() },
-              }, t('generate')),
+              // Only what acts on the record itself stays: exporting it, copying it, handing
+              // it to a model for correction.
               h(Btn, {
                 key: 'files', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void exportFiles() },
@@ -3476,31 +3395,9 @@ registerProcessor('meeting-capture', MeetingCapture)
                 onClick: () => { setMoreOpen(false); void copyForFix() },
               }, t('copyForFix')),
               h(Btn, {
-                key: 'refresh', type: 'button', style: styles.menuItem, role: 'menuitem',
-                onClick: () => { setMoreOpen(false); void refreshAnalysis() },
-              }, t('refresh')),
-              h(Btn, {
-                disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
-                key: 'revise', type: 'button', style: styles.menuItem, role: 'menuitem',
-                onClick: () => { setMoreOpen(false); void revise() },
-              }, t('revise')),
-              h(Btn, {
                 key: 'minutesdocx', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void writeMinutes('docx') },
               }, t('minutesDocx')),
-              h(Btn, {
-                key: 'push', type: 'button', style: styles.menuItem, role: 'menuitem',
-                onClick: () => { setMoreOpen(false); void push() },
-              }, t('push')),
-              // Name and role live in one dialog; this brings it back after the meeting
-              // was named, so the seat stays changeable (FEATURES §5.5).
-              h(Btn, {
-                key: 'setup', type: 'button', style: styles.menuItem, role: 'menuitem',
-                onClick: () => {
-                  setMoreOpen(false)
-                  setNamePrompt({ text: meta.title, kind: meta.kind, role: role === '' ? 'attendee' : role, roleOther: '', start: false })
-                },
-              }, t('meetingSetup')),
             ])) : null,
           ]),
           h(Btn, {
@@ -3563,7 +3460,6 @@ registerProcessor('meeting-capture', MeetingCapture)
             key: 'ink',
             t,
             onSave: saveNote,
-            onRecognize: recognize,
             onRecognizeLocal: recognizeNote,
             recognizedText: lastNote,
             onRecognizedToTask: (text) => { void noteToTask(text) },
@@ -4577,12 +4473,6 @@ registerProcessor('meeting-capture', MeetingCapture)
         if (pngBase64 !== '') await props.onSave(pngBase64)
       }
 
-      /** Hand the rendered note to the agent for handwriting recognition. */
-      const recognize = async () => {
-        const pngBase64 = pngBytes()
-        if (pngBase64 !== '') await props.onRecognize(pngBase64)
-      }
-
       /**
        * Pack the drawing the way the recognizer reads it, following the official ModelScope
        * preprocessing: crop to the ink, fit the height to 32, paste at the top-left of a
@@ -4824,13 +4714,6 @@ registerProcessor('meeting-capture', MeetingCapture)
             disabled: count === 0 && strokes.current.length === 0,
             onClick: () => { void recognizeLocal() },
           }, t('inkLocal')),
-          h(Btn, {
-            key: 'recognize',
-            type: 'button',
-            style: styles.button,
-            disabled: count === 0 && strokes.current.length === 0,
-            onClick: () => { void recognize() },
-          }, t('inkRecognize')),
         ]),
         // One row per recognized line, so a note holding several assignments can send each of
         // them to the task list on its own.

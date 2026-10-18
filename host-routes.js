@@ -1025,6 +1025,38 @@ export function createHandler(ctx) {
         return
       }
 
+      if (method === 'GET' && route === '/download') {
+        // Hand a produced artifact to the browser as a download, so the person gets the
+        // usual save dialog instead of a file written somewhere they have to go looking for.
+        const name = url.searchParams.get('name') ?? ''
+        if (!isSafeArtifactName(name)) {
+          sendJson(res, 400, { error: 'invalid file name' })
+          return
+        }
+        const path = join(exportDirectory(), name)
+        let info
+        try {
+          info = await stat(path)
+        } catch {
+          sendJson(res, 404, { error: 'no such file' })
+          return
+        }
+        if (!info.isFile() || info.size > MAX_ARTIFACT_BYTES) {
+          sendJson(res, 400, { error: 'file is missing or too large' })
+          return
+        }
+        const bytes = await readFile(path)
+        res.writeHead(200, {
+          'Content-Type': contentTypeOf(name),
+          'Content-Length': bytes.length,
+          // The name is percent-encoded for the header, and the plain name is kept too so
+          // older clients still see a sensible file name.
+          'Content-Disposition': `attachment; filename="${name.replace(/[^\x20-\x7e]/gu, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+        })
+        res.end(bytes)
+        return
+      }
+
       if (method === 'GET' && (route === '/audio' || route === '/raw')) {
         const name = url.searchParams.get('name') ?? ''
         if (!isSafeArtifactName(name)) {

@@ -114,6 +114,10 @@ export function wavHeader(dataBytes, sampleRate) {
 export function contentTypeOf(name) {
   if (name.endsWith('.wav')) return 'audio/wav'
   if (name.endsWith('.png')) return 'image/png'
+  // Word and Markdown are produced artifacts too: the browser needs the right type to save
+  // them under the right name and open them in the right application.
+  if (name.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  if (name.endsWith('.md')) return 'text/markdown; charset=utf-8'
   return 'text/plain; charset=utf-8'
 }
 
