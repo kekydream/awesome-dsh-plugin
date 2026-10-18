@@ -5546,7 +5546,11 @@ registerProcessor('meeting-capture', MeetingCapture)
             openConversation: (sessionId) => {
               const workspace = ctx.get('uiWorkspace')
               if (workspace === undefined || sessionId === '') return false
-              workspace.openSession({ sessionId })
+              // `openSession(target)` takes the SessionId ITSELF — it is passed straight to
+              // `replaceMain`. Handing it `{ sessionId }` resolves to no session at all and
+              // lands on a blank one, which is exactly what "it only opened a new chat" was.
+              console.info('meeting-room: revealing session', sessionId)
+              workspace.openSession(sessionId)
               return true
             },
             /**
