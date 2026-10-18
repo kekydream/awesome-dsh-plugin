@@ -909,6 +909,9 @@ registerProcessor('meeting-capture', MeetingCapture)
   transition: background .12s ease; }
 .mr-row:hover { background: var(--dsw-alias-bg-layer-2); }
 .mr-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A choice is a Menu behind a Button: keep the trigger as narrow as the select was. */
+.mr-choice { max-width: 168px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-choice.mr-choice--tight { max-width: 108px; }
 .mr-ufield.mr-layout-title { flex: 1 1 auto; min-width: 0; }
 .mr-hover { transition: background .12s ease; }
 .mr-hover:hover { background: var(--dsw-alias-bg-layer-2); }
@@ -949,6 +952,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       : null
     const HostInput = typeof primitives.Input === 'function' || (typeof primitives.Input === 'object' && primitives.Input !== null)
       ? primitives.Input
+      : null
+    const HostMenu = typeof primitives.Menu === 'function' || (typeof primitives.Menu === 'object' && primitives.Menu !== null)
+      ? primitives.Menu
       : null
 
     /** The host Button preset each of our variants means. */
@@ -1024,15 +1030,58 @@ registerProcessor('meeting-capture', MeetingCapture)
     }
 
     /**
-     * One select, styled as a field so rows of controls line up.
-     * @param props - usual select props, plus `variant` to force one.
-     * @returns the select element.
+     * One choice out of a list. Call sites keep the native-select contract — `value`,
+     * `onChange(event)` and `<option>` children — while the control underneath is the
+     * host's Menu when this host has one, and a native select otherwise. Keeping the old
+     * contract is what lets nine pickers change at once without touching nine call sites.
+     * @param props - usual select props, including the option children.
+     * @returns the control.
      */
     function Picker(props) {
-      const { style, variant, ...rest } = props
+      const { style, variant, className, children, value, onChange, disabled, title, ...rest } = props
       const resolved = variant ?? FIELD_VARIANT.get(style) ?? 'tight'
       const extra = style !== undefined && !FIELD_VARIANT.has(style) ? style : undefined
-      return h('select', { ...rest, className: `mr-picker mr-picker--${resolved}`, style: extra })
+      const [open, setOpen] = React.useState(false)
+      const options = React.Children.toArray(children).map((child) => ({
+        value: String(child.props.value ?? ''),
+        label: child.props.children,
+      }))
+      if (HostMenu === null || HostButton === null) {
+        return h('select', {
+          ...rest,
+          className: classNames(className, `mr-picker mr-picker--${resolved}`),
+          style: extra,
+          value,
+          disabled,
+          title,
+          onChange,
+        }, children)
+      }
+      const selected = String(value ?? '')
+      const current = options.find((option) => option.value === selected)
+      return h(HostMenu, {
+        open,
+        anchor: h(HostButton, {
+          variant: 'outline',
+          size: 'sm',
+          disabled,
+          title,
+          className: classNames(className, `mr-choice mr-choice--${resolved}`),
+          onClick: () => setOpen((wasOpen) => !wasOpen),
+        // A value the list does not contain (a hand-picked due time) shows itself rather
+        // than leaving the trigger blank.
+        }, current === undefined ? (selected === '' ? '' : selected) : current.label),
+        items: options.map((option) => ({ id: option.value, label: option.label })),
+        selectedId: selected,
+        // The handler keeps seeing a change event, exactly as the select gave it one.
+        onSelect: (id) => {
+          setOpen(false)
+          if (id !== selected) onChange({ target: { value: id } })
+        },
+        onClose: () => setOpen(false),
+        align: 'start',
+        portal: true,
+      })
     }
 
     /**
