@@ -754,7 +754,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       error: { margin: 0, fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' },
       note: { margin: 0, fontSize: '11px', opacity: 0.7, wordBreak: 'break-all' },
       actions: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
-      hub: { padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '860px' },
+      hub: { padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '860px', height: '100%', minHeight: 0, boxSizing: 'border-box' },
+      /**
+       * The scrolling part of the page: the heading, the status card and the tab row stay put,
+       * and each tab's own content moves under them once it is taller than the frame.
+       */
+      hubBody: { display: 'flex', flexDirection: 'column', gap: '14px', flex: '1 1 auto', minHeight: 0, overflowY: 'auto', paddingRight: '4px',
+        // Belt and braces: if the frame hands this page an indefinite height, the tab body
+        // still gets a ceiling of its own instead of running off the bottom.
+        maxHeight: 'calc(100vh - 200px)' },
       hubTitle: { margin: 0, fontSize: '18px', fontWeight: 600 },
       /** One meeting in the management page: fixed columns, so the rows line up. */
       hubRecord: { display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
@@ -5115,6 +5123,9 @@ registerProcessor('meeting-capture', MeetingCapture)
           style: hubTab === value ? styles.tabActive : styles.tab,
           onClick: () => setHubTab(value),
         }, t(HUB_TAB_KEYS[value])))),
+        // Every tab body scrolls on its own: the page keeps its heading, status and tab row,
+        // and whatever the tab holds moves under them.
+        h('div', { key: 'hubbody', style: styles.hubBody }, [
         hubTab === 'terms' ? h('div', { key: 'terms' }, [
           h('label', { key: 'label', style: styles.label, htmlFor: 'meeting-room-hub-terms' }, t('terms')),
           h('span', { key: 'hint', style: styles.hint }, t('termsHint')),
@@ -5357,6 +5368,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                 : h('p', { key: 'none', style: styles.empty }, t('hubNoText')),
         ]) : null,
         error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        ]),
       ]))
     }
 
