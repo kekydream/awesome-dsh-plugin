@@ -788,6 +788,9 @@ registerProcessor('meeting-capture', MeetingCapture)
         border: '1px solid var(--dsw-alias-border-l1)',
         borderRadius: '8px',
         boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
+        // A long menu scrolls instead of running off a short panel.
+        maxHeight: '60vh',
+        overflowY: 'auto',
       },
       menuItem: {
         padding: '6px 10px',
@@ -1848,8 +1851,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       const listRef = React.useRef(null)
       /** Where the meeting dropdown sits: measured from the panel, so it spans its width. */
       const [pickerRect, setPickerRect] = React.useState(null)
-      /** Where the overflow menu sits: measured from its button, above the panel's layers. */
-      const [moreRect, setMoreRect] = React.useState(null)
       /** The switch guard: the row to open once the countdown saved the current meeting. */
       const [switchPrompt, setSwitchPrompt] = React.useState(null)
       const audio = React.useRef(null)
@@ -3333,36 +3334,15 @@ registerProcessor('meeting-capture', MeetingCapture)
               type: 'button',
               style: moreOpen ? styles.buttonActive : styles.button,
               'aria-expanded': moreOpen,
-              onClick: (event) => {
-                const open = moreOpen !== true
-                if (open) {
-                  // Measured and fixed, like the meeting picker: the menu then sits above
-                  // everything in the panel instead of inside its stacking order (§5.2).
-                  const section = event.currentTarget.closest('section')
-                  const box = (section ?? event.currentTarget).getBoundingClientRect()
-                  const button = event.currentTarget.getBoundingClientRect()
-                  const width = Math.min(300, Math.max(200, box.width - 16))
-                  setMoreRect({
-                    top: button.bottom + 6,
-                    left: Math.max(8, box.right - 8 - width),
-                    width,
-                  })
-                }
-                setMoreOpen(open)
-              },
+              onClick: () => setMoreOpen((value) => !value),
             }, t('more')),
+            // Anchored to its own button rather than to measured coordinates: the button
+            // grows when it turns active, and a rect captured before that render put the
+            // menu somewhere else. The wrapper is the positioning context, so the menu is
+            // always directly under the button; the z-index keeps it above the panel.
             moreOpen ? h('div', {
               key: 'moremenu',
-              style: moreRect === null ? styles.menu : {
-                ...styles.menu,
-                position: 'fixed',
-                top: `${moreRect.top}px`,
-                left: `${moreRect.left}px`,
-                width: `${moreRect.width}px`,
-                right: 'auto',
-                maxHeight: '60vh',
-                overflowY: 'auto',
-              },
+              style: styles.menu,
               role: 'menu',
             }, [
               h(Btn, {
