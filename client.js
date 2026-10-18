@@ -1071,8 +1071,12 @@ registerProcessor('meeting-capture', MeetingCapture)
       const section = typeof element.closest === 'function' ? element.closest('section') : null
       const box = (section ?? element).getBoundingClientRect()
       const rect = element.getBoundingClientRect()
-      const width = Math.min(maxWidth, Math.max(200, box.width - 16))
-      return { top: rect.bottom + 6, left: Math.max(8, box.right - 8 - width), width }
+      const width = Math.min(maxWidth, Math.max(180, box.width - 16))
+      // Hung off the button's bottom-LEFT corner: the left edges line up, and the panel's
+      // width only caps how wide it may get. Clamped so it cannot leave the window.
+      const viewport = typeof window === 'undefined' ? box.width : window.innerWidth
+      const left = Math.min(Math.max(8, rect.left), Math.max(8, viewport - width - 8))
+      return { top: rect.bottom + 6, left, width }
     }
 
     /**
@@ -1906,6 +1910,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [pickerRect, setPickerRect] = React.useState(null)
       /** Where the overflow menu sits, measured from the button that opened it. */
       const [moreRect, setMoreRect] = React.useState(null)
+      /** The button that opened it, kept as a plain node so it can be measured again. */
+      const moreAnchor = React.useRef(null)
       /** The switch guard: the row to open once the countdown saved the current meeting. */
       const [switchPrompt, setSwitchPrompt] = React.useState(null)
       const audio = React.useRef(null)
@@ -2572,19 +2578,37 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       // The overflow is a dropdown, so it closes on the next click anywhere or on Escape,
       // like a native menu. The zero-delay listener keeps the opening click from closing it.
+      // A resize, a minimise or a switch away also closes it: the panel's own geometry just
+      // changed, and coordinates measured before that would be wrong.
       React.useEffect(() => {
         if (!moreOpen) return undefined
         const close = () => setMoreOpen(false)
         const onKey = (event) => { if (event.key === 'Escape') setMoreOpen(false) }
+        const onViewportChange = () => setMoreOpen(false)
         const timer = setTimeout(() => {
           document.addEventListener('click', close)
           document.addEventListener('keydown', onKey)
+          window.addEventListener('resize', onViewportChange)
+          document.addEventListener('visibilitychange', onViewportChange)
         }, 0)
         return () => {
           clearTimeout(timer)
           document.removeEventListener('click', close)
           document.removeEventListener('keydown', onKey)
+          window.removeEventListener('resize', onViewportChange)
+          document.removeEventListener('visibilitychange', onViewportChange)
         }
+      }, [moreOpen])
+
+      // Measure again once the open render has happened: the button is in its active style
+      // by then, so the menu lands under the button as it actually looks.
+      React.useLayoutEffect(() => {
+        if (!moreOpen) {
+          setMoreRect(null)
+          return
+        }
+        const placed = measureUnder(moreAnchor.current, 300)
+        if (placed !== null) setMoreRect(placed)
       }, [moreOpen])
 
       /** Load one slice of the picker's rows; scrolling to the bottom asks for the next one. */
@@ -2638,19 +2662,25 @@ registerProcessor('meeting-capture', MeetingCapture)
         void loadHistory(state.query, true)
       }, [loadHistory])
 
-      // The picker is a dropdown as well: an outside click or Escape closes it.
+      // The picker is a dropdown as well: an outside click or Escape closes it, and so does a
+      // resize or a minimise — its placement was measured from the panel's geometry.
       React.useEffect(() => {
         if (picker.open !== true) return undefined
         const close = () => setPicker((value) => ({ ...value, open: false }))
         const onKey = (event) => { if (event.key === 'Escape') setPicker((value) => ({ ...value, open: false })) }
+        const onViewportChange = () => setPicker((value) => ({ ...value, open: false }))
         const timer = setTimeout(() => {
           document.addEventListener('click', close)
           document.addEventListener('keydown', onKey)
+          window.addEventListener('resize', onViewportChange)
+          document.addEventListener('visibilitychange', onViewportChange)
         }, 0)
         return () => {
           clearTimeout(timer)
           document.removeEventListener('click', close)
           document.removeEventListener('keydown', onKey)
+          window.removeEventListener('resize', onViewportChange)
+          document.removeEventListener('visibilitychange', onViewportChange)
         }
       }, [picker.open])
 
@@ -3397,7 +3427,12 @@ registerProcessor('meeting-capture', MeetingCapture)
               // then fell back to coordinates relative to the whole page.
               onClick: (event) => {
                 const open = moreOpen !== true
-                if (open) setMoreRect(measureUnder(event.currentTarget, 300))
+                if (open) {
+                  // The element is kept for one re-measurement after the open render, when
+                  // the button already carries its active style and the row has settled.
+                  moreAnchor.current = event.currentTarget
+                  setMoreRect(measureUnder(event.currentTarget, 300))
+                }
                 setMoreOpen(open)
               },
             }, t('more')),
