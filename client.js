@@ -777,7 +777,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         position: 'absolute',
         top: 'calc(100% + 4px)',
         right: 0,
-        zIndex: 20,
+        // Above the panel's own chrome and pinned rows; dialogs stay above this.
+        zIndex: 3000,
         minWidth: '168px',
         display: 'flex',
         flexDirection: 'column',
@@ -820,7 +821,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         top: 'calc(100% + 4px)',
         left: 0,
         right: 0,
-        zIndex: 20,
+        // Same layer as the overflow menu: a dropdown is never covered by panel content.
+        zIndex: 3000,
         maxHeight: '320px',
         overflowY: 'auto',
         display: 'flex',
@@ -841,7 +843,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabBody: { minHeight: '384px', display: 'flex', flexDirection: 'column', gap: '8px' },
       hintLines: { display: 'block', fontSize: '11px', opacity: 0.65, lineHeight: 1.6, whiteSpace: 'pre-line' },
       termsArea: { width: '100%', flex: 1, minHeight: '320px', padding: '6px', borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px', resize: 'vertical', boxSizing: 'border-box' },
-      setupOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
+      setupOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5000 },
       setupCard: { position: 'relative', background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '12px', padding: '18px 20px', maxWidth: '460px', width: 'calc(100% - 40px)', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' },
       /** The same card for a dialog that has more to read (the tutorial). */
       setupCardWide: { position: 'relative', background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '12px', padding: '18px 22px', maxWidth: '820px', width: 'min(92vw, 820px)', maxHeight: '82vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' },
@@ -1846,6 +1848,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       const listRef = React.useRef(null)
       /** Where the meeting dropdown sits: measured from the panel, so it spans its width. */
       const [pickerRect, setPickerRect] = React.useState(null)
+      /** Where the overflow menu sits: measured from its button, above the panel's layers. */
+      const [moreRect, setMoreRect] = React.useState(null)
       /** The switch guard: the row to open once the countdown saved the current meeting. */
       const [switchPrompt, setSwitchPrompt] = React.useState(null)
       const audio = React.useRef(null)
@@ -3329,9 +3333,38 @@ registerProcessor('meeting-capture', MeetingCapture)
               type: 'button',
               style: moreOpen ? styles.buttonActive : styles.button,
               'aria-expanded': moreOpen,
-              onClick: () => setMoreOpen((value) => !value),
+              onClick: (event) => {
+                const open = moreOpen !== true
+                if (open) {
+                  // Measured and fixed, like the meeting picker: the menu then sits above
+                  // everything in the panel instead of inside its stacking order (§5.2).
+                  const section = event.currentTarget.closest('section')
+                  const box = (section ?? event.currentTarget).getBoundingClientRect()
+                  const button = event.currentTarget.getBoundingClientRect()
+                  const width = Math.min(300, Math.max(200, box.width - 16))
+                  setMoreRect({
+                    top: button.bottom + 6,
+                    left: Math.max(8, box.right - 8 - width),
+                    width,
+                  })
+                }
+                setMoreOpen(open)
+              },
             }, t('more')),
-            moreOpen ? h('div', { key: 'moremenu', style: styles.menu, role: 'menu' }, [
+            moreOpen ? h('div', {
+              key: 'moremenu',
+              style: moreRect === null ? styles.menu : {
+                ...styles.menu,
+                position: 'fixed',
+                top: `${moreRect.top}px`,
+                left: `${moreRect.left}px`,
+                width: `${moreRect.width}px`,
+                right: 'auto',
+                maxHeight: '60vh',
+                overflowY: 'auto',
+              },
+              role: 'menu',
+            }, [
               h(Btn, {
                 disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
                 key: 'extract', type: 'button', style: styles.menuItem, role: 'menuitem',
