@@ -956,6 +956,9 @@ registerProcessor('meeting-capture', MeetingCapture)
     const HostMenu = typeof primitives.Menu === 'function' || (typeof primitives.Menu === 'object' && primitives.Menu !== null)
       ? primitives.Menu
       : null
+    const HostModal = typeof primitives.Modal === 'function' || (typeof primitives.Modal === 'object' && primitives.Modal !== null)
+      ? primitives.Modal
+      : null
 
     /** The host Button preset each of our variants means. */
     const BTN_PRESET = {
@@ -1082,6 +1085,33 @@ registerProcessor('meeting-capture', MeetingCapture)
         align: 'start',
         portal: true,
       })
+    }
+
+    /**
+     * One dialog: the host's Modal when this host has one, the plugin's own overlay
+     * otherwise. Title, body and footer arrive as props/nodes, so a call site does not care
+     * which of the two is rendering — and the host version brings its own focus handling.
+     * @param props - title, optional description, onClose, children (body) and footer (buttons).
+     * @returns the dialog.
+     */
+    function Dialog(props) {
+      const { title, description, onClose, children, footer } = props
+      if (HostModal !== null) {
+        return h(HostModal, { open: true, onClose, title, description, children, footer })
+      }
+      return h('div', {
+        style: styles.setupOverlay,
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-label': title,
+      }, [
+        h('div', { key: 'card', style: styles.setupCard }, [
+          h('h2', { key: 'title', style: styles.setupTitle }, title),
+          description === undefined ? null : h('p', { key: 'hint', style: styles.note }, description),
+          children,
+          footer === undefined ? null : h('div', { key: 'foot', style: styles.setupFoot }, footer),
+        ]),
+      ])
     }
 
     /**
@@ -3824,41 +3854,33 @@ registerProcessor('meeting-capture', MeetingCapture)
             typeof props.openVoiceInputBundle === 'function' && !speech.requesting && !pendingStart ? h(Btn, { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null,
           ]),
         ]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
-        switchPrompt === null ? null : h('div', {
+        switchPrompt === null ? null : h(Dialog, {
           key: 'switchprompt',
-          style: styles.setupOverlay,
-          role: 'dialog',
-          'aria-modal': 'true',
-        }, [
-          h('div', { style: styles.setupCard }, [
-            h('h2', { style: styles.setupTitle }, t('historyGuardTitle')),
-            h('p', { style: styles.note }, t('historyGuardBody')),
-            h('p', { key: 'count', style: styles.status }, `⏳ ${switchPrompt.seconds}`),
-            h('div', { key: 'foot', style: styles.setupFoot }, [
-              h(Btn, {
-                key: 'now',
-                type: 'button',
-                style: styles.button,
-                onClick: () => setSwitchPrompt((value) => (value === null ? null : { ...value, seconds: 0 })),
-              }, t('historyGuardNow')),
-              h(Btn, {
-                key: 'cancel',
-                type: 'button',
-                style: styles.button,
-                onClick: () => setSwitchPrompt(null),
-              }, t('cancelEntry')),
-            ]),
-          ]),
-        ]),
-        namePrompt === null ? null : h('div', {
+          title: t('historyGuardTitle'),
+          description: t('historyGuardBody'),
+          onClose: () => setSwitchPrompt(null),
+          children: h('p', { key: 'count', style: styles.status }, `⏳ ${switchPrompt.seconds}`),
+          footer: [
+            h(Btn, {
+              key: 'now',
+              type: 'button',
+              style: styles.button,
+              onClick: () => setSwitchPrompt((value) => (value === null ? null : { ...value, seconds: 0 })),
+            }, t('historyGuardNow')),
+            h(Btn, {
+              key: 'cancel',
+              type: 'button',
+              style: styles.button,
+              onClick: () => setSwitchPrompt(null),
+            }, t('cancelEntry')),
+          ],
+        }),
+        namePrompt === null ? null : h(Dialog, {
           key: 'nameprompt',
-          style: styles.setupOverlay,
-          role: 'dialog',
-          'aria-modal': 'true',
-        }, [
-          h('div', { style: styles.setupCard }, [
-            h('h2', { style: styles.setupTitle }, t('meetingNameTitle')),
-            h('p', { style: styles.note }, t('meetingNameHint')),
+          title: t('meetingNameTitle'),
+          description: t('meetingNameHint'),
+          onClose: () => setNamePrompt(null),
+          children: [
             h(Field, {
               key: 'text',
               type: 'text',
@@ -3892,42 +3914,42 @@ registerProcessor('meeting-capture', MeetingCapture)
                   : current.text,
               })),
             }, t(KIND_LABEL_KEYS[value])))),
-            h('div', { key: 'foot', style: styles.setupFoot }, [
-              h(Btn, {
-                key: 'go',
-                type: 'button',
-                style: styles.button,
-                onClick: () => {
-                  const draft = namePrompt
-                  setNamePrompt(null)
-                  void (async () => {
-                    if (draft === null) return
-                    // The seat is stored with the name, so both land before recording starts.
-                    const nextRole = typeof draft.role === 'string' && draft.role !== '' ? draft.role : role
-                    if (nextRole !== role) await chooseRole(nextRole)
-                    if (draft.text.trim() !== '' || draft.kind !== '') {
-                      await saveMeta({ title: draft.text.trim(), kind: draft.kind })
-                    }
-                    // Opened from the menu it only saves; opened by Start it also records.
-                    if (draft.start !== false) await start()
-                  })()
-                },
-              }, namePrompt.start === false ? t('saveEntry') : t('start')),
-              namePrompt.start === false ? null : h(Btn, {
-                key: 'skip',
-                type: 'button',
-                style: styles.button,
-                onClick: () => { setNamePrompt(null); void start() },
-              }, t('meetingNameSkip')),
-              h(Btn, {
-                key: 'cancel',
-                type: 'button',
-                style: styles.button,
-                onClick: () => setNamePrompt(null),
-              }, t('cancelEntry')),
-            ]),
-          ]),
-        ]),
+          ],
+          footer: [
+          h(Btn, {
+            key: 'go',
+              type: 'button',
+              style: styles.button,
+              onClick: () => {
+                const draft = namePrompt
+                setNamePrompt(null)
+                void (async () => {
+                  if (draft === null) return
+                  // The seat is stored with the name, so both land before recording starts.
+                  const nextRole = typeof draft.role === 'string' && draft.role !== '' ? draft.role : role
+                  if (nextRole !== role) await chooseRole(nextRole)
+                  if (draft.text.trim() !== '' || draft.kind !== '') {
+                    await saveMeta({ title: draft.text.trim(), kind: draft.kind })
+                  }
+                  // Opened from the menu it only saves; opened by Start it also records.
+                  if (draft.start !== false) await start()
+                })()
+              },
+            }, namePrompt.start === false ? t('saveEntry') : t('start')),
+            namePrompt.start === false ? null : h(Btn, {
+              key: 'skip',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { setNamePrompt(null); void start() },
+            }, t('meetingNameSkip')),
+            h(Btn, {
+              key: 'cancel',
+              type: 'button',
+              style: styles.button,
+              onClick: () => setNamePrompt(null),
+            }, t('cancelEntry')),
+          ],
+        }),
         ]),
       ]))
     }
