@@ -139,6 +139,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubSendHint: '新建一个对话，把这场会议的实录放进去，确认后发送',
       hubOpenSession: '打开会议',
       hubOpenMeetingHint: '切换到这场会议的对话，并在右侧打开它的会议记录',
+      hubOpeningMeeting: '正在打开这场会议',
       hubNoMeeting: '这条记录没有对应的会议',
       hubNoWorkspace: '当前界面不支持新建对话',
       hubClose: '关闭',
@@ -400,6 +401,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubSendHint: 'Open a new conversation with this meeting\'s transcript, ready to send',
       hubOpenSession: 'Open meeting',
       hubOpenMeetingHint: 'Switch to this meeting\'s conversation and open its record in the right panel',
+      hubOpeningMeeting: 'Opening this meeting',
       hubNoMeeting: 'This record has no meeting behind it',
       hubNoWorkspace: 'This shell cannot start a new conversation',
       hubClose: 'Close',
@@ -2668,6 +2670,10 @@ registerProcessor('meeting-capture', MeetingCapture)
         const pending = pendingMeeting.current
         if (pending === null || pending.sessionId !== sessionId) return
         pendingMeeting.current = null
+        console.info('meeting-room: panel picked up the meeting to show', pending.meetingId)
+        // Bring this panel's tab forward: the panel is mounted in the session that owns the
+        // meeting, so this is the first moment the request can be served for sure.
+        if (typeof props.focusMeetingPanel === 'function') props.focusMeetingPanel()
         void (async () => {
           const adopted = await adopt()
           // Its own meeting is already the one on screen; nothing to switch to.
@@ -2675,7 +2681,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           await openHistorical({ meetingId: pending.meetingId, sessionId: pending.sessionId, title: '' })
           setBodyTab('transcript')
         })()
-      }, [adopt, openHistorical, sessionId])
+      }, [adopt, openHistorical, props, sessionId])
 
       /** Write the current meeting now, so switching away cannot lose it. */
       const saveNow = React.useCallback(async () => {
@@ -4906,13 +4912,23 @@ registerProcessor('meeting-capture', MeetingCapture)
           return
         }
         pendingMeeting.current = { sessionId: row.sessionId, meetingId: row.meetingId }
+        setNote(`${t('hubOpeningMeeting')} …`)
+        console.info('meeting-room: open meeting requested', row.meetingId, 'in session', row.sessionId)
         const opened = typeof props.openConversation === 'function' ? props.openConversation(row.sessionId) : false
         if (opened === false) {
           pendingMeeting.current = null
           setError(t('hubNoWorkspace'))
           return
         }
-        if (typeof props.openMeetingPanel === 'function') props.openMeetingPanel()
+        // Switching conversations rebuilds the right column, so the first attempt can land on
+        // the old pane. Retry briefly; the panel also focuses its own tab once it is mounted
+        // with the pending meeting, which covers the case where these attempts arrive early.
+        const tryFocus = (attempt) => {
+          if (typeof props.openMeetingPanel !== 'function') return
+          props.openMeetingPanel()
+          if (attempt < 3) setTimeout(() => tryFocus(attempt + 1), 300 * (attempt + 1))
+        }
+        tryFocus(0)
       }, [props, t])
 
       /**
@@ -5417,7 +5433,26 @@ registerProcessor('meeting-capture', MeetingCapture)
 
         ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab', key: TAB_ID, locale: NS,
-          inject: () => ({ askNote, askText, openVoiceInputBundle: () => { if (readRailCollapsed() === true) ctx.layout.toggleSidebar(); const nav = ctx.get('pluginNavigation'); if (nav) nav.openBundle('@deepseek-ai/dsh-experimental-voice-input-bundle'); else ctx.layout.selectPanel('plugins') } }),
+          inject: () => ({
+            askNote,
+            askText,
+            /**
+             * Bring this panel's tab forward in its own column. The panel calls this when it
+             * was asked to show a meeting, which is more reliable than the caller doing it
+             * before the conversation switch has finished rebuilding the column.
+             * @returns whether the tab could be selected.
+             */
+            focusMeetingPanel: () => {
+              try {
+                ctx.sidebarRight.openTab(TAB_KIND)
+                return true
+              } catch (failure) {
+                console.warn('meeting-room: could not focus the meeting tab', failure)
+                return false
+              }
+            },
+            openVoiceInputBundle: () => { if (readRailCollapsed() === true) ctx.layout.toggleSidebar(); const nav = ctx.get('pluginNavigation'); if (nav) nav.openBundle('@deepseek-ai/dsh-experimental-voice-input-bundle'); else ctx.layout.selectPanel('plugins') },
+          }),
         }, MeetingPanel))
         ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab.title', key: TAB_ID,
@@ -5467,7 +5502,9 @@ registerProcessor('meeting-capture', MeetingCapture)
              */
             openMeetingPanel: () => {
               try {
-                if (!ctx.sidebarRight.isExpanded()) ctx.sidebarRight.openTab(TAB_KIND)
+                // Always select the tab: skipping this when the column is merely expanded
+                // left whatever other tab was showing in place of the meeting.
+                ctx.sidebarRight.openTab(TAB_KIND)
                 return true
               } catch (failure) {
                 console.warn('meeting-room: the meeting panel could not be opened', failure)
