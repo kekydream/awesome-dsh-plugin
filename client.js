@@ -711,7 +711,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         flexWrap: 'wrap',
         padding: '6px 8px',
         borderRadius: '6px',
-        border: '1px solid rgba(127,127,127,0.22)',
+        border: '1px solid var(--dsw-alias-border-l1)',
       },
       taskRowDraft: {
         display: 'flex',
@@ -720,7 +720,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         flexWrap: 'wrap',
         padding: '6px 8px',
         borderRadius: '6px',
-        border: '1px dashed rgba(127,127,127,0.45)',
+        border: '1px dashed var(--dsw-alias-border-l2)',
       },
       taskTitleInput: {
         flex: 1,
@@ -751,16 +751,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       textarea: { width: '100%', minHeight: '56px', padding: '6px', borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px', resize: 'vertical', boxSizing: 'border-box' },
       list: { display: 'flex', flexDirection: 'column', gap: '6px' },
       segment: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', cursor: 'pointer' },
-      segmentActive: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', cursor: 'pointer', background: 'rgba(127,127,127,0.18)', fontWeight: 600 },
+      segmentActive: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', cursor: 'pointer', background: 'var(--dsw-alias-bg-layer-2)', fontWeight: 600 },
       stamp: { opacity: 0.55, fontVariantNumeric: 'tabular-nums', minWidth: '38px' },
-      chip: { padding: '0 6px', borderRadius: '10px', border: '1px solid rgba(127,127,127,0.4)', fontSize: '11px', alignSelf: 'center' },
+      chip: { padding: '0 6px', borderRadius: '10px', border: '1px solid var(--dsw-alias-border-l2)', fontSize: '11px', alignSelf: 'center' },
       empty: { margin: 0, fontSize: '12px', opacity: 0.6 },
-      error: { margin: 0, fontSize: '12px', color: '#c0392b' },
+      error: { margin: 0, fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' },
       note: { margin: 0, fontSize: '11px', opacity: 0.7, wordBreak: 'break-all' },
       actions: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
       hub: { padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '860px' },
       hubTitle: { margin: 0, fontSize: '18px', fontWeight: 600 },
-      hubCard: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderRadius: '8px', border: '1px solid rgba(127,127,127,0.25)' },
+      hubCard: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderRadius: '8px', border: '1px solid var(--dsw-alias-border-l1)' },
       hubList: { display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '260px', overflowY: 'auto' },
       hubRow: { display: 'flex', alignItems: 'baseline', gap: '10px', justifyContent: 'space-between' },
       linkButton: { padding: 0, border: 'none', background: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit' },
@@ -768,7 +768,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       audio: { width: '100%' },
       player: { display: 'flex', flexDirection: 'column', gap: '8px' },
       playerList: { display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '360px', overflowY: 'auto' },
-      buttonActive: { padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', background: 'rgba(127,127,127,0.3)' },
+      buttonActive: { padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', background: 'var(--dsw-alias-bg-layer-2)' },
       inlineInput: { padding: '2px 6px', borderRadius: '4px', fontSize: '12px', width: '72px', fontFamily: 'inherit', boxSizing: 'border-box' },
       smallButton: { padding: '1px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' },
       /** The overflow menu hangs under its button instead of widening the action row. */
@@ -833,11 +833,11 @@ registerProcessor('meeting-capture', MeetingCapture)
         boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
       },
       taskDone: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', opacity: 0.55 },
-      ink: { display: 'block', width: '100%', height: '320px', touchAction: 'none', border: '1px dashed rgba(127,127,127,0.45)', borderRadius: '8px', cursor: 'crosshair' },
-      inkShot: { maxWidth: '100%', borderRadius: '8px', border: '1px solid rgba(127,127,127,0.25)' },
-      tabs: { display: 'flex', gap: '4px', borderBottom: '1px solid rgba(127,127,127,0.25)', paddingBottom: '2px' },
+      ink: { display: 'block', width: '100%', height: '320px', touchAction: 'none', border: '1px dashed var(--dsw-alias-border-l2)', borderRadius: '8px', cursor: 'crosshair' },
+      inkShot: { maxWidth: '100%', borderRadius: '8px', border: '1px solid var(--dsw-alias-border-l1)' },
+      tabs: { display: 'flex', gap: '4px', borderBottom: '1px solid var(--dsw-alias-border-l1)', paddingBottom: '2px' },
       tab: { padding: '4px 10px', border: 'none', background: 'none', color: 'inherit', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', borderRadius: '6px 6px 0 0', opacity: 0.7 },
-      tabActive: { padding: '4px 10px', border: 'none', background: 'rgba(127,127,127,0.22)', color: 'inherit', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', borderRadius: '6px 6px 0 0', fontWeight: 600 },
+      tabActive: { padding: '4px 10px', border: 'none', background: 'var(--dsw-alias-bg-layer-2)', color: 'inherit', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', borderRadius: '6px 6px 0 0', fontWeight: 600 },
       tabBody: { minHeight: '384px', display: 'flex', flexDirection: 'column', gap: '8px' },
       hintLines: { display: 'block', fontSize: '11px', opacity: 0.65, lineHeight: 1.6, whiteSpace: 'pre-line' },
       termsArea: { width: '100%', flex: 1, minHeight: '320px', padding: '6px', borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px', resize: 'vertical', boxSizing: 'border-box' },
@@ -847,6 +847,117 @@ registerProcessor('meeting-capture', MeetingCapture)
       setupFeature: { fontSize: '13px', lineHeight: 1.6 },
       setupFoot: { display: 'flex', gap: '8px', justifyContent: 'flex-end' },
       setupClose: { position: 'absolute', top: '8px', right: '12px', border: 'none', background: 'none', color: 'inherit', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '4px' },
+    }
+
+    /**
+     * The plugin's one control stylesheet. Every button, field, picker and tab renders a
+     * raw element (behaviour and per-site widths stay exactly as they were) but takes its
+     * surface, border, radius and interactive states from these classes, so the whole plugin
+     * looks like one product instead of a dozen inline variants. Colours are theme tokens,
+     * which is also what makes light and dark both correct.
+     */
+    const CONTROL_CSS = `
+.mr-btn { font: inherit; font-size: 12px; line-height: 1.5; padding: 4px 10px; border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary); cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, opacity .12s ease; }
+.mr-btn:hover { background: var(--dsw-alias-bg-layer-2); }
+.mr-btn:active { background: var(--dsw-alias-bg-base); }
+.mr-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.mr-btn:disabled { opacity: .5; cursor: not-allowed; }
+.mr-btn--active { background: var(--dsw-alias-bg-layer-2); border-color: var(--dsw-alias-border-l2); }
+.mr-btn--small { padding: 1px 8px; font-size: 11px; border-radius: 4px; }
+.mr-btn--link { border-color: transparent; background: none; padding: 0 2px; text-decoration: underline;
+  color: var(--dsw-alias-brand-primary); }
+.mr-btn--menu { display: block; width: 100%; text-align: left; border-color: transparent; background: none;
+  padding: 6px 10px; white-space: nowrap; }
+.mr-btn--menu:hover { background: var(--dsw-alias-bg-layer-2); }
+.mr-btn--tab { border-color: transparent; background: none; border-radius: 6px 6px 0 0; opacity: .68; }
+.mr-btn--tab:hover { opacity: 1; background: none; }
+.mr-btn--tab-active { border-color: transparent; background: none; border-radius: 6px 6px 0 0;
+  box-shadow: inset 0 -2px 0 var(--dsw-alias-brand-primary); font-weight: 600; }
+.mr-btn--header { border-color: transparent; background: none; }
+.mr-btn--plain { border-color: transparent; background: none; }
+.mr-field, .mr-picker { font: inherit; font-size: 12px; color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base); border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px; padding: 3px 6px; box-sizing: border-box; }
+.mr-field::placeholder { color: var(--dsw-alias-label-secondary); }
+.mr-field:hover, .mr-picker:hover { border-color: var(--dsw-alias-border-l2); }
+.mr-field:focus, .mr-picker:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
+.mr-field:disabled, .mr-picker:disabled { opacity: .55; cursor: not-allowed; }
+.mr-field--wide { flex: 1 1 120px; min-width: 0; }
+.mr-field--tight, .mr-picker--tight { width: 76px; }
+.mr-field--area { min-height: 72px; resize: vertical; width: 100%; }
+.mr-field--title { border-color: transparent; background: none; padding: 2px 4px; flex: 1 1 auto; min-width: 0; }
+.mr-field--title:hover { border-color: var(--dsw-alias-border-l1); }
+.mr-hover { transition: background .12s ease; }
+.mr-hover:hover { background: var(--dsw-alias-bg-layer-2); }
+`
+    if (typeof document !== 'undefined' && document.getElementById('mr-control-style') === null) {
+      const sheet = document.createElement('style')
+      sheet.id = 'mr-control-style'
+      sheet.textContent = CONTROL_CSS
+      document.head.appendChild(sheet)
+    }
+
+    /** Which shared variant each of the plugin's own style objects means. */
+    const BTN_VARIANT = new Map([
+      [styles.button, 'default'],
+      [styles.buttonActive, 'active'],
+      [styles.smallButton, 'small'],
+      [styles.linkButton, 'link'],
+      [styles.menuItem, 'menu'],
+      [styles.tab, 'tab'],
+      [styles.tabActive, 'tab-active'],
+      [styles.headerButton, 'header'],
+    ])
+    const FIELD_VARIANT = new Map([
+      [styles.inlineInput, 'tight'],
+      [styles.inlineWide, 'wide'],
+      [styles.textarea, 'area'],
+      [styles.taskTitleInput, 'title'],
+      [styles.termsArea, 'area'],
+    ])
+
+    /**
+     * One button. The caller's props and handlers pass straight through; the look comes from
+     * `.mr-*`, and a style object the map does not know (a width, a flex) is still honoured.
+     * @param props - usual button props, plus `variant` to force one.
+     * @returns the button element.
+     */
+    function Btn(props) {
+      const { style, variant, ...rest } = props
+      const resolved = variant ?? BTN_VARIANT.get(style) ?? 'default'
+      const extra = style !== undefined && !BTN_VARIANT.has(style) ? style : undefined
+      return h('button', { ...rest, className: `mr-btn mr-btn--${resolved}`, style: extra })
+    }
+
+    /**
+     * One text field (or textarea when the variant says so).
+     * @param props - usual input props, plus `variant` to force one.
+     * @returns the field element.
+     */
+    function Field(props) {
+      const { style, variant, ...rest } = props
+      // A checkbox is a control but not a *field*: it keeps its own shape.
+      if (rest.type === 'checkbox' || rest.type === 'radio' || rest.type === 'file' || rest.type === 'range') {
+        return h('input', { ...rest, style })
+      }
+      const resolved = variant ?? FIELD_VARIANT.get(style) ?? 'wide'
+      const extra = style !== undefined && !FIELD_VARIANT.has(style) ? style : undefined
+      return h(resolved === 'area' ? 'textarea' : 'input', { ...rest, className: `mr-field mr-field--${resolved}`, style: extra })
+    }
+
+    /**
+     * One select, styled as a field so rows of controls line up.
+     * @param props - usual select props, plus `variant` to force one.
+     * @returns the select element.
+     */
+    function Picker(props) {
+      const { style, variant, ...rest } = props
+      const resolved = variant ?? FIELD_VARIANT.get(style) ?? 'tight'
+      const extra = style !== undefined && !FIELD_VARIANT.has(style) ? style : undefined
+      return h('select', { ...rest, className: `mr-picker mr-picker--${resolved}`, style: extra })
     }
 
     /**
@@ -1107,7 +1218,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             onEnded: () => setPlaying(false),
           }),
         h('div', { key: 'meta', style: styles.row }, [
-          h('button', {
+          h(Btn, {
             key: 'follow',
             type: 'button',
             style: follow ? styles.buttonActive : styles.button,
@@ -1119,6 +1230,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           key: segment.id,
           ref: (element) => { rows.current[index] = element },
           style: index === activeIndex ? styles.segmentActive : styles.segment,
+          className: 'mr-hover',
           title: t('seekHint'),
           onClick: () => { if (props.src !== '') seekTo(segment.start) },
         }, [
@@ -1131,7 +1243,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           }, seenOf(segment)),
           // Only where there is a meeting to write to: the hub previews finished records and
           // passes no handler.
-          props.onToTask === undefined ? null : h('button', {
+          props.onToTask === undefined ? null : h(Btn, {
             key: 'toTask',
             type: 'button',
             style: styles.smallButton,
@@ -2874,7 +2986,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               onCompositionEnd: onQueryComposed,
               onKeyDown: (event) => { if (event.key === 'Escape') setPicker((value) => ({ ...value, open: false })) },
             }),
-            h('button', {
+            h(Btn, {
               key: 'toggle',
               type: 'button',
               style: styles.smallButton,
@@ -2898,6 +3010,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             ...picker.rows.map((row) => h('div', {
               key: row.meetingId,
               style: styles.historyRow,
+              className: 'mr-hover',
               role: 'button',
               tabIndex: 0,
               title: t('historyChoose'),
@@ -2931,13 +3044,13 @@ registerProcessor('meeting-capture', MeetingCapture)
           ]),
           viewed === null ? null : h('div', { key: 'viewer', style: styles.row }, [
             h('span', { key: 'label', style: styles.status }, `${t('historyViewing')}: ${meta.title === '' ? t('meetingNameNone') : meta.title}${meta.period === '' ? '' : ` · ${meta.period}`}`),
-            typeof props.openConversation !== 'function' || viewed.sessionId === '' ? null : h('button', {
+            typeof props.openConversation !== 'function' || viewed.sessionId === '' ? null : h(Btn, {
               key: 'session',
               type: 'button',
               style: styles.smallButton,
               onClick: () => openSeries({ sessionId: viewed.sessionId }),
             }, t('historyOpenSession')),
-            h('button', {
+            h(Btn, {
               key: 'back',
               type: 'button',
               style: styles.button,
@@ -2947,7 +3060,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           // Meeting identity: name, type, the derived period, and this kind's one-click
           // distill (FEATURES.md §2.1, §3, §5.1). Hidden while viewing a historical meeting.
           viewed !== null ? null : h('div', { key: 'metabar', style: styles.row }, [
-            h('input', {
+            h(Field, {
               key: `title-${meta.title}`,
               type: 'text',
               style: styles.inlineWide,
@@ -2959,28 +3072,28 @@ registerProcessor('meeting-capture', MeetingCapture)
                 if (next !== meta.title) void saveMeta({ title: next })
               },
             }),
-            h('select', {
+            h(Picker, {
               key: 'kind',
               style: styles.inlineInput,
               value: meta.kind,
               onChange: (event) => { void saveMeta({ kind: event.target.value }) },
             }, KIND_VALUES.map((value) => h('option', { key: value === '' ? 'general' : value, value }, t(KIND_LABEL_KEYS[value])))),
             meta.period === '' ? null : h('span', { key: 'period', style: styles.chip }, meta.period),
-            series.prev === null ? null : h('button', {
+            series.prev === null ? null : h(Btn, {
               key: 'prev',
               type: 'button',
               style: styles.smallButton,
               title: `${series.prev.title === '' ? t('meetingNameNone') : series.prev.title}${series.prev.period === '' ? '' : ` · ${series.prev.period}`}`,
               onClick: () => openSeries(series.prev),
             }, t('seriesPrev')),
-            series.next === null ? null : h('button', {
+            series.next === null ? null : h(Btn, {
               key: 'next',
               type: 'button',
               style: styles.smallButton,
               title: `${series.next.title === '' ? t('meetingNameNone') : series.next.title}${series.next.period === '' ? '' : ` · ${series.next.period}`}`,
               onClick: () => openSeries(series.next),
             }, t('seriesNext')),
-            h('button', {
+            h(Btn, {
               key: 'distill',
               type: 'button',
               style: styles.button,
@@ -2990,13 +3103,13 @@ registerProcessor('meeting-capture', MeetingCapture)
           // A briefing starts by accounting for what yesterday's review left open (§3.1).
           carry.items.length === 0 || viewed !== null ? null : h('div', { key: 'carry', style: styles.row }, [
             h('span', { key: 'hint', style: styles.hint }, `${t('carryOverHint')} ${carry.items.length}`),
-            h('button', { key: 'handle', type: 'button', style: styles.smallButton, onClick: () => { void handleCarryOver() } }, t('carryOverAction')),
-            carry.review === null ? null : h('button', { key: 'open', type: 'button', style: styles.smallButton, onClick: () => openSeries(carry.review) }, t('carryOverOpen')),
+            h(Btn, { key: 'handle', type: 'button', style: styles.smallButton, onClick: () => { void handleCarryOver() } }, t('carryOverAction')),
+            carry.review === null ? null : h(Btn, { key: 'open', type: 'button', style: styles.smallButton, onClick: () => openSeries(carry.review) }, t('carryOverOpen')),
           ]),
           // Recording and the meeting's own actions belong to the session's meeting, so they
           // step aside while a historical meeting is being read (§5.4).
           viewed !== null ? null : h('div', { key: 'notebar', style: styles.row }, [
-          h('button', {
+          h(Btn, {
             key: 'toggle',
             type: 'button',
             style: recording ? styles.buttonActive : styles.button,
@@ -3010,25 +3123,25 @@ registerProcessor('meeting-capture', MeetingCapture)
             },
           }, recording ? t('stop') : t('start')),
           // Pause sits beside Stop: a pause keeps the meeting open, Stop ends it (§5.6).
-          phase !== 'recording' ? null : h('button', {
+          phase !== 'recording' ? null : h(Btn, {
             key: 'pause',
             type: 'button',
             style: paused ? styles.buttonActive : styles.button,
             onClick: () => togglePause(),
           }, paused ? t('resumeRecording') : t('pauseRecording')),
-          h('button', {
+          h(Btn, {
             key: 'notes',
             type: 'button',
             style: notesOpen ? styles.buttonActive : styles.button,
             onClick: () => setNotesOpen((value) => !value),
           }, t('notesToggle')),
-          h('button', {
+          h(Btn, {
             key: 'review',
             type: 'button',
             style: styles.button,
             onClick: () => { void review() },
           }, t('review')),
-          h('button', {
+          h(Btn, {
             key: 'minutes',
             type: 'button',
             style: styles.button,
@@ -3038,7 +3151,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           // and 「生成要点与任务」 sits with the other occasional actions instead of shouting
           // in the bar.
           hasContent ? h('div', { key: 'morewrap', style: styles.menuWrap }, [
-            h('button', {
+            h(Btn, {
               key: 'more',
               type: 'button',
               style: moreOpen ? styles.buttonActive : styles.button,
@@ -3046,45 +3159,45 @@ registerProcessor('meeting-capture', MeetingCapture)
               onClick: () => setMoreOpen((value) => !value),
             }, t('more')),
             moreOpen ? h('div', { key: 'moremenu', style: styles.menu, role: 'menu' }, [
-              segments.length === 0 ? null : h('button', {
+              segments.length === 0 ? null : h(Btn, {
                 key: 'extract', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void extract() },
               }, t('generate')),
-              h('button', {
+              h(Btn, {
                 key: 'files', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void exportFiles() },
               }, t('exportFile')),
-              segments.length === 0 ? null : h('button', {
+              segments.length === 0 ? null : h(Btn, {
                 key: 'srt', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void copySrt() },
               }, t('copySrt')),
-              segments.length === 0 ? null : h('button', {
+              segments.length === 0 ? null : h(Btn, {
                 key: 'copy', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void copyText() },
               }, t('copy')),
-              segments.length === 0 ? null : h('button', {
+              segments.length === 0 ? null : h(Btn, {
                 key: 'fix', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void copyForFix() },
               }, t('copyForFix')),
-              h('button', {
+              h(Btn, {
                 key: 'refresh', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void refreshAnalysis() },
               }, t('refresh')),
-              segments.length === 0 ? null : h('button', {
+              segments.length === 0 ? null : h(Btn, {
                 key: 'revise', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void revise() },
               }, t('revise')),
-              h('button', {
+              h(Btn, {
                 key: 'minutesdocx', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void writeMinutes('docx') },
               }, t('minutesDocx')),
-              h('button', {
+              h(Btn, {
                 key: 'push', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void push() },
               }, t('push')),
               // Name and role live in one dialog; this brings it back after the meeting
               // was named, so the seat stays changeable (FEATURES §5.5).
-              h('button', {
+              h(Btn, {
                 key: 'setup', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => {
                   setMoreOpen(false)
@@ -3093,7 +3206,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               }, t('meetingSetup')),
             ]) : null,
           ]) : null,
-          h('button', {
+          h(Btn, {
             key: 'help',
             type: 'button',
             title: t('helpToggle'),
@@ -3105,19 +3218,19 @@ registerProcessor('meeting-capture', MeetingCapture)
         ]),
         h('span', { key: 'status', style: styles.status }, status),
         notesOpen ? h('div', { key: 'tabs', style: styles.tabs }, [
-          h('button', {
+          h(Btn, {
             key: 'ink',
             type: 'button',
             style: tab === 'ink' ? styles.tabActive : styles.tab,
             onClick: () => setTab('ink'),
           }, t('tabInk')),
-          h('button', {
+          h(Btn, {
             key: 'system',
             type: 'button',
             style: tab === 'system' ? styles.tabActive : styles.tab,
             onClick: () => setTab('system'),
           }, t('tabSystem')),
-          h('button', {
+          h(Btn, {
             key: 'terms',
             type: 'button',
             style: tab === 'terms' ? styles.tabActive : styles.tab,
@@ -3138,7 +3251,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           }) : null,
           tab === 'system' ? h('div', { key: 'system', style: styles.list }, [
             h('span', { key: 'hint', style: styles.hintLines }, t('inkSystemHint')),
-            h('button', {
+            h(Btn, {
               key: 'open',
               type: 'button',
               style: styles.button,
@@ -3152,7 +3265,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                 }
               },
             }, t('inkSystemOpen')),
-            h('textarea', {
+            h(Field, {
               key: 'field',
               ref: systemField,
               style: styles.textarea,
@@ -3160,7 +3273,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               placeholder: t('inkStore'),
               onChange: (event) => setSystemText(event.target.value),
             }),
-            h('button', {
+            h(Btn, {
               key: 'store',
               type: 'button',
               style: styles.button,
@@ -3170,7 +3283,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           ]) : null,
           tab === 'terms' ? h('div', { key: 'terms', style: styles.list }, [
             h('span', { key: 'hint', style: styles.hint }, t('termsHint')),
-            h('textarea', {
+            h(Field, {
               key: 'input',
               id: 'meeting-room-terms',
               style: styles.termsArea,
@@ -3195,14 +3308,14 @@ registerProcessor('meeting-capture', MeetingCapture)
         // One tab per kind of meeting content, so the panel shows one thing at a time instead
         // of the transcript, the points, the assignments and the voices stacked together.
         h('div', { key: 'bodytabs', style: styles.tabs }, [
-          ...BODY_TAB_VALUES.map((value) => h('button', {
+          ...BODY_TAB_VALUES.map((value) => h(Btn, {
             key: value,
             type: 'button',
             style: bodyTab === value ? styles.tabActive : styles.tab,
             onClick: () => setBodyTab(value),
           }, t(BODY_TAB_KEYS[value]))),
           // The score table belongs to the monthly review, so it appears with that type.
-          meta.kind !== 'monthly' ? null : h('button', {
+          meta.kind !== 'monthly' ? null : h(Btn, {
             key: 'scores',
             type: 'button',
             style: bodyTab === 'scores' ? styles.tabActive : styles.tab,
@@ -3215,7 +3328,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         h('span', { key: 'rolehint', style: styles.hint }, t('roleHint')),
         h('div', { key: 'speaker', style: styles.row }, [
           h('span', { key: 'state', style: styles.status }, speakerText),
-          speaker.phase === 'ready' ? null : h('button', {
+          speaker.phase === 'ready' ? null : h(Btn, {
             key: 'prepare',
             type: 'button',
             style: styles.button,
@@ -3229,6 +3342,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             key: segment.id,
             ref: (element) => { rows.current[index] = element },
             style: index === activeIndex ? styles.segmentActive : styles.segment,
+            className: 'mr-hover',
             title: t('seekHint'),
             onClick: () => seekTo(segment.start),
           }, [
@@ -3241,7 +3355,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               title: seenOf(segment) === segment.text ? undefined : segment.text,
             }, seenOf(segment)),
             // Every cue is its own candidate assignment.
-            h('button', {
+            h(Btn, {
               key: 'toTask',
               type: 'button',
               style: styles.smallButton,
@@ -3257,13 +3371,13 @@ registerProcessor('meeting-capture', MeetingCapture)
           // otherwise sit in the panel the whole time.
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, t('speakerNames')),
-            labels.length === 0 ? null : h('button', {
+            labels.length === 0 ? null : h(Btn, {
               key: 'toggle',
               type: 'button',
               style: namesOpen ? styles.buttonActive : styles.button,
               onClick: () => setNamesOpen((value) => !value),
             }, namesOpen ? t('hubClose') : t('openNames')),
-            viewed !== null ? null : h('button', {
+            viewed !== null ? null : h(Btn, {
               key: 'relabel',
               type: 'button',
               style: styles.button,
@@ -3279,7 +3393,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             h('span', { key: 'hint', style: styles.hint }, t('speakerNameHint')),
             ...labels.map((label) => h('div', { key: label, style: styles.row }, [
             h('span', { key: 'label', style: styles.chip }, label),
-            h('input', {
+            h(Field, {
               key: 'name',
               style: styles.textarea,
               value: draftNames[label] ?? speakers[label] ?? '',
@@ -3288,7 +3402,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               list: OWNER_LIST_ID,
               onChange: (event) => setDraftNames((value) => ({ ...value, [label]: event.target.value })),
             }),
-            h('button', {
+            h(Btn, {
               key: 'save',
               type: 'button',
               style: styles.button,
@@ -3308,7 +3422,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             key: point.id,
             style: styles.taskEdit,
           }, [
-            h('input', {
+            h(Field, {
               key: 'text',
               type: 'text',
               style: styles.inlineWide,
@@ -3317,19 +3431,19 @@ registerProcessor('meeting-capture', MeetingCapture)
               spellCheck: false,
               onChange: (event) => setPointDraft((value) => ({ ...value, text: event.target.value })),
             }),
-            h('select', {
+            h(Picker, {
               key: 'kind',
               style: styles.inlineInput,
               value: pointDraft.kind,
               onChange: (event) => setPointDraft((value) => ({ ...value, kind: event.target.value })),
             }, POINT_KIND_VALUES.map((value) => h('option', { key: value, value }, t(`point_${value}`)))),
-            h('button', {
+            h(Btn, {
               key: 'save',
               type: 'button',
               style: styles.smallButton,
               onClick: () => { void savePointEdit() },
             }, t('saveEntry')),
-            h('button', {
+            h(Btn, {
               key: 'cancel',
               type: 'button',
               style: styles.smallButton,
@@ -3339,7 +3453,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             key: point.id,
             style: point.status === 'confirmed' ? styles.segment : styles.taskDone,
           }, [
-            h('input', {
+            h(Field, {
               key: 'done',
               type: 'checkbox',
               checked: point.status === 'confirmed',
@@ -3349,13 +3463,13 @@ registerProcessor('meeting-capture', MeetingCapture)
             h('span', { key: 'kind', style: styles.chip }, t(`point_${point.kind}`)),
             h('span', { key: 'text', style: { flex: 1 } }, point.text),
             h('span', { key: 'origin', style: styles.chip }, point.origin === 'agent' ? t('originAgent') : point.origin === 'manual' ? t('originManual') : t('originRule')),
-            h('button', {
+            h(Btn, {
               key: 'edit',
               type: 'button',
               style: styles.smallButton,
               onClick: () => beginPointEdit(point),
             }, t('editEntry')),
-            h('button', {
+            h(Btn, {
               key: 'del',
               type: 'button',
               style: styles.smallButton,
@@ -3364,7 +3478,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           ]))),
           // Hand-writing an entry is always possible: no recording, or nothing extracted yet.
           h('div', { key: 'add', style: styles.row }, [
-            h('input', {
+            h(Field, {
               key: 'text',
               type: 'text',
               style: styles.inlineWide,
@@ -3374,13 +3488,13 @@ registerProcessor('meeting-capture', MeetingCapture)
               onChange: (event) => setNewPoint((value) => ({ ...value, text: event.target.value })),
               onKeyDown: (event) => { if (event.key === 'Enter') void addPoint() },
             }),
-            h('select', {
+            h(Picker, {
               key: 'kind',
               style: styles.inlineInput,
               value: newPoint.kind,
               onChange: (event) => setNewPoint((value) => ({ ...value, kind: event.target.value })),
             }, POINT_KIND_VALUES.map((value) => h('option', { key: value, value }, t(`point_${value}`)))),
-            h('button', {
+            h(Btn, {
               key: 'save',
               type: 'button',
               style: styles.smallButton,
@@ -3409,14 +3523,14 @@ registerProcessor('meeting-capture', MeetingCapture)
               key: task.id,
               style: task.status === 'confirmed' ? styles.taskRow : styles.taskRowDraft,
             }, [
-              h('input', {
+              h(Field, {
                 key: 'done',
                 type: 'checkbox',
                 checked: task.status === 'confirmed',
                 title: t('confirm'),
                 onChange: (event) => { void editEntry('task', task.id, { status: event.target.checked ? 'confirmed' : 'draft' }) },
               }),
-              h('input', {
+              h(Field, {
                 key: 'title',
                 type: 'text',
                 style: styles.taskTitleInput,
@@ -3430,7 +3544,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                   else event.target.value = task.title
                 },
               }),
-              h('select', {
+              h(Picker, {
                 key: 'owner',
                 style: styles.inlineInput,
                 value: task.owner,
@@ -3442,7 +3556,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               ]),
               // Time is a quick choice; the exact date and time picker appears only when the
               // user asks for it, or when the stored value is already something specific.
-              h('select', {
+              h(Picker, {
                 key: 'due',
                 style: styles.inlineInput,
                 value: showDuePicker ? CUSTOM_DUE : task.due,
@@ -3463,7 +3577,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                 ...presets.map((entry) => h('option', { key: entry.key, value: entry.value }, t(entry.key))),
                 h('option', { key: 'custom', value: CUSTOM_DUE }, t('dueCustom')),
               ]),
-              showDuePicker ? h('input', {
+              showDuePicker ? h(Field, {
                 key: 'duepicker',
                 type: 'datetime-local',
                 style: styles.inlineInput,
@@ -3471,14 +3585,14 @@ registerProcessor('meeting-capture', MeetingCapture)
                 spellCheck: false,
                 onChange: (event) => { void editEntry('task', task.id, { due: event.target.value.replace('T', ' ') }) },
               }) : null,
-              h('select', {
+              h(Picker, {
                 key: 'priority',
                 style: styles.inlineInput,
                 value: TASK_PRIORITY_VALUES.includes(task.priority) ? task.priority : 'normal',
                 title: t('priority'),
                 onChange: (event) => { void editEntry('task', task.id, { priority: event.target.value }) },
               }, TASK_PRIORITY_VALUES.map((value) => h('option', { key: value, value }, t(PRIORITY_KEYS[value])))),
-              h('button', {
+              h(Btn, {
                 key: 'del',
                 type: 'button',
                 style: styles.smallButton,
@@ -3488,7 +3602,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           }),
           // The same promise as the points tab: this tab is never a dead end.
           h('div', { key: 'add', style: styles.row }, [
-            h('input', {
+            h(Field, {
               key: 'text',
               type: 'text',
               style: styles.inlineWide,
@@ -3498,7 +3612,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               onChange: (event) => setNewTask(event.target.value),
               onKeyDown: (event) => { if (event.key === 'Enter') void addTask() },
             }),
-            h('button', {
+            h(Btn, {
               key: 'save',
               type: 'button',
               style: styles.smallButton,
@@ -3509,16 +3623,16 @@ registerProcessor('meeting-capture', MeetingCapture)
         bodyTab !== 'scores' ? null : h('div', { key: 'scores', style: styles.list }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, `${t('panelTabScores')} (${scores.length})`),
-            viewed !== null ? null : h('button', { key: 'prefill', type: 'button', style: styles.button, onClick: () => { void prefillScores() } }, t('scoresPrefill')),
-            viewed !== null ? null : h('button', { key: 'csv', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('csv') } }, t('scoresExportCsv')),
-            viewed !== null ? null : h('button', { key: 'xlsx', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('xlsx') } }, t('scoresExportXlsx')),
+            viewed !== null ? null : h(Btn, { key: 'prefill', type: 'button', style: styles.button, onClick: () => { void prefillScores() } }, t('scoresPrefill')),
+            viewed !== null ? null : h(Btn, { key: 'csv', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('csv') } }, t('scoresExportCsv')),
+            viewed !== null ? null : h(Btn, { key: 'xlsx', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('xlsx') } }, t('scoresExportXlsx')),
           ]),
           h('span', { key: 'hint', style: styles.hint }, t('scoresHint')),
           scores.length === 0 ? null : h('div', { key: 'rows', style: styles.list }, scores.map((row) => h('div', {
             key: row.person,
             style: row.status === 'confirmed' ? styles.segment : styles.taskDone,
           }, [
-            h('input', {
+            h(Field, {
               key: 'confirmed',
               type: 'checkbox',
               checked: row.status === 'confirmed',
@@ -3526,18 +3640,18 @@ registerProcessor('meeting-capture', MeetingCapture)
               onChange: (event) => { void editScore(row.person, { status: event.target.checked ? 'confirmed' : 'draft' }) },
             }),
             h('span', { key: 'person', style: styles.chip }, row.person),
-            h('input', { key: 'hours', type: 'number', style: styles.inlineInput, defaultValue: String(row.hours ?? 0), title: t('scoreHours'), onBlur: (event) => { void editScore(row.person, { hours: Number(event.target.value) }) } }),
-            h('input', { key: 'completion', type: 'number', style: styles.inlineInput, defaultValue: String(row.completion ?? 0), title: t('scoreCompletion'), onBlur: (event) => { void editScore(row.person, { completion: Number(event.target.value) }) } }),
-            h('input', { key: 'quality', type: 'number', style: styles.inlineInput, defaultValue: String(row.quality ?? 0), title: t('scoreQuality'), onBlur: (event) => { void editScore(row.person, { quality: Number(event.target.value) }) } }),
-            h('input', { key: 'learn', type: 'number', style: styles.inlineInput, defaultValue: String(row.learn ?? 0), title: t('scoreLearn'), onBlur: (event) => { void editScore(row.person, { learn: Number(event.target.value) }) } }),
+            h(Field, { key: 'hours', type: 'number', style: styles.inlineInput, defaultValue: String(row.hours ?? 0), title: t('scoreHours'), onBlur: (event) => { void editScore(row.person, { hours: Number(event.target.value) }) } }),
+            h(Field, { key: 'completion', type: 'number', style: styles.inlineInput, defaultValue: String(row.completion ?? 0), title: t('scoreCompletion'), onBlur: (event) => { void editScore(row.person, { completion: Number(event.target.value) }) } }),
+            h(Field, { key: 'quality', type: 'number', style: styles.inlineInput, defaultValue: String(row.quality ?? 0), title: t('scoreQuality'), onBlur: (event) => { void editScore(row.person, { quality: Number(event.target.value) }) } }),
+            h(Field, { key: 'learn', type: 'number', style: styles.inlineInput, defaultValue: String(row.learn ?? 0), title: t('scoreLearn'), onBlur: (event) => { void editScore(row.person, { learn: Number(event.target.value) }) } }),
             h('span', { key: 'total', style: styles.chip }, `${t('scoreTotal')} ${row.total ?? 0}`),
-            h('input', { key: 'highlight', type: 'text', style: styles.inlineWide, defaultValue: row.highlight ?? '', placeholder: t('scoreHighlight'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { highlight: event.target.value }) } }),
-            h('input', { key: 'improve', type: 'text', style: styles.inlineWide, defaultValue: row.improve ?? '', placeholder: t('scoreImprove'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { improve: event.target.value }) } }),
+            h(Field, { key: 'highlight', type: 'text', style: styles.inlineWide, defaultValue: row.highlight ?? '', placeholder: t('scoreHighlight'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { highlight: event.target.value }) } }),
+            h(Field, { key: 'improve', type: 'text', style: styles.inlineWide, defaultValue: row.improve ?? '', placeholder: t('scoreImprove'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { improve: event.target.value }) } }),
             (row.basis ?? []).length === 0 ? null : h('span', { key: 'basis', style: styles.chip, title: (row.basis ?? []).join('\n') }, `${t('scoreBasis')} ${(row.basis ?? []).length}`),
-            h('button', { key: 'del', type: 'button', style: styles.smallButton, onClick: () => { void removeScore(row.person) } }, t('remove')),
+            h(Btn, { key: 'del', type: 'button', style: styles.smallButton, onClick: () => { void removeScore(row.person) } }, t('remove')),
           ]))),
           h('div', { key: 'add', style: styles.row }, [
-            h('input', {
+            h(Field, {
               key: 'person',
               type: 'text',
               style: styles.inlineWide,
@@ -3547,14 +3661,14 @@ registerProcessor('meeting-capture', MeetingCapture)
               onChange: (event) => setNewScorePerson(event.target.value),
               onKeyDown: (event) => { if (event.key === 'Enter') void addScore() },
             }),
-            h('button', { key: 'add', type: 'button', style: styles.smallButton, onClick: () => { void addScore() } }, t('addEntry')),
+            h(Btn, { key: 'add', type: 'button', style: styles.smallButton, onClick: () => { void addScore() } }, t('addEntry')),
           ]),
         ]),
         notes.length === 0 ? null : h('div', { key: 'notes', style: styles.list }, [
           h('div', { key: 'label', style: styles.label }, `${t('inkNote')} (${notes.length})`),
           ...notes.map((entry) => h('div', { key: entry.id, style: styles.segment }, [
             h('span', { key: 'text', style: { flex: 1 } }, entry.text),
-            h('button', {
+            h(Btn, {
               key: 'toTask',
               type: 'button',
               style: styles.smallButton,
@@ -3567,7 +3681,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           ...documents.map((entry) => h('div', { key: entry.id, style: styles.row }, [
             h('span', { key: 'title', style: { flex: 1 } }, entry.title),
             h('span', { key: 'name', style: styles.chip }, entry.name),
-            h('button', {
+            h(Btn, {
               key: 'open',
               type: 'button',
               style: styles.smallButton,
@@ -3581,9 +3695,9 @@ registerProcessor('meeting-capture', MeetingCapture)
           h('p', { style: styles.subtitle }, speech.requesting ? (speechDetail !== '' ? speechDetail : t('speechPreparing')) : speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechPrepareHint')),
           pendingStart ? h('p', { style: styles.status }, t('speechAutoStart')) : null,
           h('div', { style: styles.row }, [
-            h('button', { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')),
-            pendingStart ? h('button', { key: 'cn', type: 'button', style: styles.button, onClick: () => setPendingStart(false) }, t('speechCancel')) : null,
-            typeof props.openVoiceInputBundle === 'function' && !speech.requesting && !pendingStart ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null,
+            h(Btn, { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')),
+            pendingStart ? h(Btn, { key: 'cn', type: 'button', style: styles.button, onClick: () => setPendingStart(false) }, t('speechCancel')) : null,
+            typeof props.openVoiceInputBundle === 'function' && !speech.requesting && !pendingStart ? h(Btn, { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null,
           ]),
         ]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
         switchPrompt === null ? null : h('div', {
@@ -3597,13 +3711,13 @@ registerProcessor('meeting-capture', MeetingCapture)
             h('p', { style: styles.note }, t('historyGuardBody')),
             h('p', { key: 'count', style: styles.status }, `⏳ ${switchPrompt.seconds}`),
             h('div', { key: 'foot', style: styles.setupFoot }, [
-              h('button', {
+              h(Btn, {
                 key: 'now',
                 type: 'button',
                 style: styles.button,
                 onClick: () => setSwitchPrompt((value) => (value === null ? null : { ...value, seconds: 0 })),
               }, t('historyGuardNow')),
-              h('button', {
+              h(Btn, {
                 key: 'cancel',
                 type: 'button',
                 style: styles.button,
@@ -3621,7 +3735,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           h('div', { style: styles.setupCard }, [
             h('h2', { style: styles.setupTitle }, t('meetingNameTitle')),
             h('p', { style: styles.note }, t('meetingNameHint')),
-            h('input', {
+            h(Field, {
               key: 'text',
               type: 'text',
               style: styles.inlineWide,
@@ -3634,14 +3748,14 @@ registerProcessor('meeting-capture', MeetingCapture)
             // meeting is starting under (§5.5).
             h('div', { key: 'rolerow', style: styles.row }, [
               h('span', { key: 'rolelabel', style: styles.status }, t('roleLabel')),
-              h('select', {
+              h(Picker, {
                 key: 'role',
                 style: styles.inlineInput,
                 value: namePrompt.role ?? 'attendee',
                 onChange: (event) => setNamePrompt((current) => ({ ...current, role: event.target.value })),
               }, ['host', 'attendee', 'observer'].map((seat) => h('option', { key: seat, value: seat }, t(ROLE_LABEL_KEYS[seat])))),
             ]),
-            h('div', { key: 'chips', style: styles.row }, KIND_VALUES.map((value) => h('button', {
+            h('div', { key: 'chips', style: styles.row }, KIND_VALUES.map((value) => h(Btn, {
               key: value === '' ? 'general' : value,
               type: 'button',
               style: namePrompt.kind === value ? styles.buttonActive : styles.button,
@@ -3655,7 +3769,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               })),
             }, t(KIND_LABEL_KEYS[value])))),
             h('div', { key: 'foot', style: styles.setupFoot }, [
-              h('button', {
+              h(Btn, {
                 key: 'go',
                 type: 'button',
                 style: styles.button,
@@ -3675,13 +3789,13 @@ registerProcessor('meeting-capture', MeetingCapture)
                   })()
                 },
               }, namePrompt.start === false ? t('saveEntry') : t('start')),
-              namePrompt.start === false ? null : h('button', {
+              namePrompt.start === false ? null : h(Btn, {
                 key: 'skip',
                 type: 'button',
                 style: styles.button,
                 onClick: () => { setNamePrompt(null); void start() },
               }, t('meetingNameSkip')),
-              h('button', {
+              h(Btn, {
                 key: 'cancel',
                 type: 'button',
                 style: styles.button,
@@ -3710,7 +3824,7 @@ registerProcessor('meeting-capture', MeetingCapture)
      * @returns the header button.
      */
     function OpenMeetingButton(props) {
-      return h('button', {
+      return h(Btn, {
         type: 'button',
         style: styles.headerButton,
         title: props.t('open'),
@@ -4219,25 +4333,25 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       return h('div', { style: styles.player }, [
         h('div', { key: 'bar', style: styles.row }, [
-          h('button', {
+          h(Btn, {
             key: 'pen',
             type: 'button',
             style: tool === 'pen' ? styles.buttonActive : styles.button,
             onClick: () => setTool('pen'),
           }, t('inkPen')),
-          h('button', {
+          h(Btn, {
             key: 'erase',
             type: 'button',
             style: tool === 'erase' ? styles.buttonActive : styles.button,
             onClick: () => setTool('erase'),
           }, t('inkErase')),
-          h('button', {
+          h(Btn, {
             key: 'lasso',
             type: 'button',
             style: tool === 'lasso' ? styles.buttonActive : styles.button,
             onClick: () => setTool('lasso'),
           }, t('inkLasso')),
-          h('button', {
+          h(Btn, {
             key: 'undo',
             type: 'button',
             style: styles.button,
@@ -4247,7 +4361,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               setCount((value) => value + 1)
             },
           }, t('inkUndo')),
-          h('button', {
+          h(Btn, {
             key: 'clear',
             type: 'button',
             style: styles.button,
@@ -4257,21 +4371,21 @@ registerProcessor('meeting-capture', MeetingCapture)
               setCount((value) => value + 1)
             },
           }, t('inkClear')),
-          h('button', {
+          h(Btn, {
             key: 'save',
             type: 'button',
             style: styles.button,
             disabled: count === 0 && strokes.current.length === 0,
             onClick: () => { void save() },
           }, t('inkSave')),
-          h('button', {
+          h(Btn, {
             key: 'local',
             type: 'button',
             style: styles.buttonActive,
             disabled: count === 0 && strokes.current.length === 0,
             onClick: () => { void recognizeLocal() },
           }, t('inkLocal')),
-          h('button', {
+          h(Btn, {
             key: 'recognize',
             type: 'button',
             style: styles.button,
@@ -4287,7 +4401,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             style: styles.row,
           }, [
             h('span', { key: 'text', style: styles.recognized }, line),
-            h('button', {
+            h(Btn, {
               key: 'toTask',
               type: 'button',
               style: styles.buttonActive,
@@ -4295,7 +4409,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t('inkToTask')),
           ])),
           h('div', { key: 'actions', style: styles.row }, [
-            h('button', {
+            h(Btn, {
               key: 'dismiss',
               type: 'button',
               style: styles.button,
@@ -4306,19 +4420,19 @@ registerProcessor('meeting-capture', MeetingCapture)
         // Circled ink is the other target; it is only offered while something is selected.
         selected.current.size === 0 ? null : h('div', { key: 'selection', style: styles.row }, [
           h('span', { key: 'label', style: styles.recognized }, `${t('inkLasso')} ${selected.current.size}`),
-          h('button', {
+          h(Btn, {
             key: 'recognizeSelection',
             type: 'button',
             style: styles.button,
             onClick: () => { void recognizeSelection(false) },
           }, t('inkSelection')),
-          h('button', {
+          h(Btn, {
             key: 'toTask',
             type: 'button',
             style: styles.buttonActive,
             onClick: () => { void recognizeSelection(true) },
           }, t('inkToTask')),
-          h('button', {
+          h(Btn, {
             key: 'clear',
             type: 'button',
             style: styles.button,
@@ -4579,7 +4693,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             : conversationOpen ? t('hubSessionOpen') : t('hubSessionBackground')),
           h('div', { key: 'hint', style: styles.hint }, t('hubHowTo')),
         ]),
-        h('div', { key: 'tabs', style: styles.tabs }, HUB_TAB_VALUES.map((value) => h('button', {
+        h('div', { key: 'tabs', style: styles.tabs }, HUB_TAB_VALUES.map((value) => h(Btn, {
           key: value,
           type: 'button',
           style: hubTab === value ? styles.tabActive : styles.tab,
@@ -4588,7 +4702,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         hubTab === 'terms' ? h('div', { key: 'terms' }, [
           h('label', { key: 'label', style: styles.label, htmlFor: 'meeting-room-hub-terms' }, t('terms')),
           h('span', { key: 'hint', style: styles.hint }, t('termsHint')),
-          h('textarea', {
+          h(Field, {
             key: 'input',
             id: 'meeting-room-hub-terms',
             style: styles.textarea,
@@ -4605,7 +4719,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             // The delivery choice comes first: it decides whether the fields below matter.
             h('div', { key: 'mode', style: styles.row }, [
               h('span', { key: 'label', style: styles.status }, t('pushMode')),
-              h('select', {
+              h(Picker, {
                 key: 'select',
                 style: styles.inlineInput,
                 value: settingsDraft.mode,
@@ -4613,7 +4727,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               }, PUSH_MODE_VALUES.map((value) => h('option', { key: value, value }, t(PUSH_MODE_KEYS[value])))),
             ]),
             h('span', { key: 'hint', style: styles.hint }, t('robotHint')),
-            h('input', {
+            h(Field, {
               key: 'dingtalk',
               style: styles.textarea,
               placeholder: `dingtalk ${t('robotNone')}`,
@@ -4621,7 +4735,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               spellCheck: false,
               onChange: (event) => setSettingsDraft((value) => ({ ...value, dingtalk: event.target.value })),
             }),
-            h('input', {
+            h(Field, {
               key: 'wecom',
               style: styles.textarea,
               placeholder: `wecom ${t('robotNone')}`,
@@ -4630,7 +4744,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               onChange: (event) => setSettingsDraft((value) => ({ ...value, wecom: event.target.value })),
             }),
             h('span', { key: 'apphint', style: styles.hint }, t('robotAppHint')),
-            h('input', {
+            h(Field, {
               key: 'appKey',
               style: styles.textarea,
               placeholder: settings.appKey === undefined || settings.appKey === '' ? 'AppKey' : `AppKey ${settings.appKey}`,
@@ -4638,7 +4752,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               spellCheck: false,
               onChange: (event) => setSettingsDraft((value) => ({ ...value, appKey: event.target.value })),
             }),
-            h('input', {
+            h(Field, {
               key: 'appSecret',
               type: 'password',
               style: styles.textarea,
@@ -4647,7 +4761,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               spellCheck: false,
               onChange: (event) => setSettingsDraft((value) => ({ ...value, appSecret: event.target.value })),
             }),
-            h('input', {
+            h(Field, {
               key: 'agentId',
               style: styles.textarea,
               placeholder: 'AgentId',
@@ -4656,7 +4770,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               onChange: (event) => setSettingsDraft((value) => ({ ...value, agentId: event.target.value })),
             }),
             h('div', { key: 'actions', style: styles.row }, [
-              h('button', { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSettings() } }, t('robotSave')),
+              h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSettings() } }, t('robotSave')),
               settingsNote === '' ? null : h('span', { key: 'note', style: styles.status }, settingsNote),
             ]),
           ]),
@@ -4671,14 +4785,14 @@ registerProcessor('meeting-capture', MeetingCapture)
             // DingTalk knows the organisation, so the roster can be filled from it instead of
             // typed by hand; one department or the whole tree.
             h('div', { key: 'sync', style: styles.row }, [
-              h('button', {
+              h(Btn, {
                 key: 'read',
                 type: 'button',
                 style: styles.button,
                 disabled: directoryBusy,
                 onClick: () => { void readDepartments() },
               }, t('readDepartments')),
-              h('select', {
+              h(Picker, {
                 key: 'dept',
                 style: styles.inlineInput,
                 value: String(deptId),
@@ -4690,7 +4804,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                   value: String(department.id),
                 }, department.name)),
               ]),
-              h('button', {
+              h(Btn, {
                 key: 'sync',
                 type: 'button',
                 style: styles.buttonActive,
@@ -4702,13 +4816,13 @@ registerProcessor('meeting-capture', MeetingCapture)
               h('span', { key: 'name', style: styles.chip }, person.name),
               h('span', { key: 'phone', style: styles.status }, person.phone === '' ? t('phonePh') : person.phone),
               h('span', { key: 'userId', style: styles.status }, person.userId === '' ? t('userIdPh') : person.userId),
-              h('button', {
+              h(Btn, {
                 key: 'edit',
                 type: 'button',
                 style: styles.smallButton,
                 onClick: () => setPersonDraft({ name: person.name, phone: person.phone, userId: person.userId }),
               }, t('editEntry')),
-              h('button', {
+              h(Btn, {
                 key: 'del',
                 type: 'button',
                 style: styles.smallButton,
@@ -4716,7 +4830,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               }, t('remove')),
             ])),
             h('div', { key: 'personadd', style: styles.row }, [
-              h('input', {
+              h(Field, {
                 key: 'name',
                 style: styles.inlineInput,
                 placeholder: t('speakerNamePlaceholder'),
@@ -4724,7 +4838,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                 spellCheck: false,
                 onChange: (event) => setPersonDraft((value) => ({ ...value, name: event.target.value })),
               }),
-              h('input', {
+              h(Field, {
                 key: 'phone',
                 style: styles.inlineInput,
                 placeholder: t('phonePh'),
@@ -4732,7 +4846,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                 spellCheck: false,
                 onChange: (event) => setPersonDraft((value) => ({ ...value, phone: event.target.value })),
               }),
-              h('input', {
+              h(Field, {
                 key: 'userId',
                 style: styles.inlineInput,
                 placeholder: t('userIdPh'),
@@ -4740,7 +4854,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                 spellCheck: false,
                 onChange: (event) => setPersonDraft((value) => ({ ...value, userId: event.target.value })),
               }),
-              h('button', {
+              h(Btn, {
                 key: 'add',
                 type: 'button',
                 style: styles.button,
@@ -4753,7 +4867,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         hubTab === 'records' ? h('div', { key: 'records', style: styles.hubCard }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, t('hubRecords')),
-            h('button', { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void refresh() } }, t('hubRefresh')),
+            h(Btn, { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void refresh() } }, t('hubRefresh')),
           ]),
           files.length === 0
             ? h('p', { key: 'empty', style: styles.empty }, t('hubEmpty'))
@@ -4761,27 +4875,27 @@ registerProcessor('meeting-capture', MeetingCapture)
               key: file.name,
               style: styles.hubRow,
             }, [
-              h('button', {
+              h(Btn, {
                 key: 'open',
                 type: 'button',
                 style: styles.linkButton,
                 onClick: () => { void open(file.name) },
               }, file.name),
               h('span', { key: 'meta', style: styles.stamp }, `${Math.max(1, Math.round(file.size / 1024))} KB · ${absoluteOf(file.modified)}`),
-              h('button', {
+              h(Btn, {
                 key: 'send',
                 type: 'button',
                 style: styles.smallButton,
                 title: t('hubSendHint'),
                 onClick: () => { void sendToNewConversation(file) },
               }, t('hubSend')),
-              file.sessionId === '' ? null : h('button', {
+              file.sessionId === '' ? null : h(Btn, {
                 key: 'session',
                 type: 'button',
                 style: styles.smallButton,
                 onClick: () => { props.openConversation(file.sessionId) },
               }, t('hubOpenSession')),
-              h('button', {
+              h(Btn, {
                 key: 'reveal',
                 type: 'button',
                 style: styles.smallButton,
@@ -4792,7 +4906,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         hubTab === 'records' && preview !== null ? h('div', { key: 'preview', style: styles.hubCard }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'name', style: styles.label }, preview.name),
-            h('button', { key: 'close', type: 'button', style: styles.button, onClick: () => setPreview(null) }, t('hubClose')),
+            h(Btn, { key: 'close', type: 'button', style: styles.button, onClick: () => setPreview(null) }, t('hubClose')),
           ]),
           preview.image
             ? h('img', {
@@ -4861,9 +4975,9 @@ registerProcessor('meeting-capture', MeetingCapture)
         h('p', { style: styles.note }, props.t('setupPrepareHint')),
         status,
         h('div', { style: styles.setupFoot }, [
-          h('button', { key: 'p', type: 'button', style: styles.button, disabled: preparing, onClick: () => { void prepare() } }, props.t('setupPrepare')),
-          h('button', { key: 'd', type: 'button', style: styles.button, onClick: () => props.onOpenDetails() }, props.t('setupDetails')),
-          h('button', { key: 'x', type: 'button', style: styles.button, onClick: () => props.onDismiss() }, props.t('setupDismiss')),
+          h(Btn, { key: 'p', type: 'button', style: styles.button, disabled: preparing, onClick: () => { void prepare() } }, props.t('setupPrepare')),
+          h(Btn, { key: 'd', type: 'button', style: styles.button, onClick: () => props.onOpenDetails() }, props.t('setupDetails')),
+          h(Btn, { key: 'x', type: 'button', style: styles.button, onClick: () => props.onDismiss() }, props.t('setupDismiss')),
         ]),
       ])])
     }
