@@ -781,6 +781,19 @@ registerProcessor('meeting-capture', MeetingCapture)
         borderRadius: '6px',
         whiteSpace: 'nowrap',
       },
+      /** One picker result: two lines, the whole card opens the meeting. */
+      historyRow: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+        padding: '6px 8px',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        border: '1px solid transparent',
+      },
+      historyHead: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' },
+      historyName: { fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: '2px' },
+      historyExcerpt: { fontSize: '12px', opacity: 0.75, lineHeight: 1.5, wordBreak: 'break-word' },
       taskDone: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', opacity: 0.55 },
       ink: { display: 'block', width: '100%', height: '320px', touchAction: 'none', border: '1px dashed rgba(127,127,127,0.45)', borderRadius: '8px', cursor: 'crosshair' },
       inkShot: { maxWidth: '100%', borderRadius: '8px', border: '1px solid rgba(127,127,127,0.25)' },
@@ -2764,17 +2777,33 @@ registerProcessor('meeting-capture', MeetingCapture)
             picker.rows.length === 0
               ? h('p', { key: 'none', style: styles.empty }, picker.loading === true ? t('historyLoading') : t('historyEmpty'))
               : null,
-            ...picker.rows.map((row) => h('div', { key: row.meetingId, style: styles.row }, [
-              h('span', { key: 'when', style: styles.stamp }, new Date(row.startedAt).toLocaleDateString()),
-              h('span', { key: 'name', style: { flex: 1 } }, `${row.title === '' ? t('meetingNameNone') : row.title}${row.kind === '' ? '' : ` · ${t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')}`}${row.period === '' ? '' : ` · ${row.period}`}`),
-              row.excerpt === '' ? null : h('span', { key: 'excerpt', style: styles.hint }, row.excerpt.length > 36 ? `${row.excerpt.slice(0, 36)}…` : row.excerpt),
-              row.hasContent === true ? null : h('span', { key: 'blank', style: styles.chip }, t('historyBlank')),
-              h('button', {
-                key: 'open',
-                type: 'button',
-                style: styles.smallButton,
-                onClick: () => { void chooseHistorical(row) },
-              }, t('historyChoose')),
+            ...picker.rows.map((row) => h('div', {
+              key: row.meetingId,
+              style: styles.historyRow,
+              role: 'button',
+              tabIndex: 0,
+              title: t('historyChoose'),
+              // The whole card opens the meeting — the name is the obvious target, and the
+              // preview line beside it means the same thing.
+              onClick: () => { void chooseHistorical(row) },
+              onKeyDown: (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  void chooseHistorical(row)
+                }
+              },
+            }, [
+              // First line: when it happened, what it was called, and its type and period.
+              h('div', { key: 'head', style: styles.historyHead }, [
+                h('span', { key: 'when', style: styles.stamp }, new Date(row.startedAt).toLocaleDateString()),
+                h('span', { key: 'name', style: styles.historyName }, row.title === '' ? t('meetingNameNone') : row.title),
+                row.kind === '' ? null : h('span', { key: 'kind', style: styles.chip }, t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')),
+                row.period === '' ? null : h('span', { key: 'period', style: styles.hint }, row.period),
+                row.hasContent === true ? null : h('span', { key: 'blank', style: styles.chip }, t('historyBlank')),
+              ]),
+              // Second line: the preview sentence, on its own line so a long name never
+              // squeezes it.
+              row.excerpt === '' ? null : h('div', { key: 'excerpt', style: styles.historyExcerpt }, row.excerpt.length > 120 ? `${row.excerpt.slice(0, 120)}…` : row.excerpt),
             ])),
           ]),
           viewed === null ? null : h('div', { key: 'viewer', style: styles.row }, [
