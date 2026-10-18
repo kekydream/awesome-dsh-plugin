@@ -752,6 +752,35 @@ registerProcessor('meeting-capture', MeetingCapture)
       buttonActive: { padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', background: 'rgba(127,127,127,0.3)' },
       inlineInput: { padding: '2px 6px', borderRadius: '4px', fontSize: '12px', width: '72px', fontFamily: 'inherit', boxSizing: 'border-box' },
       smallButton: { padding: '1px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' },
+      /** The overflow menu hangs under its button instead of widening the action row. */
+      menuWrap: { position: 'relative', display: 'inline-block' },
+      menu: {
+        position: 'absolute',
+        top: 'calc(100% + 4px)',
+        right: 0,
+        zIndex: 20,
+        minWidth: '168px',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '4px',
+        gap: '2px',
+        background: 'var(--dsw-alias-bg-base)',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '8px',
+        boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
+      },
+      menuItem: {
+        padding: '6px 10px',
+        border: 'none',
+        background: 'none',
+        color: 'inherit',
+        cursor: 'pointer',
+        fontSize: '12px',
+        fontFamily: 'inherit',
+        textAlign: 'left',
+        borderRadius: '6px',
+        whiteSpace: 'nowrap',
+      },
       taskDone: { display: 'flex', gap: '8px', fontSize: '13px', lineHeight: 1.6, padding: '0 4px', borderRadius: '4px', opacity: 0.55 },
       ink: { display: 'block', width: '100%', height: '320px', touchAction: 'none', border: '1px dashed rgba(127,127,127,0.45)', borderRadius: '8px', cursor: 'crosshair' },
       inkShot: { maxWidth: '100%', borderRadius: '8px', border: '1px solid rgba(127,127,127,0.25)' },
@@ -2134,6 +2163,23 @@ registerProcessor('meeting-capture', MeetingCapture)
         return () => clearInterval(timer)
       }, [paused, t])
 
+      // The overflow is a dropdown, so it closes on the next click anywhere or on Escape,
+      // like a native menu. The zero-delay listener keeps the opening click from closing it.
+      React.useEffect(() => {
+        if (!moreOpen) return undefined
+        const close = () => setMoreOpen(false)
+        const onKey = (event) => { if (event.key === 'Escape') setMoreOpen(false) }
+        const timer = setTimeout(() => {
+          document.addEventListener('click', close)
+          document.addEventListener('keydown', onKey)
+        }, 0)
+        return () => {
+          clearTimeout(timer)
+          document.removeEventListener('click', close)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [moreOpen])
+
       /** Load the picker's rows, optionally filtered (FEATURES.md §5.4). */
       const loadHistory = React.useCallback(async (query) => {
         setPicker((value) => ({ ...value, loading: true, open: true }))
@@ -2835,12 +2881,6 @@ registerProcessor('meeting-capture', MeetingCapture)
             style: notesOpen ? styles.buttonActive : styles.button,
             onClick: () => setNotesOpen((value) => !value),
           }, t('notesToggle')),
-          segments.length === 0 ? null : h('button', {
-            key: 'extract',
-            type: 'button',
-            style: styles.button,
-            onClick: () => { void extract() },
-          }, t('generate')),
           h('button', {
             key: 'review',
             type: 'button',
@@ -2853,22 +2893,56 @@ registerProcessor('meeting-capture', MeetingCapture)
             style: styles.button,
             onClick: () => { void writeMinutes() },
           }, t('minutes')),
-          // The overflow expands in place, ahead of the button that owns it, so the bar keeps
-          // one row and the extra actions land where the eye already is.
-          moreOpen && hasContent ? h('button', { key: 'files', type: 'button', style: styles.button, onClick: () => { void exportFiles() } }, t('exportFile')) : null,
-          moreOpen && hasContent && segments.length > 0 ? h('button', { key: 'srt', type: 'button', style: styles.button, onClick: () => { void copySrt() } }, t('copySrt')) : null,
-          moreOpen && hasContent && segments.length > 0 ? h('button', { key: 'copy', type: 'button', style: styles.button, onClick: () => { void copyText() } }, t('copy')) : null,
-          moreOpen && hasContent && segments.length > 0 ? h('button', { key: 'fix', type: 'button', style: styles.button, onClick: () => { void copyForFix() } }, t('copyForFix')) : null,
-          moreOpen && hasContent ? h('button', { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void refreshAnalysis() } }, t('refresh')) : null,
-          moreOpen && hasContent && segments.length > 0 ? h('button', { key: 'revise', type: 'button', style: styles.button, onClick: () => { void revise() } }, t('revise')) : null,
-          moreOpen && hasContent ? h('button', { key: 'minutesdocx', type: 'button', style: styles.button, onClick: () => { void writeMinutes('docx') } }, t('minutesDocx')) : null,
-          moreOpen && hasContent ? h('button', { key: 'push', type: 'button', style: styles.button, onClick: () => { void push() } }, t('push')) : null,
-          hasContent ? h('button', {
-            key: 'more',
-            type: 'button',
-            style: moreOpen ? styles.buttonActive : styles.button,
-            onClick: () => setMoreOpen((value) => !value),
-          }, t('more')) : null,
+          // The overflow is a dropdown under its own button: the action row keeps one line,
+          // and 「生成要点与任务」 sits with the other occasional actions instead of shouting
+          // in the bar.
+          hasContent ? h('div', { key: 'morewrap', style: styles.menuWrap }, [
+            h('button', {
+              key: 'more',
+              type: 'button',
+              style: moreOpen ? styles.buttonActive : styles.button,
+              'aria-expanded': moreOpen,
+              onClick: () => setMoreOpen((value) => !value),
+            }, t('more')),
+            moreOpen ? h('div', { key: 'moremenu', style: styles.menu, role: 'menu' }, [
+              segments.length === 0 ? null : h('button', {
+                key: 'extract', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void extract() },
+              }, t('generate')),
+              h('button', {
+                key: 'files', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void exportFiles() },
+              }, t('exportFile')),
+              segments.length === 0 ? null : h('button', {
+                key: 'srt', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void copySrt() },
+              }, t('copySrt')),
+              segments.length === 0 ? null : h('button', {
+                key: 'copy', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void copyText() },
+              }, t('copy')),
+              segments.length === 0 ? null : h('button', {
+                key: 'fix', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void copyForFix() },
+              }, t('copyForFix')),
+              h('button', {
+                key: 'refresh', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void refreshAnalysis() },
+              }, t('refresh')),
+              segments.length === 0 ? null : h('button', {
+                key: 'revise', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void revise() },
+              }, t('revise')),
+              h('button', {
+                key: 'minutesdocx', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void writeMinutes('docx') },
+              }, t('minutesDocx')),
+              h('button', {
+                key: 'push', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); void push() },
+              }, t('push')),
+            ]) : null,
+          ]) : null,
           h('button', {
             key: 'help',
             type: 'button',
