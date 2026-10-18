@@ -128,6 +128,15 @@ export function periodOf(kind, startedAt) {
 const KIND_TEXT = { '': '通用', briefing: '晨会', review: '复盘会', weekly: '例会', monthly: '总结会' }
 
 /**
+ * The label for one kind, for text a person reads or the picker searches.
+ * @param kind - meeting kind.
+ * @returns the label; an unknown kind reads as 通用.
+ */
+export function kindText(kind) {
+  return KIND_TEXT[kind] ?? '通用'
+}
+
+/**
  * Local timestamp of an ISO date, or undefined when the text is not one.
  * @param value - 'YYYY-MM-DD'.
  * @param endOfDay - true for the last millisecond of that local day.

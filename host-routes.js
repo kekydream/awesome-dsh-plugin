@@ -49,6 +49,7 @@ import {
 
 import { speakerState, prepareSpeakers, labelCue, relabelFromRecording } from './host-speaker.js'
 import { handwritingState, recognizeHandwriting, prepareHandwriting } from './host-handwriting.js'
+import { flushMeetings, meetingIsEmpty } from './host-persistence.js'
 
 import {
   appendChunk,
@@ -60,6 +61,7 @@ import {
   readSettings,
   writeSettings,
   periodOf,
+  kindText,
   seriesFor,
   carryOverFor,
   scoreTotal,
@@ -427,6 +429,61 @@ export function createHandler(ctx) {
           return
         }
         sendJson(res, 200, carryOverFor(meeting))
+        return
+      }
+
+      if (method === 'GET' && route === '/history') {
+        // The panel's meeting picker (FEATURES §5.4): every meeting on this machine, newest
+        // first, filterable by name, date, type, points, assignments and transcript text.
+        const query = (url.searchParams.get('query') ?? '').trim().toLowerCase()
+        const asked = Number(url.searchParams.get('limit') ?? 50)
+        const limit = Number.isFinite(asked) && asked > 0 ? Math.min(Math.floor(asked), 200) : 50
+        const rows = []
+        for (const meeting of meetings.values()) {
+          const points = meeting.points ?? []
+          const tasks = meeting.tasks ?? []
+          const segments = meeting.segments ?? []
+          const when = new Date(meeting.startedAt).toLocaleDateString()
+          const haystack = [
+            meeting.title ?? '',
+            kindText(meeting.kind ?? ''),
+            meeting.period ?? '',
+            when,
+            ...points.slice(0, 20).map((point) => point.text ?? ''),
+            ...tasks.slice(0, 20).map((task) => task.title ?? ''),
+            ...segments.slice(0, 100).map((segment) => seenText(segment)),
+          ].join('\n').toLowerCase()
+          if (query !== '' && !haystack.includes(query)) continue
+          rows.push({
+            meetingId: meeting.id,
+            sessionId: meeting.sessionId ?? '',
+            title: meeting.title ?? '',
+            kind: meeting.kind ?? '',
+            period: meeting.period ?? '',
+            startedAt: meeting.startedAt,
+            excerpt: points.length > 0 ? points[0].text ?? '' : (segments.length > 0 ? seenText(segments[0]) : ''),
+            counts: {
+              segments: segments.length,
+              points: points.length,
+              tasks: tasks.length,
+              notes: (meeting.notes ?? []).length,
+              documents: (meeting.documents ?? []).length,
+              scores: (meeting.scores ?? []).length,
+            },
+            // The switch guard only interrupts for a meeting that actually holds something.
+            hasContent: !meetingIsEmpty(meeting),
+          })
+        }
+        rows.sort((left, right) => right.startedAt - left.startedAt)
+        sendJson(res, 200, { meetings: rows.slice(0, limit), total: rows.length })
+        return
+      }
+
+      if (method === 'POST' && route === '/flush') {
+        // The picker's "auto-save": the periodic flush covers it within seconds, but the
+        // panel must be able to say "saved" honestly before it switches away.
+        await flushMeetings(ctx)
+        sendJson(res, 200, { saved: true })
         return
       }
 

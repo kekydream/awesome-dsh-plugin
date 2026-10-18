@@ -189,6 +189,19 @@ registerProcessor('meeting-capture', MeetingCapture)
       pausedStatus: '已暂停 · 已录',
       pauseLongHint: '仍在暂停（已超过 10 分钟）',
       carryOverPrompt: '昨天复盘会留下了 {count} 项未完成/遗留事项：\n{list}\n\n请在本次晨会实录里对照这些事项，决定今天派给谁、什么时候完成，并用 meeting_write 把结果写成本会 tasks（草稿，等人确认）。只依据实录与上面的清单，不要编造。',
+      historyPlaceholder: '搜索历史会议（名称 / 日期 / 类型 / 实录关键词）',
+      historyOpen: '打开会议',
+      historyLoading: '正在读取…',
+      historyEmpty: '没有匹配的会议',
+      historyBlank: '空',
+      historyChoose: '打开',
+      historyViewing: '正在查看历史会议',
+      historyOpenSession: '打开原会话',
+      historyBack: '返回本会话',
+      historyViewOnly: '查看历史会议时不可修改：请先「返回本会话」',
+      historyGuardTitle: '当前会议有未保存内容',
+      historyGuardBody: '3 秒后自动保存，然后打开所选会议；也可以立即保存或取消。',
+      historyGuardNow: '立即保存并打开',
       distillGeneral: '请按本场会议的类型提炼内容。先调用 meeting_read（meetingId={meetingId}）读完实录，然后：1) 用 meeting_write（meetingId={meetingId}）把决定与要点写入 points（kind 取 decision/point/risk/question）；2) 把明确的行动项写入 tasks（任务/负责人/时限/优先级，草稿，等人确认）；3) 需要存档时用 meeting_save_document 存一份 Markdown。只依据实录，不要编造；人名与术语不确定时保守处理并标注。',
       distillBriefing: '以下是本会话的晨会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，再按晨会模板提炼：1) 昨日遗留：用 meeting_query（kind:"review", period:"yesterday", include:["tasks"]）查昨天复盘会留下的遗留事项，与实录对照后单独成段；2) 部署事项：每条写清「任务 / 负责人 / 时限 / 优先级」，区分决定（decision）与要求（point）；3) 用 meeting_write（meetingId={meetingId}）把要点写入 points、把部署写入 tasks（草稿，等人确认）。只依据实录，不要编造。写完用一句话说明提取了多少条。',
       distillReview: '以下是本会话的复盘会（名称：{title}，周期：{period}）。请先调用 meeting_read（meetingId={meetingId}）读完实录，并按顺序做：1) 用 meeting_query（kind:"briefing", period:"today", include:["tasks"]）取今天晨会的任务，每条都带 #id 与它所属的 meetingId；2) 逐项核销：用 meeting_write 写回**晨会那份记录**（meetingId 填晨会的 id，tasks 里写 {id, done:true/false, source:"实录原句"}）——这是跨会写回，不要复制任务；3) 本会的问题与风险写入 points（kind 取 risk 或 question）；4) 遗留事项写入本会 tasks（草稿），标题注明「遗留」；5) 用 meeting_save_document 存一份「复盘盘点 · {period}」。只依据实录，不要编造。',
@@ -449,6 +462,19 @@ registerProcessor('meeting-capture', MeetingCapture)
       pausedStatus: 'Paused · recorded',
       pauseLongHint: 'Still paused (over 10 minutes)',
       carryOverPrompt: 'Yesterday\'s review left {count} item(s) unfinished or carried over:\n{list}\n\nCheck them against this briefing\'s transcript, decide who takes each one and by when, then write the result into this meeting\'s tasks with meeting_write (drafts a human confirms). Use only the transcript and the list above; do not invent anything.',
+      historyPlaceholder: 'Search meetings (name / date / type / transcript)',
+      historyOpen: 'Open meeting',
+      historyLoading: 'Loading…',
+      historyEmpty: 'No meeting matches',
+      historyBlank: 'empty',
+      historyChoose: 'Open',
+      historyViewing: 'Viewing a past meeting',
+      historyOpenSession: 'Open its conversation',
+      historyBack: 'Back to this session',
+      historyViewOnly: 'Read-only while viewing a past meeting — go back to this session to edit',
+      historyGuardTitle: 'This meeting has unsaved content',
+      historyGuardBody: 'It is saved automatically in 3 seconds, then the chosen meeting opens; you can also save now or cancel.',
+      historyGuardNow: 'Save and open now',
       distillGeneral: 'Distill this meeting according to its type. First call meeting_read (meetingId={meetingId}) for the full transcript, then: 1) write decisions and points with meeting_write (meetingId={meetingId}), kind being decision/point/risk/question; 2) write clear action items as tasks (title/owner/due/priority — drafts that a human confirms); 3) store a Markdown document with meeting_save_document when it should be archived. Use only the transcript; never invent content and mark anything uncertain.',
       distillBriefing: 'This session is a morning briefing (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then: 1) carry-over — call meeting_query (kind:"review", period:"yesterday", include:["tasks"]) for what yesterday\'s review left open, checked against the transcript and listed separately; 2) assignments, each with task / owner / due / priority, separating decisions from requests; 3) write points and tasks back with meeting_write (meetingId={meetingId}); tasks stay drafts. Use only the transcript and finish with one line saying how many entries you extracted.',
       distillReview: 'This session is a daily review (name: {title}, period: {period}). Call meeting_read (meetingId={meetingId}) for the transcript, then work in order: 1) meeting_query (kind:"briefing", period:"today", include:["tasks"]) for today\'s briefing tasks, each carrying its #id and the meetingId that owns it; 2) check them off by writing back to the BRIEFING record with meeting_write — that briefing\'s meetingId, tasks entries {id, done:true|false, source:"transcript words"}; never copy tasks between meetings; 3) this meeting\'s problems and risks go to points (kind risk or question); 4) carry-over items go to this meeting\'s tasks, marked "carry-over"; 5) save a "Review · {period}" document with meeting_save_document. Use only the transcript.',
@@ -1408,6 +1434,18 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [paused, setPaused] = React.useState(false)
       const pausedAt = React.useRef(0)
       const pauseWarned = React.useRef(false)
+      /** The meeting picker: open flag, query and rows (FEATURES.md §5.4). */
+      const [picker, setPicker] = React.useState({ open: false, query: '', rows: [], loading: false })
+      /** The historical meeting the panel is viewing; null means this session's own. */
+      const [viewed, setViewed] = React.useState(null)
+      /**
+       * The same fact for callbacks that must not be re-created on every switch: the guard
+       * has to see the CURRENT mode even when the callback was built earlier (§5.4).
+       */
+      const viewedRef = React.useRef(null)
+      viewedRef.current = viewed
+      /** The switch guard: the row to open once the countdown saved the current meeting. */
+      const [switchPrompt, setSwitchPrompt] = React.useState(null)
       const audio = React.useRef(null)
       const rows = React.useRef([])
       const noteSeq = React.useRef(0)
@@ -1719,6 +1757,10 @@ registerProcessor('meeting-capture', MeetingCapture)
        * @param name - The person's name; empty clears the assignment.
        */
       const nameSpeaker = React.useCallback(async (label, name) => {
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
         setError('')
         const id = await ensureMeeting()
         if (id === '') {
@@ -1826,6 +1868,11 @@ registerProcessor('meeting-capture', MeetingCapture)
        * @param op - 'remove' deletes the entry.
        */
       const editEntry = React.useCallback(async (kind, id, patch = {}, op = 'update') => {
+        // Writes belong to the session's own meeting; a viewed history stays read-only (§5.4).
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
         setError('')
         // Confirm, edit or delete before recording even started: the meeting is created on
         // demand, so an edit is never silently dropped for a missing id.
@@ -1853,6 +1900,12 @@ registerProcessor('meeting-capture', MeetingCapture)
        * @returns whether the task was created.
        */
       const makeTaskFrom = React.useCallback(async (text) => {
+        // A viewed history is read-only: the assignment would land in the session's own
+        // meeting, which is not what the click means (§5.4).
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return false
+        }
         const title = text.replace(/\s+/gu, ' ').trim()
         if (title === '') return false
         const target = await ensureMeeting()
@@ -1969,6 +2022,10 @@ registerProcessor('meeting-capture', MeetingCapture)
        * @param body - request body without the meeting id.
        */
       const postScores = React.useCallback(async (body) => {
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
         setError('')
         const id = await ensureMeeting()
         if (id === '') {
@@ -2076,6 +2133,98 @@ registerProcessor('meeting-capture', MeetingCapture)
         }, 30 * 1000)
         return () => clearInterval(timer)
       }, [paused, t])
+
+      /** Load the picker's rows, optionally filtered (FEATURES.md §5.4). */
+      const loadHistory = React.useCallback(async (query) => {
+        setPicker((value) => ({ ...value, loading: true, open: true }))
+        try {
+          const reply = await get(`/history?query=${encodeURIComponent(query)}&limit=50`)
+          setPicker((value) => ({ ...value, rows: Array.isArray(reply.meetings) ? reply.meetings : [], loading: false }))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+          setPicker((value) => ({ ...value, loading: false }))
+        }
+      }, [])
+
+      /**
+       * Show one historical meeting in this panel. Only the view changes: the session keeps
+       * its own meeting, so the agent's tools still write where they always wrote.
+       */
+      const openHistorical = React.useCallback(async (row) => {
+        setError('')
+        setPicker({ open: false, query: '', rows: [], loading: false })
+        try {
+          const value = await get(`/state?meetingId=${encodeURIComponent(row.meetingId)}`)
+          setViewed({ meetingId: row.meetingId, sessionId: row.sessionId, title: typeof value.title === 'string' ? value.title : row.title })
+          setSegments(Array.isArray(value.segments) ? value.segments : [])
+          setSeconds(typeof value.seconds === 'number' ? value.seconds : 0)
+          setAudioName(typeof value.audioName === 'string' ? value.audioName : '')
+          setPoints(Array.isArray(value.points) ? value.points : [])
+          setTasks(Array.isArray(value.tasks) ? value.tasks : [])
+          setNotes(Array.isArray(value.notes) ? value.notes : [])
+          setDocuments(Array.isArray(value.documents) ? value.documents : [])
+          setScores(Array.isArray(value.scores) ? value.scores : [])
+          setLabels(Array.isArray(value.labels) ? value.labels : [])
+          setSpeakers(value.speakers !== null && typeof value.speakers === 'object' ? value.speakers : {})
+          setMeta({
+            kind: typeof value.kind === 'string' ? value.kind : '',
+            period: typeof value.period === 'string' ? value.period : '',
+            title: typeof value.title === 'string' ? value.title : row.title,
+          })
+          setPlayhead(0)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /** Write the current meeting now, so switching away cannot lose it. */
+      const saveNow = React.useCallback(async () => {
+        if (meetingId === '') return
+        try {
+          await post('/flush', { meetingId })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [meetingId])
+
+      /** Pick a row: an untouched session switches at once, one with content counts down. */
+      const chooseHistorical = React.useCallback(async (row) => {
+        const content = segments.length > 0 || points.length > 0 || tasks.length > 0 || notes.length > 0
+        if (viewed !== null || content !== true) {
+          await openHistorical(row)
+          return
+        }
+        setPicker((value) => ({ ...value, open: false }))
+        setSwitchPrompt({ row, seconds: 3 })
+      }, [notes.length, openHistorical, points.length, segments.length, tasks.length, viewed])
+
+      /** Leave the viewer and show this session's own meeting again. */
+      const closeViewed = React.useCallback(async () => {
+        setViewed(null)
+        setPlayhead(0)
+        setMeetingId('')
+        const adopted = await adopt()
+        if (adopted === null) setNote(t('noMeeting'))
+        else await refreshAnalysis()
+      }, [adopt, refreshAnalysis, setMeetingId, t])
+
+      // The guard counts down, then saves and switches; Cancel stops it (FEATURES.md §5.4).
+      React.useEffect(() => {
+        if (switchPrompt === null) return undefined
+        if (switchPrompt.seconds > 0) {
+          const timer = setTimeout(() => {
+            setSwitchPrompt((value) => (value === null ? null : { ...value, seconds: value.seconds - 1 }))
+          }, 1000)
+          return () => clearTimeout(timer)
+        }
+        const row = switchPrompt.row
+        setSwitchPrompt(null)
+        void (async () => {
+          await saveNow()
+          await openHistorical(row)
+        })()
+        return undefined
+      }, [switchPrompt, saveNow, openHistorical])
 
       /** Open one stored document inline, without leaving the panel. */
       const openStoredDocument = React.useCallback(async (entry) => {
@@ -2540,9 +2689,66 @@ registerProcessor('meeting-capture', MeetingCapture)
         // player and the content tabs; only what follows it scrolls, so a long transcript
         // cannot push those controls out of reach.
         h('div', { key: 'head', style: styles.panelHead }, [
+          // The meeting picker: search every meeting on this machine and open one for
+          // reading. Switching the view never changes which meeting the session owns (§5.4).
+          h('div', { key: 'picker', style: styles.row }, [
+            h('input', {
+              key: 'query',
+              type: 'text',
+              style: styles.inlineWide,
+              value: picker.query,
+              placeholder: t('historyPlaceholder'),
+              spellCheck: false,
+              onFocus: () => { void loadHistory(picker.query) },
+              onChange: (event) => { void loadHistory(event.target.value) },
+              onKeyDown: (event) => { if (event.key === 'Escape') setPicker((value) => ({ ...value, open: false })) },
+            }),
+            h('button', {
+              key: 'toggle',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => {
+                const open = picker.open !== true
+                setPicker((value) => ({ ...value, open }))
+                if (open) void loadHistory(picker.query)
+              },
+            }, picker.open ? t('hubClose') : t('historyOpen')),
+          ]),
+          picker.open !== true ? null : h('div', { key: 'pickerlist', style: styles.list }, [
+            picker.rows.length === 0
+              ? h('p', { key: 'none', style: styles.empty }, picker.loading === true ? t('historyLoading') : t('historyEmpty'))
+              : null,
+            ...picker.rows.map((row) => h('div', { key: row.meetingId, style: styles.row }, [
+              h('span', { key: 'when', style: styles.stamp }, new Date(row.startedAt).toLocaleDateString()),
+              h('span', { key: 'name', style: { flex: 1 } }, `${row.title === '' ? t('meetingNameNone') : row.title}${row.kind === '' ? '' : ` · ${t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')}`}${row.period === '' ? '' : ` · ${row.period}`}`),
+              row.excerpt === '' ? null : h('span', { key: 'excerpt', style: styles.hint }, row.excerpt.length > 36 ? `${row.excerpt.slice(0, 36)}…` : row.excerpt),
+              row.hasContent === true ? null : h('span', { key: 'blank', style: styles.chip }, t('historyBlank')),
+              h('button', {
+                key: 'open',
+                type: 'button',
+                style: styles.smallButton,
+                onClick: () => { void chooseHistorical(row) },
+              }, t('historyChoose')),
+            ])),
+          ]),
+          viewed === null ? null : h('div', { key: 'viewer', style: styles.row }, [
+            h('span', { key: 'label', style: styles.status }, `${t('historyViewing')}: ${meta.title === '' ? t('meetingNameNone') : meta.title}${meta.period === '' ? '' : ` · ${meta.period}`}`),
+            typeof props.openConversation !== 'function' || viewed.sessionId === '' ? null : h('button', {
+              key: 'session',
+              type: 'button',
+              style: styles.smallButton,
+              onClick: () => openSeries({ sessionId: viewed.sessionId }),
+            }, t('historyOpenSession')),
+            h('button', {
+              key: 'back',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { void closeViewed() },
+            }, t('historyBack')),
+          ]),
           // Meeting identity: name, type, the derived period, and this kind's one-click
-          // distill (FEATURES.md §2.1, §3, §5.1).
-          h('div', { key: 'metabar', style: styles.row }, [
+          // distill (FEATURES.md §2.1, §3, §5.1). Hidden while viewing a historical meeting.
+          viewed !== null ? null : h('div', { key: 'metabar', style: styles.row }, [
             h('input', {
               key: `title-${meta.title}`,
               type: 'text',
@@ -2584,12 +2790,14 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t(DISTILL_BUTTON_KEYS[meta.kind] ?? 'distillButtonGeneral')),
           ]),
           // A briefing starts by accounting for what yesterday's review left open (§3.1).
-          carry.items.length === 0 ? null : h('div', { key: 'carry', style: styles.row }, [
+          carry.items.length === 0 || viewed !== null ? null : h('div', { key: 'carry', style: styles.row }, [
             h('span', { key: 'hint', style: styles.hint }, `${t('carryOverHint')} ${carry.items.length}`),
             h('button', { key: 'handle', type: 'button', style: styles.smallButton, onClick: () => { void handleCarryOver() } }, t('carryOverAction')),
             carry.review === null ? null : h('button', { key: 'open', type: 'button', style: styles.smallButton, onClick: () => openSeries(carry.review) }, t('carryOverOpen')),
           ]),
-          h('div', { key: 'notebar', style: styles.row }, [
+          // Recording and the meeting's own actions belong to the session's meeting, so they
+          // step aside while a historical meeting is being read (§5.4).
+          viewed !== null ? null : h('div', { key: 'notebar', style: styles.row }, [
           h('span', { key: 'rolelabel', style: styles.status }, t('roleLabel')),
           // A dropdown rather than three buttons: the seat is one choice, and the row is
           // already carrying the meeting's actions.
@@ -2831,7 +3039,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               style: namesOpen ? styles.buttonActive : styles.button,
               onClick: () => setNamesOpen((value) => !value),
             }, namesOpen ? t('hubClose') : t('openNames')),
-            h('button', {
+            viewed !== null ? null : h('button', {
               key: 'relabel',
               type: 'button',
               style: styles.button,
@@ -3077,9 +3285,9 @@ registerProcessor('meeting-capture', MeetingCapture)
         bodyTab !== 'scores' ? null : h('div', { key: 'scores', style: styles.list }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, `${t('panelTabScores')} (${scores.length})`),
-            h('button', { key: 'prefill', type: 'button', style: styles.button, onClick: () => { void prefillScores() } }, t('scoresPrefill')),
-            h('button', { key: 'csv', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('csv') } }, t('scoresExportCsv')),
-            h('button', { key: 'xlsx', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('xlsx') } }, t('scoresExportXlsx')),
+            viewed !== null ? null : h('button', { key: 'prefill', type: 'button', style: styles.button, onClick: () => { void prefillScores() } }, t('scoresPrefill')),
+            viewed !== null ? null : h('button', { key: 'csv', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('csv') } }, t('scoresExportCsv')),
+            viewed !== null ? null : h('button', { key: 'xlsx', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('xlsx') } }, t('scoresExportXlsx')),
           ]),
           h('span', { key: 'hint', style: styles.hint }, t('scoresHint')),
           scores.length === 0 ? null : h('div', { key: 'rows', style: styles.list }, scores.map((row) => h('div', {
@@ -3154,6 +3362,32 @@ registerProcessor('meeting-capture', MeetingCapture)
             typeof props.openVoiceInputBundle === 'function' && !speech.requesting && !pendingStart ? h('button', { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null,
           ]),
         ]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        switchPrompt === null ? null : h('div', {
+          key: 'switchprompt',
+          style: styles.setupOverlay,
+          role: 'dialog',
+          'aria-modal': 'true',
+        }, [
+          h('div', { style: styles.setupCard }, [
+            h('h2', { style: styles.setupTitle }, t('historyGuardTitle')),
+            h('p', { style: styles.note }, t('historyGuardBody')),
+            h('p', { key: 'count', style: styles.status }, `⏳ ${switchPrompt.seconds}`),
+            h('div', { key: 'foot', style: styles.setupFoot }, [
+              h('button', {
+                key: 'now',
+                type: 'button',
+                style: styles.button,
+                onClick: () => setSwitchPrompt((value) => (value === null ? null : { ...value, seconds: 0 })),
+              }, t('historyGuardNow')),
+              h('button', {
+                key: 'cancel',
+                type: 'button',
+                style: styles.button,
+                onClick: () => setSwitchPrompt(null),
+              }, t('cancelEntry')),
+            ]),
+          ]),
+        ]),
         namePrompt === null ? null : h('div', {
           key: 'nameprompt',
           style: styles.setupOverlay,
