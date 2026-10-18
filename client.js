@@ -4907,28 +4907,37 @@ registerProcessor('meeting-capture', MeetingCapture)
        */
       const openMeeting = React.useCallback(async (row) => {
         setError('')
-        if (row.sessionId === '') {
-          setError(t('hubNoMeeting'))
-          return
-        }
-        pendingMeeting.current = { sessionId: row.sessionId, meetingId: row.meetingId }
-        setNote(`${t('hubOpeningMeeting')} …`)
-        console.info('meeting-room: open meeting requested', row.meetingId, 'in session', row.sessionId)
-        const opened = typeof props.openConversation === 'function' ? props.openConversation(row.sessionId) : false
-        if (opened === false) {
+        // Wrapped because a throw in here happens after the conversation already switched:
+        // an unhandled rejection would leave the person on a conversation with no panel and
+        // no explanation, which is exactly how this went wrong once.
+        try {
+          if (row.sessionId === '') {
+            setError(t('hubNoMeeting'))
+            return
+          }
+          pendingMeeting.current = { sessionId: row.sessionId, meetingId: row.meetingId }
+          setSettingsNote(`${t('hubOpeningMeeting')} …`)
+          console.info('meeting-room: open meeting requested', row.meetingId, 'in session', row.sessionId)
+          const opened = typeof props.openConversation === 'function' ? props.openConversation(row.sessionId) : false
+          if (opened === false) {
+            pendingMeeting.current = null
+            setError(t('hubNoWorkspace'))
+            return
+          }
+          // Switching conversations rebuilds the right column, so the first attempt can land
+          // on the old pane. Retry briefly; the panel also focuses its own tab once it is
+          // mounted with the pending meeting, covering attempts that arrive too early.
+          const tryFocus = (attempt) => {
+            if (typeof props.openMeetingPanel !== 'function') return
+            props.openMeetingPanel()
+            if (attempt < 3) setTimeout(() => tryFocus(attempt + 1), 300 * (attempt + 1))
+          }
+          tryFocus(0)
+        } catch (failure) {
           pendingMeeting.current = null
-          setError(t('hubNoWorkspace'))
-          return
+          setError(failure instanceof Error ? failure.message : String(failure))
+          console.warn('meeting-room: opening a meeting failed', failure)
         }
-        // Switching conversations rebuilds the right column, so the first attempt can land on
-        // the old pane. Retry briefly; the panel also focuses its own tab once it is mounted
-        // with the pending meeting, which covers the case where these attempts arrive early.
-        const tryFocus = (attempt) => {
-          if (typeof props.openMeetingPanel !== 'function') return
-          props.openMeetingPanel()
-          if (attempt < 3) setTimeout(() => tryFocus(attempt + 1), 300 * (attempt + 1))
-        }
-        tryFocus(0)
       }, [props, t])
 
       /**
