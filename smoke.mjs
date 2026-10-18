@@ -31,6 +31,7 @@ const sessions = await import(`${plugin}/host-sessions.js`)
 const persistence = await import(`${plugin}/host-persistence.js`)
 const { createHandler } = await import(`${plugin}/host-routes.js`)
 const { exportDirectory } = await import(`${plugin}/host-helpers.js`)
+const { zipRead, importPackage, PACKAGE_FORMAT } = await import(`${plugin}/host-package.js`)
 
 const results = []
 const check = (name, ok) => {
@@ -248,6 +249,34 @@ check('下载接口以附件返回', download.status === 200 && String(download.
 check('下载的中文名走 UTF-8 文件名', String(download.headers['Content-Disposition'] ?? '').includes('filename*=UTF-8'))
 check('目录穿越被拒', (await call('/download?name=' + encodeURIComponent('../x.txt'))).status === 400)
 check('缺失文件返回 404', (await call('/download?name=none.md')).status === 404)
+
+// ---------------------------------------------------------------------------
+// 7b. 会议工程包：打包 / 导入
+// ---------------------------------------------------------------------------
+const packaged = (() => {
+  // Give the meeting a recording first, so the archive's audio path is exercised too.
+  brief.audioName = 'smoke-recording.wav'
+  return null
+})() ?? await (async () => {
+  await fs.mkdir(exportDirectory(), { recursive: true })
+  await fs.writeFile(join(exportDirectory(), 'smoke-recording.wav'), Buffer.from('RIFF....WAVEfmt '))
+  return call('/package?meetingId=m-brief')
+})()
+check('打包接口以附件返回 zip', packaged.status === 200
+  && String(packaged.headers['Content-Type']).includes('zip')
+  && String(packaged.headers['Content-Disposition']).startsWith('attachment;')
+  && packaged.body.subarray(0, 2).toString() === 'PK')
+const names = zipRead(packaged.body).map((entry) => entry.name)
+check('包里含记录、清单与录音', names.includes('meeting.json') && names.includes('manifest.json') && names.some((name) => name.startsWith('audio/')))
+const manifest = JSON.parse(zipRead(packaged.body).find((entry) => entry.name === 'manifest.json').data.toString('utf8'))
+check('清单写明格式与版本', manifest.format === PACKAGE_FORMAT && typeof manifest.version === 'number')
+const imported = await call('/import', undefined, 'POST') // no body: must be refused, not crash
+check('空请求体导入被拒', imported.status === 400)
+const restored = await importPackage(packaged.body)
+check('导入得到新会议且不挂在会话上', restored.meetingId !== 'm-brief' && meetings.get(restored.meetingId)?.sessionId === '')
+check('导入保留内容与发言人标签', meetings.get(restored.meetingId)?.tasks.length === brief.tasks.length
+  && JSON.stringify(meetings.get(restored.meetingId)?.speakerLabels ?? []) === JSON.stringify(brief.speakerLabels ?? []))
+check('导入记下来源会议', meetings.get(restored.meetingId)?.importedFrom === 'm-brief')
 
 // ---------------------------------------------------------------------------
 // 8. Agent 工具

@@ -121,12 +121,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       empty: '还没有内容。开始后对着麦克风说话。',
       terms: '会议术语（人名 / 公司 / 项目 / 专业词）',
       termsHint: '每行一条，三种写法：① 错词=正确词 → 直接替换，例如 romi中心=罗米中心；② 只写一个词 → 同音订正，例如 陈一鸣（听到 沉一明 也会改成它）；③ 前面加 * → 连单字也按同音订正，例如 *李（单字容易误替换，只在对某个姓氏有把握时用）。订正不改动原始转写，鼠标停在句子上可看原文。',
-      exportFile: '保存为文件（SRT + Markdown）',
+      exportFile: '保存为文件',
       copySrt: '复制 SRT',
       copy: '复制全文',
       copyForFix: '复制纠错请求',
       copied: '已复制',
-      saved: '已保存',
       error: '出错',
       hubTitle: '会议管理',
       hubIntro: '会议实录保存在本机；录制在会话里进行（标题栏的「会议记录」按钮 → 右侧栏面板）。',
@@ -146,6 +145,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       pushNow: '一键同步到钉钉/企业微信',
       pushNowHint: '按「会议管理 → 设置」里选择的推送方式，发送已确认的工作安排',
       pushed: '已推送',
+      packageSaving: '正在打包这场会议',
+      hubImport: '导入会议',
+      hubImportHint: '选择之前导出的会议压缩包（.zip），把它导入本机',
+      hubImported: '已导入会议',
       pushNothingConfigured: '没有可推送的目标：请先在「会议管理 → 设置」里配置群机器人或工作通知',
       hubOpenPanelManual: '已切到该对话；右侧面板未能自动打开，请点会话右上角的会议按钮',
       hubNoMeeting: '这条记录没有对应的会议',
@@ -388,12 +391,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       empty: 'Nothing yet. Start, then speak into the microphone.',
       terms: 'Meeting terms (people, companies, projects, jargon)',
       termsHint: 'One per line, three forms: (1) wrong=right replaces literally, e.g. romi=Romie; (2) a bare word fixes same-sound mishearings, e.g. 陈一鸣 also corrects 沉一明; (3) a leading * also matches single characters by sound, e.g. *李 — use it only for a surname you are sure about, because one syllable can rewrite the wrong character. Corrections never overwrite the recognition; hover a line to see the original.',
-      exportFile: 'Save files (SRT + Markdown)',
+      exportFile: 'Save as file',
       copySrt: 'Copy SRT',
       copy: 'Copy transcript',
       copyForFix: 'Copy correction request',
       copied: 'Copied',
-      saved: 'Saved',
       error: 'Error',
       hubTitle: 'Meeting management',
       hubIntro: 'Records stay on this machine; recording happens inside a session (the "Meeting notes" button in the session header opens the sidebar panel).',
@@ -413,6 +415,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       pushNow: 'Send to DingTalk / WeCom',
       pushNowHint: 'Sends the confirmed assignments the way the management page\'s settings chose',
       pushed: 'Sent',
+      packageSaving: 'Packaging this meeting',
+      hubImport: 'Import meeting',
+      hubImportHint: 'Choose a meeting archive (.zip) exported earlier and bring it into this machine',
+      hubImported: 'Imported meeting',
       pushNothingConfigured: 'Nothing to send to — configure a group robot or a work notification in Meeting management → Settings',
       hubOpenPanelManual: 'Switched to that conversation, but the right panel did not open — use the meeting button in the session header',
       hubNoMeeting: 'This record has no meeting behind it',
@@ -1073,9 +1079,20 @@ registerProcessor('meeting-capture', MeetingCapture)
      */
     function downloadArtifact(name) {
       if (typeof name !== 'string' || name === '' || typeof document === 'undefined') return
+      downloadUrl(`${PREFIX}/download?name=${encodeURIComponent(name)}`, name)
+    }
+
+    /**
+     * Ask the browser to save whatever a plugin route answers with. The route names the file,
+     * so the person gets the save dialog and chooses where it goes.
+     * @param path - same-origin path to fetch and save.
+     * @param name - suggested file name, when the caller knows one.
+     */
+    function downloadUrl(path, name) {
+      if (typeof document === 'undefined') return
       const link = document.createElement('a')
-      link.href = `${PREFIX}/download?name=${encodeURIComponent(name)}`
-      link.download = name
+      link.href = path
+      if (typeof name === 'string' && name !== '') link.download = name
       link.rel = 'noopener'
       document.body.appendChild(link)
       link.click()
@@ -1326,18 +1343,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       return `${pad(hours, 2)}:${pad(minutes, 2)}:${pad(secs, 2)},${pad(ms % 1000, 3)}`
     }
 
-    /**
-     * Render an absolute local timestamp.
-     * @param at - Epoch milliseconds.
-     * @returns `YYYY-MM-DD HH:MM:SS` in local time.
-     */
-    function absoluteOf(at) {
-      const date = new Date(at)
-      const pad = (value) => String(value).padStart(2, '0')
-      const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-      const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-      return `${day} ${time}`
-    }
 
     /**
      * Render a local date and time for file names.
@@ -1544,52 +1549,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       ])
     }
 
-    /**
-     * Render the transcript as a readable Markdown document.
-     * @param segments - Timed transcript segments.
-     * @param startedAt - Meeting start in epoch milliseconds.
-     * @param terms - Meeting terminology to record alongside the transcript.
-     * @returns the Markdown document.
-     */
-    function markdownOf(segments, startedAt, terms, points = [], tasks = []) {
-      const end = segments.length === 0 ? 0 : segments[segments.length - 1].end
-      const lines = [
-        '# 会议实录',
-        '',
-        `- 开始时间：${absoluteOf(startedAt)}`,
-        `- 时长：${clock(end)}`,
-        `- 段落数：${segments.length}`,
-        '',
-      ]
-      if (terms.length > 0) {
-        lines.push('## 术语表', '')
-        for (const term of terms) lines.push(`- ${term}`)
-        lines.push('')
-      }
-      if (points.length > 0) {
-        lines.push('## 要点', '')
-        for (const point of points) lines.push(`- **${point.kind}**　${point.text}`)
-        lines.push('')
-      }
-      if (tasks.length > 0) {
-        lines.push('## 工作安排', '')
-        for (const task of tasks) {
-          const owner = task.owner === '' ? '未定负责人' : task.owner
-          const due = task.due === '' ? '未定时间' : task.due
-          // The checkbox mirrors the human confirmation state, not the extractor's guess.
-          lines.push(`- [${task.status === 'confirmed' ? 'x' : ' '}] ${task.title}　—　${owner}　·　${due}　·　${task.priority}　·　${task.status}`)
-        }
-        lines.push('')
-      }
-      lines.push('## 逐句记录', '')
-      // Every line carries its own wall-clock time, so a record read out of context
-      // still says when it was said; the SRT keeps relative timecodes as the format requires.
-      for (const segment of segments) {
-        lines.push(`- **${absoluteOf(startedAt + segment.start * 1000)}**　${speakerPrefixOf(segment)}${seenOf(segment)}`)
-      }
-      lines.push('')
-      return lines.join('\n')
-    }
 
     /**
      * Compose the end-of-meeting correction request: the term list plus the record,
@@ -2273,6 +2232,21 @@ registerProcessor('meeting-capture', MeetingCapture)
        * @param draft - The person to store.
        * @param action - 'save' adds or updates, 'remove' deletes by name.
        */
+      /** Save this whole meeting as one archive another DSH can open. */
+      const savePackage = React.useCallback(async () => {
+        setError('')
+        setNote('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        // The route answers with the archive itself and names the file, so the browser asks
+        // where to save it: the meeting travels as one project rather than as loose files.
+        setNote(`${t('packageSaving')} …`)
+        downloadUrl(`${PREFIX}/package?meetingId=${encodeURIComponent(id)}`)
+      }, [ensureMeeting, t])
+
       /**
        * Send the confirmed assignments out. The host reads the management page's robot
        * settings and picks the route itself: group robot, work notification, or both.
@@ -3194,23 +3168,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [flush, release])
 
       /** Write the SRT record and its Markdown companion into the host's meetings directory. */
-      const exportFiles = React.useCallback(async () => {
-        if (meetingId === '') return
-        // Local date and time, so the file name matches the meeting's wall clock.
-        const stamp = stampOf(startedAt === 0 ? Date.now() : startedAt)
-        try {
-          const reply = await post('/export', {
-            meetingId,
-            files: [
-              { name: `${stamp}.srt`, content: srtOf(visible) },
-              { name: `${stamp}.md`, content: markdownOf(visible, startedAt, terms, points, tasks) },
-            ],
-          })
-          setNote(`${t('saved')}: ${reply.paths.join('  |  ')}`)
-        } catch (failure) {
-          setError(failure instanceof Error ? failure.message : String(failure))
-        }
-      }, [meetingId, points, startedAt, tasks, terms, t, visible])
 
       /** Copy the SRT record to the clipboard. */
       const copySrt = React.useCallback(async () => {
@@ -3456,7 +3413,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               // it to a model for correction.
               h(Btn, {
                 key: 'files', type: 'button', style: styles.menuItem, role: 'menuitem',
-                onClick: () => { setMoreOpen(false); void exportFiles() },
+                onClick: () => { setMoreOpen(false); void savePackage() },
               }, t('exportFile')),
               h(Btn, {
                 disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
@@ -4884,6 +4841,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [deptId, setDeptId] = React.useState(0)
       const [directoryBusy, setDirectoryBusy] = React.useState(false)
       const [settingsNote, setSettingsNote] = React.useState('')
+      /** The hidden file field behind the import button, and whether an import is running. */
+      const importField = React.useRef(null)
+      const [importing, setImporting] = React.useState(false)
       /** Which hub section is showing; the page keeps its own tabs, not the panel's. */
       const [hubTab, setHubTab] = React.useState('records')
 
@@ -5017,6 +4977,39 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [])
 
       React.useEffect(() => { void refresh() }, [refresh])
+
+      /**
+       * Bring one exported archive in as a meeting of this machine. The bytes go up as they
+       * are — an imported meeting carries its recording, which JSON would only inflate.
+       * @param file - The .zip the person chose.
+       */
+      const importMeeting = React.useCallback(async (file) => {
+        if (file === undefined || file === null) return
+        setError('')
+        setSettingsNote('')
+        setImporting(true)
+        try {
+          const response = await fetch(`${PREFIX}/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/zip' },
+            body: file,
+          })
+          const text = await response.text()
+          let value = {}
+          try { value = text === '' ? {} : JSON.parse(text) } catch { value = {} }
+          if (!response.ok) {
+            setError(typeof value.error === 'string' ? value.error : `${response.status}`)
+            return
+          }
+          const name = typeof value.title === 'string' && value.title !== '' ? value.title : String(value.meetingId ?? '')
+          setSettingsNote(`${t('hubImported')}: ${name} · ${String(value.files ?? 0)}`)
+          await refresh()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setImporting(false)
+        }
+      }, [refresh, t])
 
       /**
        * Open one meeting from the management page: remember it, switch to the conversation it
@@ -5304,6 +5297,28 @@ registerProcessor('meeting-capture', MeetingCapture)
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, t('hubRecords')),
             h(Btn, { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void refresh() } }, t('hubRefresh')),
+            // Bringing a meeting in from another DSH: the archive holds the record, its
+            // recording and the artifacts that belong to it.
+            h(Btn, {
+              key: 'import',
+              type: 'button',
+              style: styles.button,
+              disabled: importing,
+              title: t('hubImportHint'),
+              onClick: () => { importField.current?.click() },
+            }, importing ? `${t('hubImport')} …` : t('hubImport')),
+            h(Field, {
+              key: 'importfile',
+              type: 'file',
+              ref: importField,
+              accept: '.zip,application/zip',
+              style: { display: 'none' },
+              onChange: (event) => {
+                const file = event.target.files?.[0]
+                event.target.value = ''
+                void importMeeting(file)
+              },
+            }),
           ]),
           records.length === 0
             ? h('p', { key: 'empty', style: styles.empty }, t('hubEmpty'))

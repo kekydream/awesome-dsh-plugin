@@ -49,6 +49,10 @@ import {
 import { speakerState, prepareSpeakers, labelCue, relabelFromRecording, noteSpeakerLabel } from './host-speaker.js'
 import { handwritingState, recognizeHandwriting, prepareHandwriting } from './host-handwriting.js'
 import { flushMeetings, meetingIsEmpty } from './host-persistence.js'
+import { packageMeeting, importPackage } from './host-package.js'
+
+/** Ceiling for an imported archive: a long meeting's recording travels inside one. */
+const IMPORT_BODY_BYTES = 512 * 1024 * 1024
 
 import {
   appendChunk,
@@ -714,6 +718,41 @@ export function createHandler(ctx) {
         const asked = Array.isArray(body.kinds) ? body.kinds.filter((kind) => WEBHOOK_KINDS.includes(kind)) : WEBHOOK_KINDS
         const outcome = await pushTasks(meeting, asked.length === 0 ? WEBHOOK_KINDS : asked)
         sendJson(res, outcome.error === '' ? 200 : 400, outcome)
+        return
+      }
+
+      if (method === 'GET' && route === '/package') {
+        // One meeting as a portable archive: the record, its recording and its artifacts.
+        // Served as an attachment, so the browser asks the person where to put it.
+        const meeting = meetings.get(url.searchParams.get('meetingId') ?? '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        const bytes = await packageMeeting(meeting)
+        const title = (meeting.title === undefined || meeting.title === '' ? meeting.id : meeting.title)
+          .replace(/[\\/:*?"<>|]/gu, '_')
+        const name = `${title}-${stampOf(meeting.startedAt)}.zip`
+        res.writeHead(200, {
+          'Content-Type': 'application/zip',
+          'Content-Length': bytes.length,
+          'Content-Disposition': `attachment; filename="meeting.zip"; filename*=UTF-8''${encodeURIComponent(name)}`,
+        })
+        res.end(bytes)
+        return
+      }
+
+      if (method === 'POST' && route === '/import') {
+        // The reverse: read a package back as a meeting of this machine. The body is the
+        // archive itself, with a ceiling a recording can actually reach.
+        try {
+          const bytes = await readBody(req, IMPORT_BODY_BYTES)
+          const imported = await importPackage(bytes)
+          await flushMeetings(ctx)
+          sendJson(res, 200, imported)
+        } catch (failure) {
+          sendJson(res, 400, { error: failure instanceof Error ? failure.message : String(failure) })
+        }
         return
       }
 

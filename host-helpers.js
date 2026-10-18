@@ -41,13 +41,13 @@ export function sendJson(res, status, value) {
  * @param req - Incoming request.
  * @returns the body bytes.
  */
-export function readBody(req) {
+export function readBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = []
     let size = 0
     req.on('data', (chunk) => {
       size += chunk.length
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         reject(new Error('request body too large'))
         req.destroy()
         return
