@@ -171,9 +171,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       distillSent: '已把提炼请求发给对话',
       meetingNameTitle: '这场会议叫什么？',
       kindLabel: '会议类型',
+      needTranscript: '需要先有一段实录',
+      historyGuardDiscard: '不保存并打开',
       meetingNameHint: '选一个常用名称，或自己写一个；名称会显示在面板、实录抬头与纪要里。',
       meetingNamePlaceholder: '会议名称，如「晨会 · 10月18日」',
-      meetingNameSkip: '暂不命名',
+      meetingNameSkip: '暂不命名并开始记录',
       meetingNameNone: '（未命名）',
       periodNone: '（无周期）',
       panelTabScores: '评分',
@@ -448,9 +450,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       distillSent: 'Distill request sent to the conversation',
       meetingNameTitle: 'Name this meeting',
       kindLabel: 'Meeting type',
+      needTranscript: 'needs a transcript first',
+      historyGuardDiscard: 'Open without saving',
       meetingNameHint: 'Pick a common name or type your own; it shows in the panel, the transcript header and the minutes.',
       meetingNamePlaceholder: 'Meeting name, e.g. "Briefing · Oct 18"',
-      meetingNameSkip: 'Skip naming',
+      meetingNameSkip: 'Skip naming and start recording',
       meetingNameNone: '(unnamed)',
       periodNone: '(no period)',
       panelTabScores: 'Scores',
@@ -924,6 +928,8 @@ registerProcessor('meeting-capture', MeetingCapture)
 .mr-dialog-body { display: flex; flex-direction: column; gap: 12px; }
 .mr-dialog-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .mr-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* A one-line field, whatever height the host input would otherwise take. */
+.mr-input-compact { height: 26px; min-height: 26px; padding-top: 0; padding-bottom: 0; line-height: 1.4; }
 .mr-ufield.mr-layout-title { flex: 1 1 auto; min-width: 0; }
 .mr-hover { transition: background .12s ease; }
 .mr-hover:hover { background: var(--dsw-alias-bg-layer-2); }
@@ -3138,88 +3144,6 @@ registerProcessor('meeting-capture', MeetingCapture)
         // player and the content tabs; only what follows it scrolls, so a long transcript
         // cannot push those controls out of reach.
         h('div', { key: 'head', style: styles.panelHead }, [
-          // The meeting picker: search every meeting on this machine and open one for
-          // reading. Switching the view never changes which meeting the session owns (§5.4).
-          h('div', {
-            key: 'pickerwrap',
-            style: styles.pickerWrap,
-            // Clicks inside the dropdown must not reach the document listener that closes it.
-            onClick: (event) => event.stopPropagation(),
-          }, [
-          h('div', { key: 'pickerbar', style: styles.row }, [
-            // The platform's Input: the same field the built-in model picker searches with,
-            // so an IME behaves; a plain input is the fallback when primitives are absent.
-            h(Field, {
-              key: 'query',
-              type: 'text',
-              style: styles.inlineWide,
-              value: picker.query,
-              placeholder: t('historyPlaceholder'),
-              spellCheck: false,
-              role: 'searchbox',
-              'aria-label': t('historyPlaceholder'),
-              onFocus: () => { void loadHistory(picker.query) },
-              onChange: (event) => onQueryChange(event.target.value),
-              onCompositionStart: () => { composingRef.current = true },
-              onCompositionEnd: onQueryComposed,
-              onKeyDown: (event) => { if (event.key === 'Escape') setPicker((value) => ({ ...value, open: false })) },
-            }),
-            h(Btn, {
-              key: 'toggle',
-              type: 'button',
-              style: styles.smallButton,
-              onClick: () => {
-                const open = picker.open !== true
-                setPicker((value) => ({ ...value, open }))
-                if (open) void loadHistory(picker.query)
-              },
-            }, picker.open ? t('hubClose') : t('historyOpen')),
-          ]),
-          // The results float under the field, scroll and page in as they are read: the
-          // dropdown is a component, not a block that pushes the panel around.
-          picker.open !== true ? null : h('div', {
-            key: 'pickerlist',
-            style: styles.historyPanel,
-            onScroll: onPickerScroll,
-          }, [
-            picker.rows.length === 0
-              ? h('p', { key: 'none', style: styles.empty }, picker.loading === true ? t('historyLoading') : t('historyEmpty'))
-              : null,
-            ...picker.rows.map((row) => h('div', {
-              key: row.meetingId,
-              style: styles.historyRow,
-              className: 'mr-hover',
-              role: 'button',
-              tabIndex: 0,
-              title: t('historyChoose'),
-              // The whole card opens the meeting — the name is the obvious target, and the
-              // preview line beside it means the same thing.
-              onClick: () => { void chooseHistorical(row) },
-              onKeyDown: (event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  void chooseHistorical(row)
-                }
-              },
-            }, [
-              // First line: when it happened, what it was called, and its type and period.
-              h('div', { key: 'head', style: styles.historyHead }, [
-                h('span', { key: 'when', style: styles.stamp }, new Date(row.startedAt).toLocaleDateString()),
-                h('span', { key: 'name', style: styles.historyName }, row.title === '' ? t('meetingNameNone') : row.title),
-                row.kind === '' ? null : h('span', { key: 'kind', style: styles.chip }, t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')),
-                row.period === '' ? null : h('span', { key: 'period', style: styles.hint }, row.period),
-                row.hasContent === true ? null : h('span', { key: 'blank', style: styles.chip }, t('historyBlank')),
-              ]),
-              // Second line: the preview sentence, on its own line so a long name never
-              // squeezes it.
-              row.excerpt === '' ? null : h('div', { key: 'excerpt', style: styles.historyExcerpt }, row.excerpt.length > 120 ? `${row.excerpt.slice(0, 120)}…` : row.excerpt),
-            ])),
-            // The footer says where the paging stands: more to come, or everything shown.
-            picker.rows.length === 0 ? null : h('div', { key: 'more', style: styles.hint }, picker.rows.length >= picker.total
-              ? t('historyAll')
-              : (picker.loadingMore === true ? t('historyLoading') : t('historyMore'))),
-          ]),
-          ]),
           viewed === null ? null : h('div', { key: 'viewer', style: styles.row }, [
             h('span', { key: 'label', style: styles.status }, `${t('historyViewing')}: ${meta.title === '' ? t('meetingNameNone') : meta.title}${meta.period === '' ? '' : ` · ${meta.period}`}`),
             typeof props.openConversation !== 'function' || viewed.sessionId === '' ? null : h(Btn, {
@@ -3300,13 +3224,16 @@ registerProcessor('meeting-capture', MeetingCapture)
               setNamePrompt({ text: '', kind: meta.kind, role: role === '' ? 'attendee' : role, start: true })
             },
           }, recording ? t('stop') : t('start')),
-          // Pause sits beside Stop: a pause keeps the meeting open, Stop ends it (§5.6).
-          phase !== 'recording' ? null : h(Btn, {
+          // Pause sits beside Stop: a pause keeps the meeting open, Stop ends it (§5.6). The
+          // button stays put for the whole recording — it used to vanish for the moment a
+          // chunk was being written, which reads as a fault — and is only disabled then.
+          recording ? h(Btn, {
             key: 'pause',
             type: 'button',
             style: paused ? styles.buttonActive : styles.button,
+            disabled: phase === 'transcribing',
             onClick: () => togglePause(),
-          }, paused ? t('resumeRecording') : t('pauseRecording')),
+          }, paused ? t('resumeRecording') : t('pauseRecording')) : null,
           h(Btn, {
             key: 'notes',
             type: 'button',
@@ -3325,6 +3252,80 @@ registerProcessor('meeting-capture', MeetingCapture)
             style: styles.button,
             onClick: () => { void writeMinutes() },
           }, t('minutes')),
+          // The picker is one button in the row like every other action, and its dropdown
+          // carries the search field: the panel is a console, not a search page (§5.4).
+          h('div', {
+            key: 'pickerwrap',
+            style: styles.menuWrap,
+            // Clicks inside the dropdown must not reach the document listener that closes it.
+            onClick: (event) => event.stopPropagation(),
+          }, [
+            h(Btn, {
+              key: 'open',
+              type: 'button',
+              style: picker.open === true ? styles.buttonActive : styles.button,
+              'aria-expanded': picker.open === true,
+              onClick: () => {
+                const open = picker.open !== true
+                setPicker((value) => ({ ...value, open }))
+                if (open) void loadHistory(picker.query)
+              },
+            }, t('historyOpen')),
+            picker.open !== true ? null : h('div', {
+              key: 'pickerlist',
+              style: styles.historyPanel,
+              onScroll: onPickerScroll,
+            }, [
+              // The platform's Input: the same field the built-in model picker searches with,
+              // so an IME behaves; a plain input is the fallback when primitives are absent.
+              h(Field, {
+                key: 'query',
+                type: 'text',
+                style: styles.inlineWide,
+                className: 'mr-input-compact',
+                value: picker.query,
+                placeholder: t('historyPlaceholder'),
+                spellCheck: false,
+                role: 'searchbox',
+                'aria-label': t('historyPlaceholder'),
+                onFocus: () => { void loadHistory(picker.query) },
+                onChange: (event) => onQueryChange(event.target.value),
+                onCompositionStart: () => { composingRef.current = true },
+                onCompositionEnd: onQueryComposed,
+                onKeyDown: (event) => { if (event.key === 'Escape') setPicker((value) => ({ ...value, open: false })) },
+              }),
+              picker.rows.length === 0
+                ? h('p', { key: 'none', style: styles.empty }, picker.loading === true ? t('historyLoading') : t('historyEmpty'))
+                : null,
+              ...picker.rows.map((row) => h('div', {
+                key: row.meetingId,
+                style: styles.historyRow,
+                className: 'mr-hover',
+                role: 'button',
+                tabIndex: 0,
+                title: t('historyChoose'),
+                onClick: () => { void chooseHistorical(row) },
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    void chooseHistorical(row)
+                  }
+                },
+              }, [
+                h('div', { key: 'head', style: styles.historyHead }, [
+                  h('span', { key: 'when', style: styles.stamp }, new Date(row.startedAt).toLocaleDateString()),
+                  h('span', { key: 'name', style: styles.historyName }, row.title === '' ? t('meetingNameNone') : row.title),
+                  row.kind === '' ? null : h('span', { key: 'kind', style: styles.chip }, t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')),
+                  row.period === '' ? null : h('span', { key: 'period', style: styles.hint }, row.period),
+                  row.hasContent === true ? null : h('span', { key: 'blank', style: styles.chip }, t('historyBlank')),
+                ]),
+                row.excerpt === '' ? null : h('div', { key: 'excerpt', style: styles.historyExcerpt }, row.excerpt.length > 120 ? `${row.excerpt.slice(0, 120)}…` : row.excerpt),
+              ])),
+              picker.rows.length === 0 ? null : h('div', { key: 'more', style: styles.hint }, picker.rows.length >= picker.total
+                ? t('historyAll')
+                : (picker.loadingMore === true ? t('historyLoading') : t('historyMore'))),
+            ]),
+          ]),
           // The overflow is a dropdown under its own button: the action row keeps one line,
           // and 「生成要点与任务」 sits with the other occasional actions instead of shouting
           // in the bar. The button itself is always there — an action that comes and goes
@@ -3338,7 +3339,8 @@ registerProcessor('meeting-capture', MeetingCapture)
               onClick: () => setMoreOpen((value) => !value),
             }, t('more')),
             moreOpen ? h('div', { key: 'moremenu', style: styles.menu, role: 'menu' }, [
-              segments.length === 0 ? null : h(Btn, {
+              h(Btn, {
+                disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
                 key: 'extract', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void extract() },
               }, t('generate')),
@@ -3346,15 +3348,18 @@ registerProcessor('meeting-capture', MeetingCapture)
                 key: 'files', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void exportFiles() },
               }, t('exportFile')),
-              segments.length === 0 ? null : h(Btn, {
+              h(Btn, {
+                disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
                 key: 'srt', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void copySrt() },
               }, t('copySrt')),
-              segments.length === 0 ? null : h(Btn, {
+              h(Btn, {
+                disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
                 key: 'copy', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void copyText() },
               }, t('copy')),
-              segments.length === 0 ? null : h(Btn, {
+              h(Btn, {
+                disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
                 key: 'fix', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void copyForFix() },
               }, t('copyForFix')),
@@ -3362,7 +3367,8 @@ registerProcessor('meeting-capture', MeetingCapture)
                 key: 'refresh', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void refreshAnalysis() },
               }, t('refresh')),
-              segments.length === 0 ? null : h(Btn, {
+              h(Btn, {
+                disabled: segments.length === 0, title: segments.length === 0 ? t('needTranscript') : undefined,
                 key: 'revise', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); void revise() },
               }, t('revise')),
@@ -3503,7 +3509,6 @@ registerProcessor('meeting-capture', MeetingCapture)
         ]),
         ]),
         h('div', { key: 'scroll', style: styles.panelScroll }, [
-        helpOpen ? h('div', { key: 'help', style: styles.help }, t('helpBody')) : null,
         h('span', { key: 'rolehint', style: styles.hint }, t('roleHint')),
         h('div', { key: 'speaker', style: styles.row }, [
           h('span', { key: 'state', style: styles.status }, speakerText),
@@ -3546,16 +3551,10 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t('inkToTask')),
           ]))),
         bodyTab !== 'names' ? null : h('div', { key: 'names', style: styles.list }, [
-          // Folded away by default: naming voices is an occasional task, and the fields would
-          // otherwise sit in the panel the whole time.
+          // The form is the page: naming voices is a straightforward task, and a button that
+          // only revealed the fields was a step in the way.
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, t('speakerNames')),
-            labels.length === 0 ? null : h(Btn, {
-              key: 'toggle',
-              type: 'button',
-              style: namesOpen ? styles.buttonActive : styles.button,
-              onClick: () => setNamesOpen((value) => !value),
-            }, namesOpen ? t('hubClose') : t('openNames')),
             viewed !== null ? null : h(Btn, {
               key: 'relabel',
               type: 'button',
@@ -3566,15 +3565,16 @@ registerProcessor('meeting-capture', MeetingCapture)
           ]),
           labels.length === 0
             // An empty tab must explain itself: labels appear once someone speaks and pauses,
-            // and this button is the repair path when the online pass left the meeting blank.
+            // and the relabel button is the repair path when the online pass left it blank.
             ? h('span', { key: 'empty', style: styles.hint }, t('speakerNamesEmpty'))
-            : namesOpen ? h('div', { key: 'body', style: styles.list }, [
+            : h('div', { key: 'body', style: styles.list }, [
             h('span', { key: 'hint', style: styles.hint }, t('speakerNameHint')),
             ...labels.map((label) => h('div', { key: label, style: styles.row }, [
             h('span', { key: 'label', style: styles.chip }, label),
             h(Field, {
               key: 'name',
-              style: styles.textarea,
+              style: styles.inlineWide,
+              className: 'mr-input-compact',
               value: draftNames[label] ?? speakers[label] ?? '',
               placeholder: t('speakerNamePlaceholder'),
               spellCheck: false,
@@ -3588,7 +3588,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               onClick: () => { void nameSpeaker(label, draftNames[label] ?? speakers[label] ?? '') },
             }, t('robotSave')),
             ])),
-          ]) : null,
+          ]),
         ]),
         bodyTab !== 'points' ? null : h('div', { key: 'points', style: styles.list }, [
           h('div', { key: 'title', style: styles.label }, `${t('points')} (${points.length})`),
@@ -3879,6 +3879,20 @@ registerProcessor('meeting-capture', MeetingCapture)
             typeof props.openVoiceInputBundle === 'function' && !speech.requesting && !pendingStart ? h(Btn, { key: 'dt', type: 'button', style: styles.linkButton, onClick: () => props.openVoiceInputBundle() }, t('setupDetails')) : null,
           ]),
         ]) : error === '' ? null : h('p', { key: 'error', style: styles.error }, `${t('error')}: ${error}`),
+        // The tutorial is a dialog, not a block inside the panel: it is read once, and it
+        // should not push the meeting's own content down while it is open.
+        helpOpen ? h(Dialog, {
+          key: 'helpdialog',
+          title: t('helpToggle'),
+          onClose: () => setHelpOpen(false),
+          children: h('p', { key: 'body', style: styles.help }, t('helpBody')),
+          footer: [h(Btn, {
+            key: 'ok',
+            type: 'button',
+            style: styles.button,
+            onClick: () => setHelpOpen(false),
+          }, t('hubClose'))],
+        }) : null,
         switchPrompt === null ? null : h(Dialog, {
           key: 'switchprompt',
           title: t('historyGuardTitle'),
@@ -3892,6 +3906,17 @@ registerProcessor('meeting-capture', MeetingCapture)
               style: styles.button,
               onClick: () => setSwitchPrompt((value) => (value === null ? null : { ...value, seconds: 0 })),
             }, t('historyGuardNow')),
+            h(Btn, {
+              key: 'discard',
+              type: 'button',
+              style: styles.button,
+              // Saving is the default, not the only option: this meeting may be a scratch one.
+              onClick: () => {
+                const row = switchPrompt.row
+                setSwitchPrompt(null)
+                void openHistorical(row)
+              },
+            }, t('historyGuardDiscard')),
             h(Btn, {
               key: 'cancel',
               type: 'button',
@@ -3911,6 +3936,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               key: 'text',
               type: 'text',
               style: styles.inlineWide,
+              className: 'mr-input-compact',
               value: namePrompt.text,
               placeholder: t('meetingNamePlaceholder'),
               spellCheck: false,
