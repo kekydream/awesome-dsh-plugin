@@ -140,6 +140,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubOpenSession: '打开会议',
       hubOpenMeetingHint: '切换到这场会议的对话，并在右侧打开它的会议记录',
       hubOpeningMeeting: '正在打开这场会议',
+      hubOpenPanelManual: '已切到该对话；右侧面板未能自动打开，请点会话右上角的会议按钮',
       hubNoMeeting: '这条记录没有对应的会议',
       hubNoWorkspace: '当前界面不支持新建对话',
       hubClose: '关闭',
@@ -402,6 +403,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubOpenSession: 'Open meeting',
       hubOpenMeetingHint: 'Switch to this meeting\'s conversation and open its record in the right panel',
       hubOpeningMeeting: 'Opening this meeting',
+      hubOpenPanelManual: 'Switched to that conversation, but the right panel did not open — use the meeting button in the session header',
       hubNoMeeting: 'This record has no meeting behind it',
       hubNoWorkspace: 'This shell cannot start a new conversation',
       hubClose: 'Close',
@@ -4924,15 +4926,22 @@ registerProcessor('meeting-capture', MeetingCapture)
             setError(t('hubNoWorkspace'))
             return
           }
-          // Switching conversations rebuilds the right column, so the first attempt can land
-          // on the old pane. Retry briefly; the panel also focuses its own tab once it is
-          // mounted with the pending meeting, covering attempts that arrive too early.
-          const tryFocus = (attempt) => {
+          // Switching conversations rebuilds the surface the right column hangs on. Until that
+          // surface is mounted, `openTab` refuses ("no session surface is mounted"), so keep
+          // asking briefly, stop the moment it takes, and say what to do if it never does.
+          let attempts = 0
+          const tryFocus = () => {
             if (typeof props.openMeetingPanel !== 'function') return
-            props.openMeetingPanel()
-            if (attempt < 3) setTimeout(() => tryFocus(attempt + 1), 300 * (attempt + 1))
+            attempts += 1
+            if (props.openMeetingPanel() === true) return
+            if (attempts < 24) {
+              setTimeout(tryFocus, 250)
+              return
+            }
+            console.warn('meeting-room: the right panel could not be opened; the conversation is open')
+            setSettingsNote(t('hubOpenPanelManual'))
           }
-          tryFocus(0)
+          tryFocus()
         } catch (failure) {
           pendingMeeting.current = null
           setError(failure instanceof Error ? failure.message : String(failure))
@@ -5511,12 +5520,21 @@ registerProcessor('meeting-capture', MeetingCapture)
              */
             openMeetingPanel: () => {
               try {
+                // The right column addresses a mounted conversation surface, and while the
+                // management page holds the main area there is none — `selectPanel(null)`
+                // shows the Conversation, which is the session already selected by the click.
+                try {
+                  ctx.layout.selectPanel(null)
+                } catch {
+                  // Older or restricted layout: fall through and let openTab speak for itself.
+                }
                 // Always select the tab: skipping this when the column is merely expanded
                 // left whatever other tab was showing in place of the meeting.
                 ctx.sidebarRight.openTab(TAB_KIND)
                 return true
-              } catch (failure) {
-                console.warn('meeting-room: the meeting panel could not be opened', failure)
+              } catch {
+                // Expected for the moment the surface needs to mount: the caller retries,
+                // so logging every attempt would only be noise.
                 return false
               }
             },
