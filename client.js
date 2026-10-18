@@ -996,6 +996,18 @@ registerProcessor('meeting-capture', MeetingCapture)
       ? primitives.Modal
       : null
 
+    /**
+     * ReactDOM, used only for portals. A dropdown has to be rendered outside the panel:
+     * inside it, any z-index still belongs to the panel's stacking context, which is what
+     * let other parts of the interface paint over the overflow menu.
+     */
+    let ReactDOM = null
+    try {
+      ReactDOM = require('react-dom')
+    } catch {
+      ReactDOM = null
+    }
+
     /** The host Button preset each of our variants means. */
     const BTN_PRESET = {
       default: { variant: 'outline', size: 'md' },
@@ -1020,6 +1032,18 @@ registerProcessor('meeting-capture', MeetingCapture)
      */
     function classNames(extra, ours) {
       return typeof extra === 'string' && extra !== '' ? `${ours} ${extra}` : ours
+    }
+
+    /**
+     * Render a floating element at the document root when portals are available, and in
+     * place otherwise. Outside the panel it escapes both the panel's stacking context and
+     * its scroll clipping, so a dropdown is never covered or cut off.
+     * @param node - the element to float.
+     * @returns the element, portalled when possible.
+     */
+    function float(node) {
+      if (ReactDOM === null || typeof ReactDOM.createPortal !== 'function' || typeof document === 'undefined') return node
+      return ReactDOM.createPortal(node, document.body)
     }
 
     /**
@@ -1851,6 +1875,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       const listRef = React.useRef(null)
       /** Where the meeting dropdown sits: measured from the panel, so it spans its width. */
       const [pickerRect, setPickerRect] = React.useState(null)
+      /** Where the overflow menu sits, measured after it opened and the button resized. */
+      const [moreRect, setMoreRect] = React.useState(null)
+      const moreButton = React.useRef(null)
       /** The switch guard: the row to open once the countdown saved the current meeting. */
       const [switchPrompt, setSwitchPrompt] = React.useState(null)
       const audio = React.useRef(null)
@@ -2530,6 +2557,26 @@ registerProcessor('meeting-capture', MeetingCapture)
           document.removeEventListener('click', close)
           document.removeEventListener('keydown', onKey)
         }
+      }, [moreOpen])
+
+      // Measure the menu's place AFTER the open render: the button carries its active style
+      // by then, so the row is settled and the menu lands under the button as it looks now.
+      React.useLayoutEffect(() => {
+        if (!moreOpen) {
+          setMoreRect(null)
+          return
+        }
+        const button = moreButton.current
+        if (button === null || typeof button.getBoundingClientRect !== 'function') return
+        const section = typeof button.closest === 'function' ? button.closest('section') : null
+        const box = (section ?? button).getBoundingClientRect()
+        const rect = button.getBoundingClientRect()
+        const width = Math.min(300, Math.max(200, box.width - 16))
+        setMoreRect({
+          top: rect.bottom + 6,
+          left: Math.max(8, box.right - 8 - width),
+          width,
+        })
       }, [moreOpen])
 
       /** Load one slice of the picker's rows; scrolling to the bottom asks for the next one. */
@@ -3260,8 +3307,11 @@ registerProcessor('meeting-capture', MeetingCapture)
                 if (open) void loadHistory(picker.query)
               },
             }, t('historyOpen')),
-            picker.open !== true ? null : h('div', {
+            picker.open !== true ? null : float(h('div', {
               key: 'pickerlist',
+              // Portalled out of the wrapper, so the panel itself has to swallow clicks:
+              // otherwise typing in its search field would reach the document and close it.
+              onClick: (event) => event.stopPropagation(),
               // Fixed and measured: the list spans the panel's width instead of hugging the
               // button it was opened from (§5.4).
               style: pickerRect === null ? styles.historyPanel : {
@@ -3322,7 +3372,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               picker.rows.length === 0 ? null : h('div', { key: 'more', style: styles.hint }, picker.rows.length >= picker.total
                 ? t('historyAll')
                 : (picker.loadingMore === true ? t('historyLoading') : t('historyMore'))),
-            ]),
+            ])),
           ]),
           // The overflow is a dropdown under its own button: the action row keeps one line,
           // and 「生成要点与任务」 sits with the other occasional actions instead of shouting
@@ -3332,17 +3382,24 @@ registerProcessor('meeting-capture', MeetingCapture)
             h(Btn, {
               key: 'more',
               type: 'button',
+              ref: moreButton,
               style: moreOpen ? styles.buttonActive : styles.button,
               'aria-expanded': moreOpen,
               onClick: () => setMoreOpen((value) => !value),
             }, t('more')),
-            // Anchored to its own button rather than to measured coordinates: the button
-            // grows when it turns active, and a rect captured before that render put the
-            // menu somewhere else. The wrapper is the positioning context, so the menu is
-            // always directly under the button; the z-index keeps it above the panel.
-            moreOpen ? h('div', {
+            // Measured placement (the button changes size when it turns active, so the
+            // measurement happens after that render, in the layout effect below) and
+            // rendered at the document root, so nothing in the panel can cover it.
+            moreOpen ? float(h('div', {
               key: 'moremenu',
-              style: styles.menu,
+              style: moreRect === null ? styles.menu : {
+                ...styles.menu,
+                position: 'fixed',
+                top: `${moreRect.top}px`,
+                left: `${moreRect.left}px`,
+                width: `${moreRect.width}px`,
+                right: 'auto',
+              },
               role: 'menu',
             }, [
               h(Btn, {
@@ -3395,7 +3452,7 @@ registerProcessor('meeting-capture', MeetingCapture)
                   setNamePrompt({ text: meta.title, kind: meta.kind, role: role === '' ? 'attendee' : role, roleOther: '', start: false })
                 },
               }, t('meetingSetup')),
-            ]) : null,
+            ])) : null,
           ]),
           h(Btn, {
             key: 'help',
