@@ -193,6 +193,17 @@ if (!hasPython) {
 }
 
 // ---------------------------------------------------------------------------
+// 6b. 推送工作安排
+// ---------------------------------------------------------------------------
+const refused = await call('/push', { meetingId: 'm-brief' }, 'POST')
+check('没有已确认任务时推送被拒并说明原因', refused.status === 400 && String(refused.value.error).includes('确认'))
+brief.tasks[0].status = 'confirmed'
+const attempted = await call('/push', { meetingId: 'm-brief' }, 'POST')
+check('已确认任务时按设置的分发方式执行', attempted.status === 200 && typeof attempted.value.mode === 'string' && Array.isArray(attempted.value.results))
+check('未配置机器人时每个目标都带回失败原因，而不是假成功', attempted.value.results.length > 0 && attempted.value.results.every((entry) => entry.ok === false && String(entry.message) !== ''))
+check('未知会议推送返回 404', (await call('/push', { meetingId: 'nope' }, 'POST')).status === 404)
+
+// ---------------------------------------------------------------------------
 // 7. 纪要、下载
 // ---------------------------------------------------------------------------
 const md = await call('/minutes', { meetingId: 'm-brief', format: 'md' }, 'POST')

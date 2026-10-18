@@ -143,6 +143,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubOpenSession: '打开会议',
       hubOpenMeetingHint: '切换到这场会议的对话，并在右侧打开它的会议记录',
       hubOpeningMeeting: '正在打开这场会议',
+      pushNow: '一键同步到钉钉/企业微信',
+      pushNowHint: '按「会议管理 → 设置」里选择的推送方式，发送已确认的工作安排',
+      pushed: '已推送',
+      pushNothingConfigured: '没有可推送的目标：请先在「会议管理 → 设置」里配置群机器人或工作通知',
       hubOpenPanelManual: '已切到该对话；右侧面板未能自动打开，请点会话右上角的会议按钮',
       hubNoMeeting: '这条记录没有对应的会议',
       hubNoWorkspace: '当前界面不支持新建对话',
@@ -406,6 +410,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubOpenSession: 'Open meeting',
       hubOpenMeetingHint: 'Switch to this meeting\'s conversation and open its record in the right panel',
       hubOpeningMeeting: 'Opening this meeting',
+      pushNow: 'Send to DingTalk / WeCom',
+      pushNowHint: 'Sends the confirmed assignments the way the management page\'s settings chose',
+      pushed: 'Sent',
+      pushNothingConfigured: 'Nothing to send to — configure a group robot or a work notification in Meeting management → Settings',
       hubOpenPanelManual: 'Switched to that conversation, but the right panel did not open — use the meeting button in the session header',
       hubNoMeeting: 'This record has no meeting behind it',
       hubNoWorkspace: 'This shell cannot start a new conversation',
@@ -2213,6 +2221,15 @@ registerProcessor('meeting-capture', MeetingCapture)
 
 
       /** Load the shared roster once, to suggest owners in task editing. */
+      const reloadPeople = React.useCallback(async () => {
+        try {
+          const reply = await get('/people')
+          if (Array.isArray(reply.people)) setPeople(reply.people)
+        } catch {
+          // The roster is a convenience: an unreadable one simply leaves the suggestions out.
+        }
+      }, [])
+
       React.useEffect(() => {
         let cancelled = false
         void (async () => {
@@ -2226,12 +2243,53 @@ registerProcessor('meeting-capture', MeetingCapture)
         return () => { cancelled = true }
       }, [])
 
+      // The roster is edited (and synced from DingTalk) on the management page, so re-read it
+      // whenever a tab that offers names is shown: otherwise a person added there would not
+      // appear here until the page was reloaded.
+      React.useEffect(() => {
+        if (bodyTab === 'tasks' || bodyTab === 'names') void reloadPeople()
+      }, [bodyTab, reloadPeople])
+
       /**
        * Add or update one person on the meeting's roster. The mobile number is what a group
        * robot mentions; the DingTalk user id is what a private work notification addresses.
        * @param draft - The person to store.
        * @param action - 'save' adds or updates, 'remove' deletes by name.
        */
+      /**
+       * Send the confirmed assignments out. The host reads the management page's robot
+       * settings and picks the route itself: group robot, work notification, or both.
+       */
+      const pushTasksNow = React.useCallback(async () => {
+        setError('')
+        setNote('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/push', { meetingId: id })
+          if (typeof reply.error === 'string' && reply.error !== '') {
+            setError(reply.error)
+            return
+          }
+          const mode = t(PUSH_MODE_KEYS[reply.mode] ?? 'pushModeBoth')
+          const results = Array.isArray(reply.results) ? reply.results : []
+          const sent = results.filter((entry) => entry?.ok === true).length
+          // The host answers one entry per target; a target that could not be reached says why.
+          // Counting successes (not entries) is what keeps this from reporting a false success.
+          if (sent === 0) {
+            const first = results.find((entry) => entry?.ok !== true && typeof entry?.message === 'string' && entry.message !== '')
+            setError(`${t('pushNothingConfigured')}${first === undefined ? '' : ` · ${first.message}`}`)
+            return
+          }
+          setNote(`${t('pushed')} · ${mode} · ${sent}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, t])
+
       /** Write the meeting up as a minutes document the user can keep or send on. */
       const writeMinutes = React.useCallback(async (format = 'md') => {
         setError('')
@@ -3470,6 +3528,13 @@ registerProcessor('meeting-capture', MeetingCapture)
           onPause: () => setPlaying(false),
           onEnded: () => setPlaying(false),
         }),
+        // The roster and this meeting's speaker names feed the datalist that every name field
+        // points at (task owners, speaker names). It used to be referenced but never rendered,
+        // so those fields had no suggestions at all.
+        h('datalist', {
+          key: 'names',
+          id: OWNER_LIST_ID,
+        }, ownerSuggestions(speakers, people).map((name) => h('option', { key: name, value: name }))),
         // One tab per kind of meeting content, so the panel shows one thing at a time instead
         // of the transcript, the points, the assignments and the voices stacked together.
         h('div', { key: 'bodytabs', style: styles.tabs }, [
@@ -3755,7 +3820,19 @@ registerProcessor('meeting-capture', MeetingCapture)
           ]),
         ]),
         bodyTab !== 'tasks' ? null : h('div', { key: 'tasks', style: styles.list }, [
-          h('div', { key: 'title', style: styles.label }, `${t('tasks')} (${tasks.filter((task) => task.status === 'confirmed').length}/${tasks.length})`),
+          h('div', { key: 'title', style: styles.row }, [
+            h('span', { key: 'label', style: styles.label }, `${t('tasks')} (${tasks.filter((task) => task.status === 'confirmed').length}/${tasks.length})`),
+            // One click sends the confirmed assignments out, in the way the management page's
+            // robot settings chose (group robot, work notification, or both).
+            viewed !== null ? null : h(Btn, {
+              key: 'push',
+              type: 'button',
+              style: styles.button,
+              disabled: tasks.every((task) => task.status !== 'confirmed'),
+              title: t('pushNowHint'),
+              onClick: () => { void pushTasksNow() },
+            }, t('pushNow')),
+          ]),
           tasks.length === 0
             ? h('p', { key: 'hint', style: styles.empty }, segments.length === 0 ? t('tasksNoRecording') : t('tasksEmpty'))
             : null,
