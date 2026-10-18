@@ -24,8 +24,8 @@ window.__ModuleLoader__.load({
 
     /**
      * Platform UI primitives. The shared Input is the field the built-in model picker
-     * searches with, so it is the one that behaves under an IME; the plugin falls back to a
-     * plain input (with its own composition handling) if the module is absent.
+     * searches with, so it is the one that behaves under an IME; every control here falls
+     * back to the plugin's own markup if the module (or one of its members) is absent.
      */
     let primitives = {}
     try {
@@ -33,7 +33,6 @@ window.__ModuleLoader__.load({
     } catch {
       primitives = {}
     }
-    const SearchInput = typeof primitives.Input === 'function' || typeof primitives.Input === 'object' ? primitives.Input : 'input'
 
     /** Locale namespace owned by this plugin. */
     const NS = 'meetingRoom'
@@ -850,11 +849,16 @@ registerProcessor('meeting-capture', MeetingCapture)
     }
 
     /**
-     * The plugin's one control stylesheet. Every button, field, picker and tab renders a
-     * raw element (behaviour and per-site widths stay exactly as they were) but takes its
-     * surface, border, radius and interactive states from these classes, so the whole plugin
-     * looks like one product instead of a dozen inline variants. Colours are theme tokens,
-     * which is also what makes light and dark both correct.
+     * The plugin's one control stylesheet, in two parts.
+     *
+     * Platform path: when the host provides `@deepseek-ai/dsh-client-ui-primitives`, buttons
+     * and fields ARE those components, so this sheet only places them (`.mr-ui*`, widths,
+     * the tab underline, a full-width menu row). The look is the host's, which is what keeps
+     * the plugin from drifting away from the UI it lives in.
+     *
+     * Fallback path: on a host without that module the same call sites render raw elements
+     * and take the skin below, so the plugin stays coherent instead of unstyled. Colours are
+     * theme tokens, which is also what makes light and dark both correct.
      */
     const CONTROL_CSS = `
 .mr-btn { font: inherit; font-size: 12px; line-height: 1.5; padding: 4px 10px; border-radius: 6px;
@@ -890,6 +894,17 @@ registerProcessor('meeting-capture', MeetingCapture)
 .mr-field--area { min-height: 72px; resize: vertical; width: 100%; }
 .mr-field--title { border-color: transparent; background: none; padding: 2px 4px; flex: 1 1 auto; min-width: 0; }
 .mr-field--title:hover { border-color: var(--dsw-alias-border-l1); }
+/* Platform path: no skin of our own, only what the host component cannot know. */
+.mr-ui.mr-layout-active { background: var(--dsw-alias-bg-layer-2); border-color: var(--dsw-alias-border-l2); }
+.mr-ui.mr-layout-link { text-decoration: underline; }
+.mr-ui.mr-layout-menu { display: block; width: 100%; text-align: left; white-space: nowrap; }
+.mr-ui.mr-layout-tab, .mr-ui.mr-layout-tab-active { border-radius: 6px 6px 0 0; }
+.mr-ui.mr-layout-tab { opacity: .68; }
+.mr-ui.mr-layout-tab:hover { opacity: 1; }
+.mr-ui.mr-layout-tab-active { box-shadow: inset 0 -2px 0 var(--dsw-alias-brand-primary); font-weight: 600; }
+.mr-ufield.mr-layout-wide { flex: 1 1 120px; min-width: 0; }
+.mr-ufield.mr-layout-tight { width: 76px; }
+.mr-ufield.mr-layout-title { flex: 1 1 auto; min-width: 0; }
 .mr-hover { transition: background .12s ease; }
 .mr-hover:hover { background: var(--dsw-alias-bg-layer-2); }
 `
@@ -920,32 +935,87 @@ registerProcessor('meeting-capture', MeetingCapture)
     ])
 
     /**
-     * One button. The caller's props and handlers pass straight through; the look comes from
-     * `.mr-*`, and a style object the map does not know (a width, a flex) is still honoured.
+     * The host's own controls, when this host ships them. `null` means the plugin renders
+     * its fallback markup instead — the same required/optional split the market plugin uses,
+     * except that here every call site has a working fallback, so nothing is ever skipped.
+     */
+    const HostButton = typeof primitives.Button === 'function' || (typeof primitives.Button === 'object' && primitives.Button !== null)
+      ? primitives.Button
+      : null
+    const HostInput = typeof primitives.Input === 'function' || (typeof primitives.Input === 'object' && primitives.Input !== null)
+      ? primitives.Input
+      : null
+
+    /** The host Button preset each of our variants means. */
+    const BTN_PRESET = {
+      default: { variant: 'outline', size: 'md' },
+      active: { variant: 'outline', size: 'md' },
+      small: { variant: 'outline', size: 'sm' },
+      link: { variant: 'ghost', size: 'sm' },
+      menu: { variant: 'ghost', size: 'md' },
+      tab: { variant: 'ghost', size: 'md' },
+      'tab-active': { variant: 'ghost', size: 'md' },
+      header: { variant: 'ghost', size: 'md' },
+      plain: { variant: 'ghost', size: 'md' },
+    }
+
+    /**
+     * Join the caller's className with ours; call sites rarely pass one, but a caller that
+     * does must not lose it.
+     * @param extra - the caller's className, if any.
+     * @param ours - the class we render with.
+     * @returns the combined className.
+     */
+    function classNames(extra, ours) {
+      return typeof extra === 'string' && extra !== '' ? `${ours} ${extra}` : ours
+    }
+
+    /**
+     * One button: the host's Button when this host has one, the plugin's own markup
+     * otherwise. The caller's props and handlers pass straight through, and a style object
+     * the map does not know (a width, a flex) is still honoured.
      * @param props - usual button props, plus `variant` to force one.
      * @returns the button element.
      */
     function Btn(props) {
-      const { style, variant, ...rest } = props
+      const { style, variant, className, ...rest } = props
       const resolved = variant ?? BTN_VARIANT.get(style) ?? 'default'
       const extra = style !== undefined && !BTN_VARIANT.has(style) ? style : undefined
-      return h('button', { ...rest, className: `mr-btn mr-btn--${resolved}`, style: extra })
+      if (HostButton !== null) {
+        const preset = BTN_PRESET[resolved] ?? BTN_PRESET.default
+        return h(HostButton, {
+          ...rest,
+          variant: preset.variant,
+          size: preset.size,
+          className: classNames(className, `mr-ui mr-layout-${resolved}`),
+          style: extra,
+        })
+      }
+      return h('button', { ...rest, className: classNames(className, `mr-btn mr-btn--${resolved}`), style: extra })
     }
 
     /**
-     * One text field (or textarea when the variant says so).
+     * One text field: the host's Input when this host has one, the plugin's own markup
+     * otherwise. A multi-line field stays a native textarea either way, because the host
+     * Input is single-line.
      * @param props - usual input props, plus `variant` to force one.
      * @returns the field element.
      */
     function Field(props) {
-      const { style, variant, ...rest } = props
+      const { style, variant, className, ...rest } = props
       // A checkbox is a control but not a *field*: it keeps its own shape.
       if (rest.type === 'checkbox' || rest.type === 'radio' || rest.type === 'file' || rest.type === 'range') {
-        return h('input', { ...rest, style })
+        return h('input', { ...rest, className, style })
       }
       const resolved = variant ?? FIELD_VARIANT.get(style) ?? 'wide'
       const extra = style !== undefined && !FIELD_VARIANT.has(style) ? style : undefined
-      return h(resolved === 'area' ? 'textarea' : 'input', { ...rest, className: `mr-field mr-field--${resolved}`, style: extra })
+      if (resolved === 'area') {
+        return h('textarea', { ...rest, className: classNames(className, 'mr-field mr-field--area'), style: extra })
+      }
+      if (HostInput !== null) {
+        return h(HostInput, { ...rest, className: classNames(className, `mr-ufield mr-layout-${resolved}`), style: extra })
+      }
+      return h('input', { ...rest, className: classNames(className, `mr-field mr-field--${resolved}`), style: extra })
     }
 
     /**
@@ -2971,7 +3041,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           h('div', { key: 'pickerbar', style: styles.row }, [
             // The platform's Input: the same field the built-in model picker searches with,
             // so an IME behaves; a plain input is the fallback when primitives are absent.
-            h(SearchInput, {
+            h(Field, {
               key: 'query',
               type: 'text',
               style: styles.inlineWide,
