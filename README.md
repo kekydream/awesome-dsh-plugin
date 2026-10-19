@@ -1,12 +1,23 @@
 # dsh-meeting-room · 会议记录
 
+**版本 0.1.0-preview.1**（预览版）
+
 DeepSeek Harness 的会议插件：**本机转写、发言人分离、要点与工作安排、手写笔记、复盘与纪要**。
 
 音频不出本机；转写用随 DSH 安装的 SenseVoice，手写识别用随插件安装的本地小模型。**不登录也能**写字、识别、建任务、出纪要。
 
 设计文档：
 - [DESIGN.md](DESIGN.md)——「会话 ↔ 会议」与「登录用户 ↔ 会话」的完整关系设计；
-- [FEATURES.md](FEATURES.md)——会议类型（晨会/复盘会/例会/总结会）、跨会提炼与月度评分的增量功能设计（设计稿，尚未实现）。
+- [FEATURES.md](FEATURES.md)——会议类型（晨会/复盘会/例会/总结会）、跨会提炼与月度评分的增量功能设计（含实现进度）；
+- [TESTING.md](TESTING.md)——发布前系统化测试清单。
+
+## 反馈
+
+预览版就是要挑毛病的：**发现任何问题、或想到任何改进意见，都请直接发邮件** ——
+杨道泉　[kekydream@qq.com](mailto:kekydream@qq.com?subject=dsh-meeting-room%20%E5%8F%8D%E9%A6%88)
+
+信中麻烦附上：插件版本（面板「更多 → 关于」里可查）、DSH 版本、操作步骤、
+以及面板上显示的错误文字或 `$DSH_HOME/meeting-room/boot.log`。有截图更好。
 
 ## 安装
 
@@ -137,6 +148,8 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
 
 会议术语的编辑入口在「**更多 → 会议术语**」（内容与本机术语表同一份，边打字边保存）。
 
+「**更多 → 关于**」显示本机实际安装的**版本号**、作者与邮箱，并可直接发邮件反馈问题或建议。
+
 ### 保存为文件与导入（会议工程包）
 
 - 「更多 → **保存为文件**」→ 弹出浏览器保存对话框，把这场会议打成**一个 zip**：
@@ -175,7 +188,6 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
 - **转写是请求/响应式的，不是流式**：文字在说话人停顿后成段出现（最长 5 秒一段），没有逐字上屏；
 - 一条 cue 若跨说话人，只记主要的那一位；
 - 手写识别是**整行**模型：请横向书写、字距不要太挤，连笔过多会影响准确率；
-- 系统手写面板依赖 Windows 自带手写功能，在 Electron 里可能唤不出，此时可直接用输入框；
 - 录音只写 WAV；会议结构化记录不自动清理，需自行管理磁盘。
 
 ## 目录结构
@@ -186,6 +198,9 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
 | `client.js` | 浏览器半边：采集、会话右侧面板、会议管理页 |
 | `speaker-worker.js` | 子进程：说话人向量提取与画廊 |
 | `handwriting-worker.js` | 子进程：本地手写识别 |
+| `host-package.js` | 会议工程包的打包与导入（ZIP 读写只用 Node 自带 zlib） |
+| `smoke.mjs` | 发布前自动化冒烟：`node smoke.mjs` |
+| `TESTING.md` | 发布前系统化测试清单（自动化 + 手动 A–Q 组） |
 | `minutes-docx.py` | 用 python-docx 把纪要渲染成 Word |
 | `cordis.patch.yml` | 组合包 patch，把宿主行插进 profile 层栈 |
 | `tools/recognize-note.mjs` | 开发工具：对一张手写 PNG 直接跑识别 |

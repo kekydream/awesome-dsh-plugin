@@ -46,6 +46,10 @@ window.__ModuleLoader__.load({
     /** Route prefix owned by the host half. */
     const PREFIX = '/meeting-room'
 
+    /** Who to write to about a problem or an idea; the About dialog offers the address. */
+    const ABOUT_EMAIL = 'kekydream@qq.com'
+    const ABOUT_AUTHOR = '杨道泉'
+
     /**
      * A meeting the management page asked the panel to show, handed over through this
      * one-slot register: the page switches the conversation first, and the panel that then
@@ -151,6 +155,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubImport: '导入会议',
       hubImportHint: '选择之前导出的会议压缩包（.zip），把它导入本机',
       hubImported: '已导入会议',
+      about: '关于',
+      aboutName: 'dsh-meeting-room · 会议记录（DeepSeek Harness 插件）',
+      aboutVersion: '版本',
+      aboutAuthor: '作者',
+      aboutLab: '博尔塔拉融媒体中心媒体传播与认知重点实验室',
+      aboutLicense: '许可',
+      aboutFeedback: '这是预览版，正需要你的意见：使用时发现 bug、觉得哪里别扭、或者有想加的功能，都请直接发邮件告诉我。信里附上版本号、DSH 版本、操作步骤与报错文字（有截图更好），我会跟着改。',
+      aboutMail: '发邮件',
       pushNothingConfigured: '没有可推送的目标：请先在「会议管理 → 设置」里配置群机器人或工作通知',
       hubOpenPanelManual: '已切到该对话；右侧面板未能自动打开，请点会话右上角的会议按钮',
       hubNoMeeting: '这条记录没有对应的会议',
@@ -423,6 +435,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubImport: 'Import meeting',
       hubImportHint: 'Choose a meeting archive (.zip) exported earlier and bring it into this machine',
       hubImported: 'Imported meeting',
+      about: 'About',
+      aboutName: 'dsh-meeting-room · meeting notes for DeepSeek Harness',
+      aboutVersion: 'Version',
+      aboutAuthor: 'Author',
+      aboutLab: 'Key Laboratory of Media Communication and Cognition, Bortala Media Centre',
+      aboutLicense: 'Licence',
+      aboutFeedback: 'This is a preview build, and it needs your opinion: if something breaks, feels awkward, or is missing, please write to me. Include the version, your DSH version, what you did and the exact error text — a screenshot helps — and I will follow it up.',
+      aboutMail: 'Email',
       pushNothingConfigured: 'Nothing to send to — configure a group robot or a work notification in Meeting management → Settings',
       hubOpenPanelManual: 'Switched to that conversation, but the right panel did not open — use the meeting button in the session header',
       hubNoMeeting: 'This record has no meeting behind it',
@@ -1971,6 +1991,30 @@ registerProcessor('meeting-capture', MeetingCapture)
       const noteSeq = React.useRef(0)
       /** Whether the terminology dialog is open (it used to be a tab in the note pad). */
       const [termsOpen, setTermsOpen] = React.useState(false)
+      /** The About dialog, and what this installation reports about itself. */
+      const [aboutOpen, setAboutOpen] = React.useState(false)
+      const [about, setAbout] = React.useState({ version: '', name: '', author: '' })
+
+      // The About dialog asks the host what is installed, so it can never claim a version
+      // this build is not.
+      React.useEffect(() => {
+        if (aboutOpen !== true) return undefined
+        let live = true
+        void (async () => {
+          try {
+            const value = await get('/version')
+            if (!live) return
+            setAbout({
+              version: typeof value.version === 'string' ? value.version : '',
+              name: typeof value.name === 'string' ? value.name : 'dsh-meeting-room',
+              author: typeof value.author === 'string' ? value.author : '',
+            })
+          } catch {
+            // Keep whatever is known: the dialog still shows the author and the address.
+          }
+        })()
+        return () => { live = false }
+      }, [aboutOpen])
       const [notesOpen, setNotesOpen] = React.useState(false)
       const [helpOpen, setHelpOpen] = React.useState(false)
 
@@ -3535,6 +3579,11 @@ registerProcessor('meeting-capture', MeetingCapture)
                 key: 'terms', type: 'button', style: styles.menuItem, role: 'menuitem',
                 onClick: () => { setMoreOpen(false); setTermsOpen(true) },
               }, t('tabTerms')),
+              // Version, author and where to write about a problem or an idea.
+              h(Btn, {
+                key: 'about', type: 'button', style: styles.menuItem, role: 'menuitem',
+                onClick: () => { setMoreOpen(false); setAboutOpen(true) },
+              }, t('about')),
             ])) : null,
           ]),
           h(Btn, {
@@ -4120,6 +4169,40 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, item.text)
             : h(HostToast, { key: item.id, text: item.text, onDone: () => dismissToast(item.id) })
         )))),
+        // The About dialog: what is installed, who made it, and how to reach them. A preview
+        // build lives on feedback, so the address is a button rather than small print.
+        aboutOpen ? h(Dialog, {
+          key: 'aboutdialog',
+          title: t('about'),
+          wide: true,
+          onClose: () => setAboutOpen(false),
+          children: [
+            h('div', { key: 'lines', style: styles.list }, [
+              h('span', { key: 'name', style: styles.label }, t('aboutName')),
+              h('span', { key: 'version', style: styles.fieldBlock }, `${t('aboutVersion')}：${about.version === '' ? '—' : about.version}`),
+              h('span', { key: 'author', style: styles.fieldBlock }, `${t('aboutAuthor')}：${ABOUT_AUTHOR}（${t('aboutLab')}）`),
+              h('span', { key: 'license', style: styles.fieldBlock }, `${t('aboutLicense')}：MIT`),
+            ]),
+            h('p', { key: 'feedback', style: styles.note }, t('aboutFeedback')),
+          ],
+          footer: [
+            h(Btn, {
+              key: 'mail',
+              type: 'button',
+              style: styles.button,
+              onClick: () => {
+                const subject = encodeURIComponent(`dsh-meeting-room ${about.version === '' ? '' : about.version} 反馈`)
+                window.open(`mailto:${ABOUT_EMAIL}?subject=${subject}`, '_blank')
+              },
+            }, `${t('aboutMail')} ${ABOUT_EMAIL}`),
+            h(Btn, {
+              key: 'close',
+              type: 'button',
+              style: styles.button,
+              onClick: () => setAboutOpen(false),
+            }, t('hubClose')),
+          ],
+        }) : null,
         // The tutorial is a dialog, not a block inside the panel: it is read once, and it
         // should not push the meeting's own content down while it is open.
         helpOpen ? h(Dialog, {

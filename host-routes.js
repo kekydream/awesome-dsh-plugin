@@ -721,6 +721,22 @@ export function createHandler(ctx) {
         return
       }
 
+      if (method === 'GET' && route === '/version') {
+        // What is actually installed, read from the plugin's own package.json, so the About
+        // dialog can never drift from the release it belongs to.
+        try {
+          const info = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'))
+          sendJson(res, 200, {
+            name: typeof info.name === 'string' ? info.name : 'dsh-meeting-room',
+            version: typeof info.version === 'string' ? info.version : '0.0.0',
+            author: typeof info.author === 'string' ? info.author : '',
+          })
+        } catch (failure) {
+          sendJson(res, 200, { name: 'dsh-meeting-room', version: '0.0.0', author: '', error: String(failure) })
+        }
+        return
+      }
+
       if (method === 'GET' && route === '/package') {
         // One meeting as a portable archive: the record, its recording and its artifacts.
         // Served as an attachment, so the browser asks the person where to put it.

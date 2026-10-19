@@ -279,6 +279,15 @@ check('导入保留内容与发言人标签', meetings.get(restored.meetingId)?.
 check('导入记下来源会议', meetings.get(restored.meetingId)?.importedFrom === 'm-brief')
 
 // ---------------------------------------------------------------------------
+// 7c. 版本信息（「关于」对话框读的就是它）
+// ---------------------------------------------------------------------------
+const version = await call('/version')
+check('版本接口回插件自己的版本与作者', version.status === 200
+  && typeof version.value.version === 'string' && version.value.version !== '0.0.0'
+  && version.value.name === 'dsh-meeting-room'
+  && String(version.value.author).includes('kekydream@qq.com'))
+
+// ---------------------------------------------------------------------------
 // 8. Agent 工具
 // ---------------------------------------------------------------------------
 const agent = { agent: { session: { id: 'session-m-brief' } } }
