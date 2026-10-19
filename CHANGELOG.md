@@ -3,6 +3,17 @@
 本文件记录**发布线**（`master`）每个预览版的内容。功能开发在 `develop` 上进行，
 稳定后再合入 `master` 并打新标签；标签即发布点（Gitee Releases 从标签创建）。
 
+## 0.1.0-preview.4
+
+为提交社区插件目录做准备（功能与 preview.3 完全相同）：
+
+- `repository` / `homepage` / `bugs` 改为 **GitHub 镜像仓库**。这不是偏好问题：
+  `awesome-dsh-plugin` 目录的 CI 只从 `raw.githubusercontent.com/<repo>/HEAD/package.json`
+  取清单校验 `dsh.bundle`，站点也拒绝非 github.com 的主机名；同时目录要求
+  **npm 包里的 `repository` 指回被收录的那个仓库**，否则包与条目不会互相关联。
+  开发仍在 Gitee 主仓库进行，GitHub 只作发布镜像。
+- 安装方式不变：`dsh plugin --profile <name> add dsh-meeting-room`（要求 DSH ≥ 0.2.0）。
+
 ## 0.1.0-preview.3
 
 修复「开始记录」**第一次点击被浪费**的问题（第一次点击撞上"模型准备"竞态）：

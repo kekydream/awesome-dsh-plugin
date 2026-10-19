@@ -94,6 +94,28 @@ TESTING.md  THIRD-PARTY-NOTICES.md  smoke.mjs  package.json
 > 相应地，npm 包里的 `repository` 字段必须指回**被收录的那个仓库**（即 GitHub 镜像），
 > 否则包与条目不会互相关联。
 
+### 镜像怎么保持同步（本机连不上 github.com）
+
+实测：本机 **`github.com` 不通**（8 秒超时），但 **`raw.githubusercontent.com` 通**
+（HTTP 200，目录 CI 读的正是它）。所以：
+
+- **本地不推 GitHub**，改由 **GitHub 侧拉 Gitee**：镜像仓库里放
+  `.github/workflows/mirror-from-gitee.yml`（本仓库已带此文件），
+  它每天用 `GITHUB_TOKEN` 把 `master` / `develop` / 标签从 Gitee 同步过去，
+  不需要任何自定义 secret（Gitee 仓库是公开的）；
+- 镜像仓库请把**默认分支设为 `master`** —— 目录 CI 读的是 `HEAD`
+  （即默认分支）的 `package.json`；
+- 工作流只推 `refs/heads/*` 与 `refs/tags/*`，**不用 `--mirror`**：否则会把镜像侧
+  独有的分支（含工作流所在的分支）一并删掉。
+
+### 发布被 npm 暂存时的现象
+
+账号开启 2FA 时，npm 会把发布**暂存**再异步处理：命令会返回成功
+（`+ dsh-meeting-room@<version>`），但紧接着查 `dist-tags` / `versions` 还看不到新版本，
+并提示 *"This change is being processed and may take a few minutes to take effect"*。
+**等几分钟再查即可**，不要重复发布（重复发布会报版本已存在）。
+首次那个 `0.0.0-stage` 版本就是这类暂存过程的产物。
+
 目录数据在 `awesome-dsh-plugin/awesome-dsh-plugin` 的 `data/plugins/`，
 **一个插件一个 YAML 文件**（两个 README 由脚本生成，不要手改）：
 
