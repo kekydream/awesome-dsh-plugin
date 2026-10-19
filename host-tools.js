@@ -1269,6 +1269,9 @@ export async function readSettings() {
         }))
     }
     if (Array.isArray(parsed.departments)) empty.departments = parsed.departments
+    // The cloud section belongs to whoever reads it (host-providers), which validates its own
+    // fields; passing it through untouched is what keeps a saved key from vanishing on read.
+    if (parsed.cloud !== null && typeof parsed.cloud === 'object') empty.cloud = parsed.cloud
   } catch {
     // Absent or unreadable: nothing is configured yet, which is not an error.
   }

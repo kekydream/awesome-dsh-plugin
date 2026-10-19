@@ -379,6 +379,73 @@ check('删除后文件真的没了', !(await fs.readdir(join(process.env.DSH_HOM
 check('坏条目被报出来而不是静默忽略', (await import(`${plugin}/host-models.js`)).validateModel({ id: 'x', kind: 'nope', name: 'y' }).error.includes('kind'))
 
 // ---------------------------------------------------------------------------
+// 7e. 云端识别与隐私开关（M2）
+// ---------------------------------------------------------------------------
+const http = await import('node:http')
+const providers = await import(`${plugin}/host-providers.js`)
+const CLOUD_KEY = 'sk-secret-abcdef123456'
+let cloudHits = 0
+let cloudAuth = ''
+let cloudFails = false
+const cloudServer = http.createServer((req, res) => {
+  cloudHits += 1
+  cloudAuth = String(req.headers.authorization ?? '')
+  if (cloudFails) {
+    // A service that echoes the key back: whatever it says must come out redacted.
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: `bad key ${cloudAuth}` }))
+    return
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({ text: '云端识别文本', model: 'test-cloud-model', duration: 1.5 }))
+})
+await new Promise((resolve) => cloudServer.listen(0, '127.0.0.1', resolve))
+const cloudBase = `http://127.0.0.1:${cloudServer.address().port}/v1`
+const cuePcm = Buffer.alloc(3200)
+
+// 1) Consent off: the switch's promise is that nothing is sent at all.
+await call('/cloud', { consent: false, asr: { provider: 'openai-compatible', baseUrl: cloudBase, model: 'test', apiKey: CLOUD_KEY } }, 'POST')
+const skippedByConsent = await providers.cloudTranscribe({ pcm: cuePcm, sampleRate: 16000 })
+check('未同意上传时一处请求都不发', skippedByConsent.skipped === true && cloudHits === 0, `hits=${cloudHits}`)
+
+// 2) Consent on: the cloud text is used, and the key travels as a bearer token only.
+await call('/cloud', { consent: true, asr: { provider: 'openai-compatible', baseUrl: cloudBase, model: 'test', apiKey: CLOUD_KEY } }, 'POST')
+const answered = await providers.cloudTranscribe({ pcm: cuePcm, sampleRate: 16000 })
+check('同意后云端识别回文本与模型', answered.skipped === false && answered.text === '云端识别文本' && answered.model === 'test-cloud-model', JSON.stringify(answered))
+check('确实只发了一次请求', cloudHits === 1, `hits=${cloudHits}`)
+check('密钥只作为 Bearer 头发送', cloudAuth === `Bearer ${CLOUD_KEY}`)
+const cloudRead = await call('/cloud')
+check('云接口不回显密钥，只说已设置', cloudRead.value.asr.keySet === true && !JSON.stringify(cloudRead.value).includes(CLOUD_KEY))
+check('云接口把主机名摊开给用户看', cloudRead.value.asr.host === `127.0.0.1:${cloudServer.address().port}`, cloudRead.value.asr.host)
+check('云接口带每分钟上限与超时说明', cloudRead.value.limits.perMinute === 60 && cloudRead.value.limits.timeoutMs === 20000)
+
+// 3) Failures: the message is redacted, and after three in a row the plugin stops trying.
+cloudFails = true
+let failureMessage = ''
+for (let attempt = 0; attempt < 3; attempt += 1) {
+  try {
+    await providers.cloudTranscribe({ pcm: cuePcm, sampleRate: 16000 })
+  } catch (failure) {
+    failureMessage = failure instanceof Error ? failure.message : String(failure)
+  }
+}
+check('云端失败消息里的密钥被脱敏', failureMessage.includes('sk-***') && !failureMessage.includes(CLOUD_KEY), failureMessage)
+check('连续失败三次后标记为已回退', providers.cloudState.fallback === true)
+const hitsBeforeFallback = cloudHits
+const afterFallback = await providers.cloudTranscribe({ pcm: cuePcm, sampleRate: 16000 })
+check('回退后不再发起任何请求', afterFallback.skipped === true && cloudHits === hitsBeforeFallback, `hits=${cloudHits}`)
+check('回退原因不含密钥', !String(afterFallback.reason).includes(CLOUD_KEY))
+
+// 4) The package must never carry a key, whatever the meeting holds.
+const packedBytes = (await call('/package?meetingId=m-brief')).body
+check('会议工程包里搜不到密钥', !packedBytes.includes(CLOUD_KEY))
+
+// Leave the harness as it was found: fallback cleared, cloud off.
+providers.resetCloudFallback()
+await call('/cloud', { consent: false, asr: { provider: 'off', baseUrl: '', model: '', apiKey: '' } }, 'POST')
+await new Promise((resolve) => cloudServer.close(resolve))
+
+// ---------------------------------------------------------------------------
 // 8. Agent 工具
 // ---------------------------------------------------------------------------
 const agent = { agent: { session: { id: 'session-m-brief' } } }

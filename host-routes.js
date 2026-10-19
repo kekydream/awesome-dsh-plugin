@@ -51,9 +51,30 @@ import { handwritingState, recognizeHandwriting, prepareHandwriting } from './ho
 import { flushMeetings, meetingIsEmpty } from './host-persistence.js'
 import { packageMeeting, importPackage } from './host-package.js'
 import { modelState, installModel, importModel, activateModel, removeModel } from './host-models.js'
+import { cloudTranscribe, cloudEmbed, cloudSummary, writeCloudSettings, testCloud, redact, cloudState } from './host-providers.js'
 
 /** Ceiling for an imported archive: a long meeting's recording travels inside one. */
 const IMPORT_BODY_BYTES = 512 * 1024 * 1024
+
+/**
+ * The vocabulary to send with a cue when cloud recognition is on: the meeting's own terminology,
+ * because names and jargon are exactly what a general model gets wrong.
+ * @param meeting - Meeting record.
+ * @returns a short prompt, or '' when the meeting has no terms.
+ */
+function hotwordsFor(meeting) {
+  const terms = typeof meeting.terms === 'string' ? meeting.terms : ''
+  if (terms.trim() === '') return ''
+  return terms
+    .split('\n')
+    .map((line) => {
+      const [wrong, right] = line.split('=')
+      return (right === undefined ? wrong : right).trim()
+    })
+    .filter((word) => word !== '')
+    .join(' ')
+    .slice(0, 800)
+}
 
 import {
   appendChunk,
@@ -241,6 +262,36 @@ export function createHandler(ctx) {
         }
         const before = meeting.segments.length
         const text = await appendChunk(ctx, meeting, pcm, meeting.seconds)
+        // Cloud recognition, when the person has turned it on. It never runs without consent
+        // (the gate returns `skipped` before any request) and never costs the local text: a
+        // failure keeps what the on-machine recogniser produced and says what happened.
+        let cloud = { used: false, skipped: true, message: '' }
+        if (meeting.segments.length > before) {
+          const cue = meeting.segments[before]
+          try {
+            const answer = await cloudTranscribe({
+              pcm: Buffer.from(cue.pcm ?? pcm),
+              sampleRate: SAMPLE_RATE,
+              language: meeting.language ?? '',
+              hotwords: await hotwordsFor(meeting),
+            })
+            if (answer.skipped === true) {
+              cloud = { used: false, skipped: true, message: '' }
+            } else {
+              cue.text = answer.text
+              cue.asrModel = answer.model
+              meeting.asrModel = answer.model
+              cloud = { used: true, skipped: false, message: '', model: answer.model }
+            }
+          } catch (failure) {
+            cloud = {
+              used: false,
+              skipped: false,
+              message: redact(failure instanceof Error ? failure.message : String(failure)),
+              fallback: cloudState.fallback,
+            }
+          }
+        }
         // Label the cue that was just appended. One cue can span a speaker change; that
         // case keeps the dominant voice and is a documented limitation.
         if (meeting.segments.length > before) {
@@ -262,6 +313,7 @@ export function createHandler(ctx) {
         }
         sendJson(res, 200, {
           text,
+          cloud,
           seconds: meeting.seconds,
           segments: publicSegments(meeting),
           audioName: meeting.audioName,
@@ -730,6 +782,26 @@ export function createHandler(ctx) {
         }
         const outcome = await pushTasks(meeting, asked.length === 0 ? WEBHOOK_KINDS : asked, only)
         sendJson(res, outcome.error === '' ? 200 : 400, outcome)
+        return
+      }
+
+      if (method === 'GET' && route === '/cloud') {
+        // Consent, configured hosts, whether a key is set — never the key itself.
+        sendJson(res, 200, await cloudSummary())
+        return
+      }
+
+      if (method === 'POST' && route === '/cloud') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const stored = await writeCloudSettings(body)
+        sendJson(res, 200, await cloudSummary())
+        // The write is reported through the summary, which cannot echo a key back.
+        void stored
+        return
+      }
+
+      if (method === 'POST' && route === '/cloud/test') {
+        sendJson(res, 200, await testCloud())
         return
       }
 

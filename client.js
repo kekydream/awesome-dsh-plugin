@@ -331,6 +331,23 @@ registerProcessor('meeting-capture', MeetingCapture)
       modelStateBad: '校验不通过',
       modelByDsh: '由 DSH 提供',
       modelInUse: '正在使用',
+      cloudTitle: '云端识别（默认关闭）',
+      cloudHint: '打开后，录音会发给下面这个地址做识别；不打开则一律在本机识别，插件不会对外发起任何请求。发送时只带当前这一段音频（不是整场录音），并在请求里声明不保留。密钥只存在本机设置里：不显示、不进日志，也不进会议工程包。',
+      cloudConsent: '我同意把音频发到下面这个地址做识别',
+      cloudProvider: '服务类型',
+      cloudOff: '关闭',
+      cloudOpenAi: 'OpenAI 兼容（/audio/transcriptions）',
+      cloudCustom: '自定义',
+      cloudWhere: '音频将发往',
+      cloudRetention: '声明不保留',
+      cloudNowhere: '还没有填写地址',
+      cloudSave: '保存云端设置',
+      cloudSaved: '已保存',
+      cloudTest: '测试连接',
+      cloudOk: '已连通',
+      cloudFailed: '未连通',
+      cloudFallback: '已回退到本机识别',
+      cloudUsed: '这一段由云端识别',
       hubTabTerms: '会议术语',
       hubTabSettings: '机器人设置',
       hubTabPeople: '人员管理',
@@ -632,6 +649,23 @@ registerProcessor('meeting-capture', MeetingCapture)
       modelStateBad: 'Verification failed',
       modelByDsh: 'Provided by DSH',
       modelInUse: 'In use',
+      cloudTitle: 'Cloud recognition (off by default)',
+      cloudHint: 'With this on, audio is sent to the address below for recognition; with it off everything is recognised on this machine and the plugin makes no outgoing request at all. Only the current cue travels (never the whole recording), and the request declares that it may not be retained. The key lives in this machine\'s settings only: never displayed, never logged, never inside a meeting package.',
+      cloudConsent: 'I agree to send audio to the address below for recognition',
+      cloudProvider: 'Service type',
+      cloudOff: 'Off',
+      cloudOpenAi: 'OpenAI-compatible (/audio/transcriptions)',
+      cloudCustom: 'Custom',
+      cloudWhere: 'Audio would go to',
+      cloudRetention: 'declared as not retained',
+      cloudNowhere: 'No address configured yet',
+      cloudSave: 'Save cloud settings',
+      cloudSaved: 'Saved',
+      cloudTest: 'Test connection',
+      cloudOk: 'Reachable',
+      cloudFailed: 'Not reachable',
+      cloudFallback: 'Fell back to on-machine recognition',
+      cloudUsed: 'This cue came from the cloud',
       hubTabTerms: 'Terms',
       hubTabSettings: 'Robot settings',
       hubTabPeople: 'People',
@@ -1744,6 +1778,10 @@ registerProcessor('meeting-capture', MeetingCapture)
     const PUSH_MODE_VALUES = ['group', 'work', 'both']
     const PUSH_MODE_KEYS = { group: 'pushModeGroup', work: 'pushModeWork', both: 'pushModeBoth' }
 
+    /** Cloud providers the settings page offers, and their locale keys. */
+    const CLOUD_PROVIDER_VALUES = ['off', 'openai-compatible', 'custom']
+    const CLOUD_PROVIDER_KEYS = { off: 'cloudOff', 'openai-compatible': 'cloudOpenAi', custom: 'cloudCustom' }
+
     /** Hub sections, in the order a user meets them. */
     const HUB_TAB_VALUES = ['records', 'models', 'terms', 'settings', 'people']
     const HUB_TAB_KEYS = { records: 'hubTabRecords', models: 'hubTabModels', terms: 'hubTabTerms', settings: 'hubTabSettings', people: 'hubTabPeople' }
@@ -2527,6 +2565,8 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       /** Text from the most recent recognition, kept so it can be turned into a task. */
       const [lastNote, setLastNote] = React.useState('')
+      /** Which cloud model last answered, so the same line is not repeated for every cue. */
+      const cloudNote = React.useRef('')
 
       /**
        * Turn arbitrary text into a draft assignment; shared by the recognized-text row and
@@ -3245,6 +3285,19 @@ registerProcessor('meeting-capture', MeetingCapture)
           if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
           if (Array.isArray(reply.labels)) setLabels(reply.labels)
           if (reply.speaker !== undefined) setSpeaker({ phase: reply.speaker.phase, message: reply.speaker.message ?? '', completedBytes: reply.speaker.completedBytes ?? 0, totalBytes: reply.speaker.totalBytes ?? 0 })
+          // Cloud recognition reports itself: which model answered, or why it fell back to the
+          // on-machine recogniser. A silent fallback is exactly what erodes trust in a switch.
+          if (reply.cloud !== undefined && reply.cloud !== null) {
+            if (reply.cloud.used === true) {
+              const model = typeof reply.cloud.model === 'string' ? reply.cloud.model : ''
+              if (cloudNote.current !== model) {
+                cloudNote.current = model
+                setNote(`${t('cloudUsed')}${model === '' ? '' : `: ${model}`}`)
+              }
+            } else if (reply.cloud.fallback === true) {
+              setError(`${t('cloudFallback')}: ${reply.cloud.message ?? ''}`)
+            }
+          }
         } catch (failure) { const msg = failure instanceof Error ? failure.message : String(failure); setError(msg); if (msg.indexOf('\u8bed\u97f3\u6a21\u578b\u5c1a\u672a\u4e0b\u8f7d') !== -1) setSpeech((c) => ({ ...c, ready: false }))
         } finally {
           active.inflight = false
@@ -5111,6 +5164,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       /** The hidden field used for "import a model from a local file", and what it is for. */
       const modelField = React.useRef(null)
       const modelTarget = React.useRef({ id: '', name: '' })
+      /**
+       * Cloud recognition: the summary the host reports (never the key itself) and the fields
+       * being edited. A blank key field means "leave the stored one alone".
+       */
+      const [cloud, setCloud] = React.useState({ consent: false, asr: {}, speaker: {}, state: {} })
+      const [cloudDraft, setCloudDraft] = React.useState({ consent: false, provider: 'off', baseUrl: '', model: '', language: '', apiKey: '' })
+      const [cloudNote, setCloudNote] = React.useState('')
+      const [cloudBusy, setCloudBusy] = React.useState(false)
 
       /** Load settings, the roster and any cached department tree when either tab opens. */
       React.useEffect(() => {
@@ -5242,6 +5303,68 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [])
 
       React.useEffect(() => { void refresh() }, [refresh])
+
+      /** Read the cloud summary and seed the fields with it (the key stays blank by design). */
+      const loadCloud = React.useCallback(async () => {
+        try {
+          const value = await get('/cloud')
+          setCloud(value)
+          setCloudDraft({
+            consent: value.consent === true,
+            provider: value.asr?.provider ?? 'off',
+            baseUrl: value.asr?.baseUrl ?? '',
+            model: value.asr?.model ?? '',
+            language: value.asr?.language ?? '',
+            apiKey: '',
+          })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /** Store the cloud settings. An empty key field leaves the stored key untouched. */
+      const saveCloud = React.useCallback(async () => {
+        setError('')
+        setCloudNote('')
+        setCloudBusy(true)
+        try {
+          const asr = {
+            provider: cloudDraft.provider,
+            baseUrl: cloudDraft.baseUrl,
+            model: cloudDraft.model,
+            language: cloudDraft.language,
+          }
+          if (cloudDraft.apiKey !== '') asr.apiKey = cloudDraft.apiKey
+          await post('/cloud', { consent: cloudDraft.consent, asr })
+          setCloudNote(t('cloudSaved'))
+          await loadCloud()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setCloudBusy(false)
+        }
+      }, [cloudDraft, loadCloud, t])
+
+      /** Ask the host to try the configured service once — a tenth of a second of silence. */
+      const runCloudTest = React.useCallback(async () => {
+        setError('')
+        setCloudNote('')
+        setCloudBusy(true)
+        try {
+          const reply = await post('/cloud/test', {})
+          const asr = reply.asr ?? {}
+          setCloudNote(`${t('cloudTest')}：${asr.ok === true ? t('cloudOk') : t('cloudFailed')} ${asr.message ?? ''}`)
+          await loadCloud()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setCloudBusy(false)
+        }
+      }, [loadCloud, t])
+
+      React.useEffect(() => {
+        if (hubTab === 'settings') void loadCloud()
+      }, [hubTab, loadCloud])
 
       /** Read the model catalog and what is on disk. */
       const loadModels = React.useCallback(async () => {
@@ -5660,6 +5783,74 @@ registerProcessor('meeting-capture', MeetingCapture)
             h('div', { key: 'actions', style: styles.row }, [
               h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSettings() } }, t('robotSave')),
               settingsNote === '' ? null : h('span', { key: 'note', style: styles.status }, settingsNote),
+            ]),
+            // Cloud recognition sits with the robots because it is the same kind of decision:
+            // something leaves this machine, and only when a person says so.
+            h('span', { key: 'cloudtitle', style: styles.label }, t('cloudTitle')),
+            h('span', { key: 'cloudhint', style: styles.hint }, t('cloudHint')),
+            h('div', { key: 'cloudconsent', style: styles.row }, [
+              h(Field, {
+                key: 'consent',
+                type: 'checkbox',
+                checked: cloudDraft.consent,
+                onChange: (event) => setCloudDraft((draft) => ({ ...draft, consent: event.target.checked })),
+              }),
+              h('span', { key: 'label', style: styles.status }, t('cloudConsent')),
+            ]),
+            h('div', { key: 'cloudprovider', style: styles.row }, [
+              h('span', { key: 'label', style: styles.status }, t('cloudProvider')),
+              h(Picker, {
+                key: 'select',
+                style: styles.inlineInput,
+                value: cloudDraft.provider,
+                onChange: (event) => setCloudDraft((draft) => ({ ...draft, provider: event.target.value })),
+              }, CLOUD_PROVIDER_VALUES.map((value) => h('option', { key: value, value }, t(CLOUD_PROVIDER_KEYS[value])))),
+            ]),
+            h(Field, {
+              key: 'cloudbase',
+              style: styles.textarea,
+              placeholder: 'https://api.example.com/v1',
+              value: cloudDraft.baseUrl,
+              spellCheck: false,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, baseUrl: event.target.value })),
+            }),
+            h(Field, {
+              key: 'cloudmodel',
+              style: styles.textarea,
+              placeholder: 'model（如 whisper-1）',
+              value: cloudDraft.model,
+              spellCheck: false,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, model: event.target.value })),
+            }),
+            h(Field, {
+              key: 'cloudlanguage',
+              style: styles.textarea,
+              placeholder: 'language（如 zh，可留空）',
+              value: cloudDraft.language,
+              spellCheck: false,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, language: event.target.value })),
+            }),
+            h(Field, {
+              key: 'cloudkey',
+              type: 'password',
+              style: styles.textarea,
+              placeholder: cloud.asr?.keySet === true ? t('secretKept') : 'API Key',
+              value: cloudDraft.apiKey,
+              spellCheck: false,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, apiKey: event.target.value })),
+            }),
+            // Saying exactly where the audio would go is the point of asking: "cloud" on its
+            // own is not something a person can judge.
+            h('span', { key: 'cloudwhere', style: styles.hint }, cloud.asr?.host === undefined || cloud.asr.host === ''
+              ? t('cloudNowhere')
+              : `${t('cloudWhere')}：${cloud.asr.host} · ${t('cloudRetention')}`),
+            cloud.state?.fallback === true
+              ? h('span', { key: 'cloudfallback', style: styles.error }, `${t('cloudFallback')}：${cloud.state.message}`)
+              : null,
+            h('div', { key: 'cloudactions', style: styles.row }, [
+              h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveCloud() } }, t('cloudSave')),
+              h(Btn, { key: 'test', type: 'button', style: styles.button, disabled: cloudBusy, onClick: () => { void runCloudTest() } }, t('cloudTest')),
+              cloudNote === '' ? null : h('span', { key: 'note', style: styles.status }, cloudNote),
             ]),
           ]),
         ]) : null,
