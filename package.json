@@ -14,7 +14,7 @@
   },
   "files": [
     "index.js",
-    "host-package.js",
+    "host-*.js",
     "speaker-worker.js",
     "handwriting-worker.js",
     "minutes-docx.py",
@@ -27,6 +27,8 @@
     "THIRD-PARTY-NOTICES.md",
     "README.md",
     "MODELS.md",
+    "DESIGN.md",
+    "FEATURES.md",
     "TESTING.md",
     "smoke.mjs"
   ],

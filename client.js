@@ -311,6 +311,26 @@ registerProcessor('meeting-capture', MeetingCapture)
       userIdPh: 'UserId',
       peopleUnit: '人',
       hubTabRecords: '会议记录',
+      hubTabModels: '模型',
+      modelsHint: '这里决定识别用哪些模型：装好、校验通过（大小与 sha256 都对）才能启用。默认不出本机；换模型只影响之后的识别，不改动已有会议的文字。',
+      modelInstall: '下载并安装',
+      modelRetry: '重新下载',
+      modelInstalled: '已安装',
+      modelImportFile: '从本地文件导入',
+      modelImportHint: '选这个模型的模型文件（离线机房、内网镜像、或你自己训练的模型都可以）；文件与目录记录对不上时会被拒绝',
+      modelImported: '已导入',
+      modelActivate: '启用这个',
+      modelActivated: '已切换',
+      modelRemove: '删除',
+      modelRemoved: '已删除文件数',
+      modelDownloading: '正在下载',
+      modelLicence: '许可',
+      modelDirectory: '模型目录',
+      modelStateReady: '已装好',
+      modelStateMissing: '未安装',
+      modelStateBad: '校验不通过',
+      modelByDsh: '由 DSH 提供',
+      modelInUse: '正在使用',
       hubTabTerms: '会议术语',
       hubTabSettings: '机器人设置',
       hubTabPeople: '人员管理',
@@ -366,7 +386,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: '会议术语',
       notesToggle: '手写笔记',
       helpToggle: '使用说明',
-      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听三个按钮，或在右侧「其他角色」里自己写）、选会议类型（通用／晨会／复盘会／例会／总结会）。选类型会**自动把标题填成「类型 · 今天日期」**，也可以自己改；不想命名就点「暂不命名并开始记录」。\n· 一个会话对应一场会议；分支出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟会提醒一次（不会自动停止）。\n· 状态行显示已录时长与当前发言人；所有按钮都在面板最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你往上滚就自动取消跟随，并出现「回到最新」可以一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx；两者都会弹出浏览器的下载保存对话框，纪要同时留在会议里可随时打开。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。负责人与发言人姓名都从「会议管理 → 人员」的名册（含从钉钉同步过来的人）里取候选。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n· 工作安排页签的「一键同步到钉钉/企业微信」按「会议管理 → 设置」里选的推送方式（群机器人／工作通知／两者）把**已确认**的任务发出去；没有配置目标时会告诉你原因；每条工作安排右侧还有「发送这条」，可以只发其中一条。\n\n【发言人】\n· 每个声纹标签直接填姓名：可以自己输入，也可以从名册下拉里选（输入即过滤）。\n· 「重新识别发言人」会从录音重新判断，用于识别当时模型还没就绪、或长会议只补标了后段的情况。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时内容只读（历史内容不会被改动），可「打开原会话」或「返回本会话」；其中工作安排的「已确认」勾选是允许的 —— 那是发送它的前提，且只会写入该场会议。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【保存为文件 · 导入 · 关于】\n· 「更多 → 保存为文件」把这场会议打成**一个 zip 工程包**：会议记录、录音、以及纪要/图片等产出都在里面；右下角会显示进度提示（打包中 → 百分比 → 已保存到文件）。\n· 「会议管理 → 记录 → 导入会议」选择这样的 zip，就能把它导入本机（导入为新会议，不覆盖已有记录、不挂在任何会话上，重名文件自动改名），因此可以把一场会议带到另一台 DSH 上打开。\n· 「更多 → 关于」显示本机实际安装的**版本号**、作者与邮箱；发现 bug 或想提改进意见，点「发邮件」直接写给我，附上版本号与操作步骤即可。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要；「刷新」重新读取，「导入会议」导入工程包；点名称可在下方回看实录与播放。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式 —— 工作安排的「一键同步」就按这里的选择发送。\n· 人员：共享名单（姓名／手机／用户 ID），可手工维护，也可从钉钉通讯录同步部门；这份名单同时是任务负责人与发言人姓名的候选来源。\n· 术语：与「更多 → 会议术语」同一份内容。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
+      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听三个按钮，或在右侧「其他角色」里自己写）、选会议类型（通用／晨会／复盘会／例会／总结会）。选类型会**自动把标题填成「类型 · 今天日期」**，也可以自己改；不想命名就点「暂不命名并开始记录」。\n· 一个会话对应一场会议；分支出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟会提醒一次（不会自动停止）。\n· 状态行显示已录时长与当前发言人；所有按钮都在面板最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你往上滚就自动取消跟随，并出现「回到最新」可以一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx；两者都会弹出浏览器的下载保存对话框，纪要同时留在会议里可随时打开。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。负责人与发言人姓名都从「会议管理 → 人员」的名册（含从钉钉同步过来的人）里取候选。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n· 工作安排页签的「一键同步到钉钉/企业微信」按「会议管理 → 设置」里选的推送方式（群机器人／工作通知／两者）把**已确认**的任务发出去；没有配置目标时会告诉你原因；每条工作安排右侧还有「发送这条」，可以只发其中一条。\n\n【发言人】\n· 每个声纹标签直接填姓名：可以自己输入，也可以从名册下拉里选（输入即过滤）。\n· 「重新识别发言人」会从录音重新判断，用于识别当时模型还没就绪、或长会议只补标了后段的情况。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时内容只读（历史内容不会被改动），可「打开原会话」或「返回本会话」；其中工作安排的「已确认」勾选是允许的 —— 那是发送它的前提，且只会写入该场会议。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【保存为文件 · 导入 · 关于】\n· 「更多 → 保存为文件」把这场会议打成**一个 zip 工程包**：会议记录、录音、以及纪要/图片等产出都在里面；右下角会显示进度提示（打包中 → 百分比 → 已保存到文件）。\n· 「会议管理 → 记录 → 导入会议」选择这样的 zip，就能把它导入本机（导入为新会议，不覆盖已有记录、不挂在任何会话上，重名文件自动改名），因此可以把一场会议带到另一台 DSH 上打开。\n· 「更多 → 关于」显示本机实际安装的**版本号**、作者与邮箱；发现 bug 或想提改进意见，点「发邮件」直接写给我，附上版本号与操作步骤即可。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要；「刷新」重新读取，「导入会议」导入工程包；点名称可在下方回看实录与播放。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式 —— 工作安排的「一键同步」就按这里的选择发送。\n· 人员：共享名单（姓名／手机／用户 ID），可手工维护，也可从钉钉通讯录同步部门；这份名单同时是任务负责人与发言人姓名的候选来源。\n· 术语：与「更多 → 会议术语」同一份内容。\n· 模型：识别用哪个模型在这里选 —— 内置的声纹与手写模型、以及从本地文件导入的更强模型；装好并通过大小与 sha256 校验才能启用，启用后只影响之后的识别。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
       inkNote: '笔记文字',
       documents: '会议文档',
       openDocument: '查看',
@@ -592,6 +612,26 @@ registerProcessor('meeting-capture', MeetingCapture)
       userIdPh: 'UserId',
       peopleUnit: 'people',
       hubTabRecords: 'Records',
+      hubTabModels: 'Models',
+      modelsHint: 'Which models recognition runs on. A model must be installed and verified (size and sha256) before it can be chosen. Nothing leaves this machine by default, and switching only affects later recognition — text already recorded is untouched.',
+      modelInstall: 'Download and install',
+      modelRetry: 'Download again',
+      modelInstalled: 'Installed',
+      modelImportFile: 'Import from a file',
+      modelImportHint: 'Pick this model\'s file (an offline machine, a private mirror, or a model you trained). Anything that does not match the catalog is refused.',
+      modelImported: 'Imported',
+      modelActivate: 'Use this one',
+      modelActivated: 'Switched',
+      modelRemove: 'Remove',
+      modelRemoved: 'Files removed',
+      modelDownloading: 'Downloading',
+      modelLicence: 'Licence',
+      modelDirectory: 'Model directory',
+      modelStateReady: 'Ready',
+      modelStateMissing: 'Not installed',
+      modelStateBad: 'Verification failed',
+      modelByDsh: 'Provided by DSH',
+      modelInUse: 'In use',
       hubTabTerms: 'Terms',
       hubTabSettings: 'Robot settings',
       hubTabPeople: 'People',
@@ -648,7 +688,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: 'Terms',
       notesToggle: 'Handwritten note',
       helpToggle: 'Help',
-      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer buttons, or your own words under Other role) and the type (general / briefing / review / weekly / monthly). Choosing a type fills the title as "type · today" and you can still edit it; "Skip naming and start recording" begins without one.\n· One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with one reminder after 10 minutes (never an automatic stop).\n· The status line shows elapsed time and who is speaking. Every control lives in the top row of the panel.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority. Owners and speaker names are suggested from the roster on Meeting management → People, including the people synced from DingTalk.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n· "Send to DingTalk / WeCom" in the tasks tab sends the CONFIRMED assignments the way Meeting management → Settings chose (group robot, work notification, or both), and says why when nothing is configured. Each row also has "Send this one" for a single assignment.\n\n[Speakers]\n· Each voice label takes a name: type it, or pick from the roster dropdown (typing filters it).\n· "Identify speakers again" re-reads the recording — for a meeting whose model was not ready, or a long one the stop-time backfill only partly covered.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session"; ticking "confirmed" on an assignment is allowed there — it is the step sending needs, and it is written to that meeting.\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Save as file · Import · About]\n· More → Save as file packs this meeting into ONE zip project: the record, the recording, and the artifacts (minutes, images). A notice in the bottom-right corner tracks it (packaging → percentage → saved to file).\n· Meeting management → Records → Import meeting takes such a zip back in (as a NEW meeting: nothing is overwritten, it belongs to no conversation, and clashing file names are renamed), which is how a meeting travels to another DSH.\n· More → About shows the version actually installed here, the author and the address; use "Email" to report a problem or an idea, with the version and what you did.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview; "Refresh" re-reads the list and "Import meeting" brings in a package; click a name to review its transcript and recording below.\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed — the tasks tab\'s one-click send follows this choice.\n· People: the shared roster (name / phone / user id), maintained by hand or synced from DingTalk departments; it is also where task owners and speaker names are suggested from.\n· Terms: the same list as More → Meeting terms.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
+      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer buttons, or your own words under Other role) and the type (general / briefing / review / weekly / monthly). Choosing a type fills the title as "type · today" and you can still edit it; "Skip naming and start recording" begins without one.\n· One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with one reminder after 10 minutes (never an automatic stop).\n· The status line shows elapsed time and who is speaking. Every control lives in the top row of the panel.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority. Owners and speaker names are suggested from the roster on Meeting management → People, including the people synced from DingTalk.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n· "Send to DingTalk / WeCom" in the tasks tab sends the CONFIRMED assignments the way Meeting management → Settings chose (group robot, work notification, or both), and says why when nothing is configured. Each row also has "Send this one" for a single assignment.\n\n[Speakers]\n· Each voice label takes a name: type it, or pick from the roster dropdown (typing filters it).\n· "Identify speakers again" re-reads the recording — for a meeting whose model was not ready, or a long one the stop-time backfill only partly covered.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session"; ticking "confirmed" on an assignment is allowed there — it is the step sending needs, and it is written to that meeting.\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Save as file · Import · About]\n· More → Save as file packs this meeting into ONE zip project: the record, the recording, and the artifacts (minutes, images). A notice in the bottom-right corner tracks it (packaging → percentage → saved to file).\n· Meeting management → Records → Import meeting takes such a zip back in (as a NEW meeting: nothing is overwritten, it belongs to no conversation, and clashing file names are renamed), which is how a meeting travels to another DSH.\n· More → About shows the version actually installed here, the author and the address; use "Email" to report a problem or an idea, with the version and what you did.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview; "Refresh" re-reads the list and "Import meeting" brings in a package; click a name to review its transcript and recording below.\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed — the tasks tab\'s one-click send follows this choice.\n· People: the shared roster (name / phone / user id), maintained by hand or synced from DingTalk departments; it is also where task owners and speaker names are suggested from.\n· Terms: the same list as More → Meeting terms.\n· Models: which model recognition runs on — the built-in speaker and handwriting models, plus any stronger model imported from a local file; a model must be installed and verified (size and sha256) before it can be chosen, and switching only affects later recognition.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
       inkNote: 'Note text',
       documents: 'Meeting documents',
       openDocument: 'Open',
@@ -1705,8 +1745,8 @@ registerProcessor('meeting-capture', MeetingCapture)
     const PUSH_MODE_KEYS = { group: 'pushModeGroup', work: 'pushModeWork', both: 'pushModeBoth' }
 
     /** Hub sections, in the order a user meets them. */
-    const HUB_TAB_VALUES = ['records', 'terms', 'settings', 'people']
-    const HUB_TAB_KEYS = { records: 'hubTabRecords', terms: 'hubTabTerms', settings: 'hubTabSettings', people: 'hubTabPeople' }
+    const HUB_TAB_VALUES = ['records', 'models', 'terms', 'settings', 'people']
+    const HUB_TAB_KEYS = { records: 'hubTabRecords', models: 'hubTabModels', terms: 'hubTabTerms', settings: 'hubTabSettings', people: 'hubTabPeople' }
 
     /** Panel body sections: the record first, then what was read out of it. */
     const BODY_TAB_VALUES = ['transcript', 'minutes', 'points', 'tasks', 'names']
@@ -5062,6 +5102,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [importing, setImporting] = React.useState(false)
       /** Which hub section is showing; the page keeps its own tabs, not the panel's. */
       const [hubTab, setHubTab] = React.useState('records')
+      /**
+       * The model catalog: which models exist, which are installed here, which one each
+       * capability runs, and how a download in flight is going.
+       */
+      const [models, setModels] = React.useState({ models: [], active: {}, problem: '', directory: '', install: null })
+      const [modelBusy, setModelBusy] = React.useState('')
+      /** The hidden field used for "import a model from a local file", and what it is for. */
+      const modelField = React.useRef(null)
+      const modelTarget = React.useRef({ id: '', name: '' })
 
       /** Load settings, the roster and any cached department tree when either tab opens. */
       React.useEffect(() => {
@@ -5193,6 +5242,122 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [])
 
       React.useEffect(() => { void refresh() }, [refresh])
+
+      /** Read the model catalog and what is on disk. */
+      const loadModels = React.useCallback(async () => {
+        try {
+          const value = await get('/models')
+          setModels({
+            models: Array.isArray(value.models) ? value.models : [],
+            active: value.active ?? {},
+            problem: typeof value.problem === 'string' ? value.problem : '',
+            directory: typeof value.directory === 'string' ? value.directory : '',
+            install: value.install ?? null,
+          })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      React.useEffect(() => {
+        if (hubTab === 'models') void loadModels()
+      }, [hubTab, loadModels])
+
+      // A model download runs for minutes, so the page polls while one is in flight — the
+      // percentage it shows is the host's own byte count, not an animation.
+      React.useEffect(() => {
+        if (models.install?.phase !== 'downloading') return undefined
+        const timer = setInterval(() => { void loadModels() }, 1000)
+        return () => clearInterval(timer)
+      }, [models.install?.phase, loadModels])
+
+      /**
+       * Download one model through the host, which verifies size and sha256 as it writes.
+       * @param id - model id.
+       */
+      const installModelNow = React.useCallback(async (id) => {
+        setError('')
+        setSettingsNote('')
+        setModelBusy(id)
+        try {
+          const reply = await post('/models/install', { id })
+          setSettingsNote(reply.error === undefined ? `${t('modelInstalled')}: ${id}` : String(reply.error))
+          if (reply.error !== undefined) setError(String(reply.error))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setModelBusy('')
+          await loadModels()
+        }
+      }, [loadModels, t])
+
+      /**
+       * Install a model from a file the person already has — an offline machine, a private
+       * mirror, or a model they trained. The bytes decide: a catalog sha256 must match.
+       * @param id - model id.
+       * @param name - which file of that model.
+       * @param file - the chosen file.
+       */
+      const importModelNow = React.useCallback(async (id, name, file) => {
+        if (file === undefined || file === null) return
+        setError('')
+        setSettingsNote('')
+        setModelBusy(id)
+        try {
+          const response = await fetch(`${PREFIX}/models/import?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: file,
+          })
+          const text = await response.text()
+          let value = {}
+          try { value = text === '' ? {} : JSON.parse(text) } catch { value = {} }
+          if (!response.ok) {
+            setError(typeof value.error === 'string' ? value.error : `${response.status}`)
+          } else {
+            setSettingsNote(`${t('modelImported')}: ${name}`)
+          }
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setModelBusy('')
+          await loadModels()
+        }
+      }, [loadModels, t])
+
+      /** Choose which model a capability runs ('' goes back to the built-in default). */
+      const activateModelNow = React.useCallback(async (kind, id) => {
+        setError('')
+        setSettingsNote('')
+        setModelBusy(id)
+        try {
+          const reply = await post('/models/activate', { kind, id })
+          if (reply.error !== undefined) setError(String(reply.error))
+          else setSettingsNote(t('modelActivated'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setModelBusy('')
+          await loadModels()
+        }
+      }, [loadModels, t])
+
+      /** Remove a model's files from this machine (built-ins can only be switched away from). */
+      const removeModelNow = React.useCallback(async (id) => {
+        setError('')
+        setSettingsNote('')
+        setModelBusy(id)
+        try {
+          const reply = await post('/models/remove', { id })
+          if (reply.error !== undefined) setError(String(reply.error))
+          else setSettingsNote(`${t('modelRemoved')}: ${reply.removed ?? 0}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setModelBusy('')
+          await loadModels()
+        }
+      }, [loadModels, t])
 
       /**
        * Bring one exported archive in as a meeting of this machine. The bytes go up as they
@@ -5344,6 +5509,84 @@ registerProcessor('meeting-capture', MeetingCapture)
         // Every tab body scrolls on its own: the page keeps its heading, status and tab row,
         // and whatever the tab holds moves under them.
         h('div', { key: 'hubbody', style: styles.hubBody }, [
+        hubTab === 'models' ? h('div', { key: 'models', className: 'mr-card' }, [
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'label', style: styles.label }, t('hubTabModels')),
+            h(Btn, { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void loadModels() } }, t('hubRefresh')),
+          ]),
+          h('span', { key: 'hint', style: styles.hint }, t('modelsHint')),
+          // A file someone edited by hand is reported, never silently ignored.
+          models.problem === '' ? null : h('p', { key: 'problem', style: styles.error }, models.problem),
+          models.install?.phase === 'downloading'
+            ? h('p', { key: 'progress', style: styles.note }, `${t('modelDownloading')} ${models.install.file} · ${models.install.total > 0 ? Math.min(100, Math.floor(models.install.received * 100 / models.install.total)) : 0}%`)
+            : null,
+          h('div', { key: 'list', style: styles.list }, models.models.map((model) => {
+            const used = models.active[model.kind] === model.id
+            const state = model.locked === true
+              ? t('modelByDsh')
+              : model.verified === true ? t('modelStateReady') : model.installed === true ? t('modelStateBad') : t('modelStateMissing')
+            const size = model.totalBytes === 0 ? '—' : `${(model.totalBytes / 1048576).toFixed(1)} MB`
+            return h('div', { key: model.id, style: styles.list }, [
+              h('div', { key: 'row', style: styles.row }, [
+                h('span', { key: 'name', style: styles.label }, `${model.name}${used ? ` · ${t('modelInUse')}` : ''}`),
+                h('span', { key: 'state', style: styles.stamp }, state),
+              ]),
+              h('span', { key: 'meta', style: styles.hint }, `${model.kind} · ${size} · ${model.sizeClass}${model.languages.length === 0 ? '' : ` · ${model.languages.join('/')}`}`),
+              model.note === '' ? null : h('span', { key: 'note', style: styles.hint }, model.note),
+              model.licence === '' ? null : h('span', { key: 'licence', style: styles.hint }, `${t('modelLicence')}：${model.licence}`),
+              h('div', { key: 'actions', style: styles.row }, model.locked === true ? [] : [
+                model.verified === true
+                  ? h(Btn, {
+                    key: 'activate',
+                    type: 'button',
+                    style: styles.button,
+                    disabled: used || modelBusy === model.id,
+                    onClick: () => { void activateModelNow(model.kind, model.id) },
+                  }, used ? t('modelInUse') : t('modelActivate'))
+                  : h(Btn, {
+                    key: 'install',
+                    type: 'button',
+                    style: styles.button,
+                    disabled: modelBusy === model.id || models.install?.phase === 'downloading',
+                    onClick: () => { void installModelNow(model.id) },
+                  }, models.install?.phase === 'failed' && models.install.id === model.id ? t('modelRetry') : t('modelInstall')),
+                h(Btn, {
+                  key: 'import',
+                  type: 'button',
+                  style: styles.button,
+                  disabled: modelBusy === model.id,
+                  title: t('modelImportHint'),
+                  onClick: () => {
+                    // The file name decides which file of the model this is, so the person is
+                    // told what to pick; the host refuses anything that does not match.
+                    modelTarget.current = { id: model.id, name: model.files[0]?.name ?? '' }
+                    modelField.current?.click()
+                  },
+                }, t('modelImportFile')),
+                model.builtin === true ? null : h(Btn, {
+                  key: 'remove',
+                  type: 'button',
+                  style: styles.button,
+                  disabled: modelBusy === model.id,
+                  onClick: () => { void removeModelNow(model.id) },
+                }, t('modelRemove')),
+              ]),
+            ])
+          })),
+          h('span', { key: 'dir', style: styles.hint }, `${t('modelDirectory')}：${models.directory}`),
+          h('input', {
+            key: 'modelfile',
+            type: 'file',
+            ref: modelField,
+            style: { display: 'none' },
+            onChange: (event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              const target = modelTarget.current
+              void importModelNow(target.id, target.name, file)
+            },
+          }),
+        ]) : null,
         hubTab === 'terms' ? h('div', { key: 'terms' }, [
           h('label', { key: 'label', style: styles.label, htmlFor: 'meeting-room-hub-terms' }, t('terms')),
           h('span', { key: 'hint', style: styles.hint }, t('termsHint')),

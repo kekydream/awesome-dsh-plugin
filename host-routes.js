@@ -50,6 +50,7 @@ import { speakerState, prepareSpeakers, labelCue, relabelFromRecording, noteSpea
 import { handwritingState, recognizeHandwriting, prepareHandwriting } from './host-handwriting.js'
 import { flushMeetings, meetingIsEmpty } from './host-persistence.js'
 import { packageMeeting, importPackage } from './host-package.js'
+import { modelState, installModel, importModel, activateModel, removeModel } from './host-models.js'
 
 /** Ceiling for an imported archive: a long meeting's recording travels inside one. */
 const IMPORT_BODY_BYTES = 512 * 1024 * 1024
@@ -249,6 +250,11 @@ export function createHandler(ctx) {
             // Noted on the meeting as well: a reopened record must still know this voice
             // existed, even when a later cue's label could not be produced.
             noteSpeakerLabel(meeting, judged.speaker)
+            // Which model produced these labels, so a later "why do the labels look like
+            // this?" has an answer. Recorded once, on the first labelled cue.
+            if (meeting.speakerModel === undefined || meeting.speakerModel === '') {
+              meeting.speakerModel = speakerState.modelId
+            }
           }
           // The embedding is kept for the end-of-meeting pass, which merges voices the online
           // gallery could not; it never leaves this process.
@@ -724,6 +730,48 @@ export function createHandler(ctx) {
         }
         const outcome = await pushTasks(meeting, asked.length === 0 ? WEBHOOK_KINDS : asked, only)
         sendJson(res, outcome.error === '' ? 200 : 400, outcome)
+        return
+      }
+
+      if (method === 'GET' && route === '/models') {
+        // The catalog, what is on disk, which one each capability runs, and how a download in
+        // flight is going — one answer, because the page shows all of it together.
+        sendJson(res, 200, await modelState())
+        return
+      }
+
+      if (method === 'POST' && route === '/models/install') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const outcome = await installModel(typeof body.id === 'string' ? body.id : '')
+        sendJson(res, outcome.error === undefined ? 200 : 400, outcome)
+        return
+      }
+
+      if (method === 'POST' && route === '/models/import') {
+        // The bytes ARE the body: a model file can be large, and JSON would only inflate it.
+        const id = url.searchParams.get('id') ?? ''
+        const name = url.searchParams.get('name') ?? ''
+        try {
+          const bytes = await readBody(req, IMPORT_BODY_BYTES)
+          const outcome = await importModel(id, name, bytes)
+          sendJson(res, outcome.error === undefined ? 200 : 400, outcome)
+        } catch (failure) {
+          sendJson(res, 400, { error: failure instanceof Error ? failure.message : String(failure) })
+        }
+        return
+      }
+
+      if (method === 'POST' && route === '/models/activate') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const outcome = await activateModel(typeof body.kind === 'string' ? body.kind : '', typeof body.id === 'string' ? body.id : '')
+        sendJson(res, outcome.error === undefined ? 200 : 400, outcome)
+        return
+      }
+
+      if (method === 'POST' && route === '/models/remove') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const outcome = await removeModel(typeof body.id === 'string' ? body.id : '')
+        sendJson(res, outcome.error === undefined ? 200 : 400, outcome)
         return
       }
 

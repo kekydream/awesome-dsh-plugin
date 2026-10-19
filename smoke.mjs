@@ -8,6 +8,7 @@
  */
 import { pathToFileURL } from 'node:url'
 import { Readable } from 'node:stream'
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,6 +32,8 @@ const sessions = await import(`${plugin}/host-sessions.js`)
 const persistence = await import(`${plugin}/host-persistence.js`)
 const { createHandler } = await import(`${plugin}/host-routes.js`)
 const { exportDirectory } = await import(`${plugin}/host-helpers.js`)
+/** The registry module, used directly for the "which model is actually in use" assertions. */
+const speakerModels = await import(`${plugin}/host-models.js`)
 const { zipRead, importPackage, PACKAGE_FORMAT } = await import(`${plugin}/host-package.js`)
 
 const results = []
@@ -47,7 +50,12 @@ const handler = createHandler(ctx)
 
 /** Run one route and parse its JSON answer. */
 async function call(route, body, method = 'GET') {
-  const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body), 'utf8')])
+  // A Buffer or a string is the body itself; anything else is JSON. Without this, a binary
+  // route would receive `{"type":"Buffer","data":[…]}` and quietly fail every check.
+  const payload = body === undefined
+    ? []
+    : [Buffer.isBuffer(body) ? body : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body), 'utf8')]
+  const req = Readable.from(payload)
   req.url = `/meeting-room${route}`
   req.method = method
   req.headers = {}
@@ -319,6 +327,56 @@ check('版本接口回插件自己的版本与作者', version.status === 200
   && typeof version.value.version === 'string' && version.value.version !== '0.0.0'
   && version.value.name === 'dsh-meeting-room'
   && String(version.value.author).includes('yangdaoquan@qq.com'))
+
+// ---------------------------------------------------------------------------
+// 7d. 模型注册表（M1）
+// ---------------------------------------------------------------------------
+const catalog = await call('/models')
+check('模型接口列出内置目录与当前启用', catalog.status === 200
+  && catalog.value.models.some((m) => m.id === 'speaker.campplus.zh-en.16k')
+  && catalog.value.models.some((m) => m.id === 'handwriting.damo.line')
+  && catalog.value.models.find((m) => m.id === 'asr.dsh.default').locked === true
+  && typeof catalog.value.active.speaker === 'string')
+check('模型接口报出目录与安装进度字段', typeof catalog.value.directory === 'string' && catalog.value.install !== undefined)
+check('未安装的模型不能启用', (await call('/models/activate', { kind: 'speaker', id: 'speaker.campplus.zh-en.16k' }, 'POST')).status === 400)
+check('未知模型不能被启用', (await call('/models/activate', { kind: 'speaker', id: 'nope' }, 'POST')).status === 400)
+check('内置模型不能删除', (await call('/models/remove', { id: 'speaker.campplus.zh-en.16k' }, 'POST')).status === 400)
+check('DSH 自己的模型不能导入', (await call('/models/import?id=asr.dsh.default&name=x', Buffer.from('x'), 'POST')).status === 400)
+
+// A model someone added to models.json, installed by hand from a local file: the offline path.
+const modelBytes = Buffer.from('这就是一个更强的本地模型'.repeat(128))
+const modelDigest = createHash('sha256').update(modelBytes).digest('hex')
+await fs.mkdir(join(process.env.DSH_HOME, 'meeting-room'), { recursive: true })
+await fs.writeFile(join(process.env.DSH_HOME, 'meeting-room', 'models.json'), JSON.stringify({
+  version: 1,
+  models: [{
+    id: 'speaker.test.large',
+    kind: 'speaker',
+    name: '测试用大模型',
+    runtime: 'onnx',
+    dir: 'meeting-room/models/speaker.test.large',
+    source: { url: 'https://example.invalid/down/', mirrors: [] },
+    files: [{ name: 'model.onnx', bytes: modelBytes.length, sha256: modelDigest }],
+    languages: ['zh'],
+    sizeClass: 'large',
+  }],
+  active: {},
+}, null, 2))
+const withCustom = await call('/models')
+check('自定义模型出现在列表且标为未安装', withCustom.value.models.find((m) => m.id === 'speaker.test.large')?.verified === false)
+check('内容不符的导入被拒（sha256）', (await call('/models/import?id=speaker.test.large&name=model.onnx', Buffer.from('别的字节'), 'POST')).status === 400)
+const importedModel = await call('/models/import?id=speaker.test.large&name=model.onnx', modelBytes, 'POST')
+check('按 sha256 校验的本地导入成功', importedModel.status === 200 && importedModel.value.verified === true, importedModel.value)
+check('导入后可以启用', (await call('/models/activate', { kind: 'speaker', id: 'speaker.test.large' }, 'POST')).status === 200)
+const activeNow = await call('/models')
+check('启用后 active 指向它', activeNow.value.active.speaker === 'speaker.test.large')
+check('启用后准备发言人会用这个模型', (await speakerModels.activeModel('speaker'))?.id === 'speaker.test.large')
+check('正在使用的模型不能删除', (await call('/models/remove', { id: 'speaker.test.large' }, 'POST')).status === 400)
+check('切回内置默认（清空选择）', (await call('/models/activate', { kind: 'speaker', id: '' }, 'POST')).status === 200)
+const removedModel = await call('/models/remove', { id: 'speaker.test.large' }, 'POST')
+check('自定义模型可以删除并报告文件数', removedModel.status === 200 && removedModel.value.removed === 1, removedModel.value)
+check('删除后文件真的没了', !(await fs.readdir(join(process.env.DSH_HOME, 'meeting-room/models/speaker.test.large')).catch(() => [])).includes('model.onnx'))
+check('坏条目被报出来而不是静默忽略', (await import(`${plugin}/host-models.js`)).validateModel({ id: 'x', kind: 'nope', name: 'y' }).error.includes('kind'))
 
 // ---------------------------------------------------------------------------
 // 8. Agent 工具
