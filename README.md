@@ -26,23 +26,57 @@ DeepSeek Harness 的会议插件：**本机转写、发言人分离、要点与�
 
 ## 安装
 
+**推荐用 Harness 自己的安装入口**（Plugins 页，或 `install_bundle` / `dsh plugin add`），
+因为它会**一次把两件事都做对**：写进 profile 的 `dependencies`，**同时**把包名追加进
+`dsh.profile.bundles`。
+
 ```sh
 dsh plugin --profile <你的profile名> add dsh-meeting-room
 ```
 
-装完确认这一层已经生效：
+### 为什么是两件事（手工安装务必看）
+
+**插件是否被加载，取决于 profile `package.json` 里的 `dsh.profile.bundles`，不是 `dependencies`。**
+DSH 的插件管理器就是这么工作的（`@deepseek-ai/dsh-plugin-manager` 的 `reconcile()`）：
+它读取 `after.dsh?.profile?.bundles`，把新装的包**追加进去**；而且只有清单里声明了
+`dsh.bundle` 的包才算"profile 层"，否则 DSH 会打印一行警告：
+
+```
+dsh: warning: <包名> declares no dsh.bundle — installed as a plain dependency, not a profile layer
+```
+
+**只用 `pnpm add`（或任何只写 `dependencies` 的方式）装，插件不会被加载。** 手工安装请补齐第二步：
+
+```jsonc
+// <profile>/package.json
+{
+  "dependencies": { "dsh-meeting-room": "0.1.0-preview.3" },
+  "dsh": {
+    "profile": {
+      "bundles": ["dsh-meeting-room"]   // ← 这一项才决定它被加载
+    }
+  }
+}
+```
+
+### 装完自检（三件都过才算装好）
 
 ```sh
-dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-meeting-room"
+# 1) 名字在 bundles 里
+grep -n 'dsh-meeting-room' <profile>/package.json      # 应出现在 dsh.profile.bundles 中
+# 2) 这一层真的进了配置
+dsh --profile <你的profile名> --dump-config            # 应出现一层 "# == dsh-meeting-room"
+# 3) 宿主代码齐全（缺 host-*.js 就是装到了旧包）
+ls node_modules/dsh-meeting-room/host-*.js             # 应列出 10 个
 ```
 
 **安装后需要重启 Harness**：宿主半边每个进程只加载一次。
 
-### 安装排错（先看这三条）
+### 安装排错（先看这四条）
 
 1. **装完必须重启 Harness**。宿主半边每个进程只加载一次，不重启就等于没装。
 
-2. **如果插件目录里只有几个 `.js` 文件** —— `...\node_modules\dsh-meeting-room\` 下只看到
+2. **插件目录里只有几个 `.js` 文件** —— `...\node_modules\dsh-meeting-room\` 下只看到
    `index.js`、`client.js` 与两个 worker 等少数文件，**却没有 `host-*.js`**，那么宿主半边会在
    加载期就失败（`index.js` 引用了这些兄弟模块），表现是插件整个起不来、也没有
    `$DSH_HOME/meeting-room/boot.log`。
@@ -65,7 +99,12 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
    pnpm add sherpa-onnx-node@1.13.8    # 在该 profile 目录里
    ```
 
-4. **如果「开始记录」要点两次才录上**，说明装的还是旧包（宿主路由缺失时，面板曾把探测失败
+4. **插件装上了却完全不生效**（Plugins 页里没有它、面板按钮不出现、`dsh --dump-config` 里
+   没有这一层）—— 最可能是**只装了依赖、没进 `bundles`**：`pnpm add` 只写 `dependencies`，
+   而决定加载的是 `dsh.profile.bundles`（见上面「为什么是两件事」）。
+   手工把包名加进 `dsh.profile.bundles` 后重启即可；用 DSH 自己的安装入口则不会踩到。
+
+5. **如果「开始记录」要点两次才录上**，说明装的还是旧包（宿主路由缺失时，面板曾把探测失败
    当成"就绪"，于是第一次点击走了注定失败的直录路径）。**0.1.0-preview.3 已修**：
    面板初始不再谎报就绪、404 不再冒充就绪、准备过程对终态与停滞都有明确出口，
    并且会直接告诉你「宿主路由未注册……请更新到 0.1.0-preview.2 或更新版本」。
