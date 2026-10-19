@@ -218,6 +218,20 @@ const bothSent = await call('/push', { meetingId: 'm-brief' }, 'POST')
 check('不带 taskId 时发送全部已确认的', bothSent.status === 200 && bothSent.value.tasks === 2)
 
 // ---------------------------------------------------------------------------
+// 5c. 历史会议（属于别的会话）也能确认并单条发送
+// ---------------------------------------------------------------------------
+seed('m-foreign', {
+  sessionId: 's-someone-else',
+  title: '别人会话里的会议',
+  tasks: [{ id: 'f1', title: '跨会查看后要发的事', owner: '张三', due: '明天', priority: 'high', status: 'draft', origin: 'agent', done: false }],
+})
+const confirmForeign = await call('/analysis', { meetingId: 'm-foreign', kind: 'task', id: 'f1', op: 'update', patch: { status: 'confirmed' } }, 'POST')
+check('别的会话的会议里也能确认任务', confirmForeign.status === 200 && meetings.get('m-foreign').tasks[0].status === 'confirmed')
+const pushForeign = await call('/push', { meetingId: 'm-foreign', taskId: 'f1' }, 'POST')
+check('历史会议的单条也能发送', pushForeign.status === 200 && pushForeign.value.tasks === 1 && pushForeign.value.error === '')
+check('确认没有把内容改动写到本会话的会议上', brief.tasks.length === 2)
+
+// ---------------------------------------------------------------------------
 // 6. 评分与导出
 // ---------------------------------------------------------------------------
 const monthly = seed('m-month', { kind: 'monthly', period: tools.periodOf('monthly', started), title: '月度总结' })
