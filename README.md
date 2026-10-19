@@ -35,6 +35,11 @@ DeepSeek Harness 的会议插件：**本机转写、发言人分离、要点与�
 dsh plugin --profile <你的profile名> add dsh-meeting-room
 ```
 
+包已发布在 npm（`dsh-meeting-room`，国内自动走 npmmirror 镜像）。要求 **DSH ≥ 0.2.0**
+（`engines.dsh`，不满足会被拦住）与 **Node ≥ 20**。
+当前是预发布版，`latest` 与 `preview` 两个 tag 都指向它，所以上面这条按包名安装即可；
+以后要用预发布线则写 `dsh plugin add dsh-meeting-room@preview`。
+
 ### 为什么是两件事（手工安装务必看）
 
 **插件是否被加载，取决于 profile `package.json` 里的 `dsh.profile.bundles`，不是 `dependencies`。**

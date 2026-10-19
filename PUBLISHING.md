@@ -35,6 +35,25 @@ npm publish --tag preview
 - 国内镜像（npmmirror）会自动同步，用户安装会自动走镜像；
 - 想升级正式版：`npm dist-tag add dsh-meeting-room@<version> latest`。
 
+### 已发布状态（2026-10-19 实测）
+
+| 项 | 结果 |
+| --- | --- |
+| 包 | `dsh-meeting-room@0.1.0-preview.3`（维护者 `kekydream`） |
+| dist-tags | `latest` 与 `preview` **都**指向 `0.1.0-preview.3` —— 因此 `dsh plugin add dsh-meeting-room` 与 `…@preview` 都能装 |
+| npmmirror | 已自动同步；实测从镜像 `npm install dsh-meeting-room` 成功（29 秒，10 个包） |
+| 安装副本 | **11 个 `host-*.js` + `client.js` + `index.js` 齐全** —— 即 0.1.0-preview.1 那个"缺宿主代码"的问题在 npm 侧已被反证 |
+| 清单字段 | `engines.dsh = ">=0.2.0"`、`engines.node = ">=20"`、`dsh.bundle.patch` 均在包里 |
+| 遗留 | 有 `0.0.0-stage` 一个版本 —— 那是首次尝试时 npm 2FA 的**暂存占位版本**，无害；不想要可在 72 小时内 `npm unpublish dsh-meeting-room@0.0.0-stage` |
+
+**为什么 `latest` 也指向预发布版**：首次发布时 npm 会把 `latest` 指向首个版本。这带来一个方便
+（按包名直接安装即可用），代价是语义上不够严格。**建议保持现状直到第一个正式版**；
+届时 `latest` 会自动移到正式版，`preview` 仍留在预发布线上。
+
+**cnpm / npmmirror 不需要发布**：它是**只读镜像**，会从 npmjs 自动同步（本包已同步）。
+要强制触发同步：`cnpm sync dsh-meeting-room`，或访问
+`https://npmmirror.com/sync/dsh-meeting-room`。发布永远只发到 `registry.npmjs.org`。
+
 ### 关于 `engines.dsh`（已决定）
 
 社区目录与 DSH 会读 `engines.dsh`（或同版本线 `@deepseek-ai/dsh-*` peer）来判断兼容性，
