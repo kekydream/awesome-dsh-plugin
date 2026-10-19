@@ -5305,9 +5305,21 @@ registerProcessor('meeting-capture', MeetingCapture)
               style: styles.button,
               disabled: importing,
               title: t('hubImportHint'),
-              onClick: () => { importField.current?.click() },
+              onClick: () => {
+                const field = importField.current
+                // The field is rendered right next to this button; if it ever is not, say so
+                // instead of a click that appears to do nothing.
+                if (field === null) {
+                  console.warn('meeting-room: the import file field is not mounted')
+                  setError(t('hubImportHint'))
+                  return
+                }
+                field.click()
+              },
             }, importing ? `${t('hubImport')} …` : t('hubImport')),
-            h(Field, {
+            // A raw element rather than the Field wrapper: React does not hand a `ref` to a function
+            // component, so a ref on Field stays null and the button would silently do nothing.
+            h('input', {
               key: 'importfile',
               type: 'file',
               ref: importField,
