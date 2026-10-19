@@ -4,6 +4,29 @@
   "description": "会议记录：本机转写、发言人分离、要点与工作安排、手写笔记、复盘与纪要 · Meeting notes inside DeepSeek Harness",
   "author": "杨道泉 <yangdaoquan@qq.com> (博尔塔拉融媒体中心媒体传播与认知重点实验室)",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitee.com/kekydream/dsh-meeting-room.git"
+  },
+  "homepage": "https://gitee.com/kekydream/dsh-meeting-room#readme",
+  "bugs": {
+    "url": "https://gitee.com/kekydream/dsh-meeting-room/issues",
+    "email": "yangdaoquan@qq.com"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "meeting",
+    "minutes",
+    "transcription",
+    "speaker-diarization",
+    "handwriting",
+    "会议记录",
+    "会议纪要",
+    "转写",
+    "发言人分离"
+  ],
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
