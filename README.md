@@ -33,11 +33,38 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
 
 **安装后需要重启 Harness**：宿主半边每个进程只加载一次。
 
+### 安装排错（先看这三条）
+
+1. **装完必须重启 Harness**。宿主半边每个进程只加载一次，不重启就等于没装。
+
+2. **如果插件目录里只有几个 `.js` 文件** —— `...\node_modules\dsh-meeting-room\` 下只看到
+   `index.js`、`client.js` 与两个 worker 等少数文件，**却没有 `host-*.js`**，那么宿主半边会在
+   加载期就失败（`index.js` 引用了这些兄弟模块），表现是插件整个起不来、也没有
+   `$DSH_HOME/meeting-room/boot.log`。
+
+   这是 **0.1.0-preview.1 那份包的缺陷**：发布清单（`package.json` 的 `files`）漏掉了多数
+   `host-*.js`，于是打出来的包里没有宿主代码。**已修复：请使用 `0.1.0-preview.2` 或更新的版本**
+   （`v0.1.0-preview.2` 标签）。本项目还为此加了发布清单守卫（`node smoke.mjs` 的前几项检查）：
+   它会遍历 `index.js` 等文件的相对引用，逐条核对是否被 `files` 覆盖 —— 同类问题不会再漏出去。
+
+   自检一行命令（在插件目录里）：
+   ```sh
+   ls node_modules/dsh-meeting-room/host-*.js   # 应当列出 10 个 host-*.js
+   ```
+
+3. **`sherpa-onnx-node` 的 peer 警告可以忽略**。profile 的 pnpm 通常
+   `autoInstallPeers: false`，所以它只被记录、不被安装；插件的转写走 DSH 自带的语音能力
+   （`ctx.get('speechToText')` 懒取），**缺它只影响转写，其余功能不受影响**。
+   想消除 WARN 可显式安装：
+   ```sh
+   pnpm add sherpa-onnx-node@1.13.8    # 在该 profile 目录里
+   ```
+
 ## 前提
 
 | 依赖 | 说明 |
 | --- | --- |
-| **SenseVoice 语音识别** | 由 DSH 安装包提供（`sherpa-onnx-node` 声明为 peer 依赖，随安装解析）。若你的 DSH 未包含 speech 相关包，转写不可用，其余功能不受影响 |
+| **SenseVoice 语音识别** | 由 DSH 安装包提供（`sherpa-onnx-node` 声明为 peer 依赖，随安装解析；profile 若关闭 `autoInstallPeers`，缺它只影响转写，其余功能不受影响，见上面「安装排错」第 3 条） |
 | **`onnxruntime-node`** | 随本插件安装，用于手写识别。若安装时 pnpm 提示忽略其构建脚本，Windows x64 上属正常现象，模块仍可加载；其他平台如加载失败，请在该 profile 里 `pnpm approve-builds` 后重装 |
 | **`pinyin-pro`** | 随本插件安装，用于会议术语的同音订正 |
 | **Python + python-docx** | 仅「导出 Word」需要。优先使用 DSH 运行时自带的 Python；若不含 `python-docx`，在其中 `pip install python-docx`。没有 Python 时其余功能不受影响 |
