@@ -425,7 +425,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       speechPrepareAction: '开始下载模型',
       speechDownloading: '正在下载语音模型…（可关闭此面板，后台继续）',
       speechPreparing: '正在准备语音识别…',
-      speechAutoStart: '语音识别准备就绪后将自动开始录音',
+      speechAutoStart: '语音识别准备中就绪后自动开始录音——不用再点',
+      speechRouteMissing: '宿主路由未注册：这份安装不完整（缺 host-*.js）。请更新到 0.1.0-preview.2 或更新的版本，然后重启 Harness',
+      speechChecking: '正在检查语音识别…',
+      setupPrepareStalled: '语音模型准备长时间没有进展',
+      preparing: '准备中…',
       speechCancel: '取消',
       prepareInPanel: '下载本地模型',
       preparingInPanel: '正在准备…',
@@ -744,7 +748,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       speechPrepareAction: 'Download model now',
       speechDownloading: 'Downloading the speech model\u2026 (safe to close this panel; it continues in the background)',
       speechPreparing: 'Preparing speech recognition\u2026',
-      speechAutoStart: 'Recording starts automatically once speech recognition is ready',
+      speechAutoStart: 'Preparing speech recognition — recording starts by itself, no need to click again',
+      speechRouteMissing: 'The host routes are not registered: this installation is incomplete (host-*.js is missing). Update to 0.1.0-preview.2 or newer, then restart the Harness',
+      speechChecking: 'Checking speech recognition…',
+      setupPrepareStalled: 'Speech model preparation has made no progress for a long time',
+      preparing: 'Preparing…',
       speechCancel: 'Cancel',
       prepareInPanel: 'Download local models',
       preparingInPanel: 'Preparing\u2026',
@@ -1720,6 +1728,25 @@ registerProcessor('meeting-capture', MeetingCapture)
     }
 
     /**
+     * Turn a failed plugin request into an error that carries its HTTP status.
+     *
+     * The status has to travel with the error: "this route is not registered" (404 — a broken or
+     * half-installed plugin) and "the service is busy" (5xx) need completely different answers,
+     * and the message text alone cannot tell them apart.
+     * @param value - decoded body, if any.
+     * @param response - the failed response.
+     * @returns the error to throw.
+     */
+    function requestFailure(value, response) {
+      const message = value !== null && typeof value === 'object' && typeof value.error === 'string' && value.error !== ''
+        ? value.error
+        : `请求失败 (${response.status})`
+      const failure = new Error(message)
+      failure.status = response.status
+      return failure
+    }
+
+    /**
      * POST JSON to the host half and decode the JSON reply.
      * @param route - Route under the plugin prefix.
      * @param body - JSON-serializable body.
@@ -1736,7 +1763,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       if (text !== '') {
         try { value = JSON.parse(text) } catch { value = {} }
       }
-      if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : `请求失败 (${response.status})`)
+      if (!response.ok) throw requestFailure(value, response)
       return value
     }
 
@@ -1752,7 +1779,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       if (text !== '') {
         try { value = JSON.parse(text) } catch { value = {} }
       }
-      if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : `请求失败 (${response.status})`)
+      if (!response.ok) throw requestFailure(value, response)
       return value
     }
 
@@ -1917,7 +1944,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [note, setNote] = React.useState('')
       const [termsText, setTermsText] = React.useState(readTerms)
       const [speaker, setSpeaker] = React.useState({ phase: 'unprepared', message: '', completedBytes: 0, totalBytes: 0 })
-      const [speech, setSpeech] = React.useState({ ready: true, phase: 'checking', requesting: false, completedBytes: 0, totalBytes: 0 })
+      /**
+       * Starts UNRESOLVED, never "ready". The probe below has not answered yet, and a click in
+       * that window used to take the record-now path and fail on an unprepared model — the click
+       * was spent and the person had to click again. Not-ready is the safe default: a click then
+       * goes through the prepare chain, which ends in recording either way.
+       */
+      const [speech, setSpeech] = React.useState({ ready: false, phase: 'checking', requesting: false, completedBytes: 0, totalBytes: 0 })
       // A 'Start' click that an unprepared model blocked: once the enable/download chain
       // reports ready, recording begins automatically instead of asking for another click.
       const [pendingStart, setPendingStart] = React.useState(false)
@@ -1945,16 +1978,36 @@ registerProcessor('meeting-capture', MeetingCapture)
         try {
           await post('/speech/prepare', {})
           const dl = Date.now() + 600000
+          let lastPhase = ''
+          let lastBytes = -1
+          let lastProgress = Date.now()
           for (;;) {
             const s = await readSpeechState()
-            // Stay busy-looking until the server actually reports the model ready, so the
-            // panel shows progress instead of a false "download started" one-liner.
-            setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy === true || s.ready !== true, completedBytes: s.completedBytes, totalBytes: s.totalBytes })
+            // `requesting` mirrors what the service reports, never "not ready yet": claiming a
+            // download that is not happening is what made a stall look like progress.
+            setSpeech({ ready: s.ready, phase: s.phase, requesting: s.busy, completedBytes: s.completedBytes, totalBytes: s.totalBytes })
             if (s.ready) return
-            if (s.phase === 'failed') {
+            // Terminal states end the wait at once, each with its own answer: a route that does
+            // not exist will never become ready, and saying so beats waiting ten minutes.
+            if (s.phase === 'missing' || s.phase === 'unavailable' || s.phase === 'failed') {
+              setPendingStart(false)
+              setSpeech({ ready: false, phase: s.phase, requesting: false, completedBytes: 0, totalBytes: 0 })
+              setError(s.phase === 'missing'
+                ? t('speechRouteMissing')
+                : (s.message !== '' ? s.message : t('setupPrepareFailed')))
+              return
+            }
+            // A phase that does not move and bytes that do not arrive is a stall: report it
+            // instead of sitting on the full deadline while the person waits for a recording.
+            if (s.phase !== lastPhase || s.completedBytes !== lastBytes) {
+              lastPhase = s.phase
+              lastBytes = s.completedBytes
+              lastProgress = Date.now()
+            }
+            if (Date.now() - lastProgress > 90000) {
               setPendingStart(false)
               setSpeech({ ready: false, phase: 'failed', requesting: false, completedBytes: 0, totalBytes: 0 })
-              setError(typeof s.message === 'string' && s.message !== '' ? s.message : t('setupPrepareFailed'))
+              setError(`${t('setupPrepareStalled')}（${s.phase}）`)
               return
             }
             if (Date.now() >= dl) {
@@ -1968,7 +2021,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         } catch (e) {
           setPendingStart(false)
           setSpeech((c) => ({ ...c, requesting: false }))
-          setError(e instanceof Error ? e.message : String(e))
+          setError(e?.status === 404 ? t('speechRouteMissing') : (e instanceof Error ? e.message : String(e)))
         }
       }, [t])
 
@@ -3489,7 +3542,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               if (meta.title !== '') { void start(); return }
               setNamePrompt({ text: '', kind: meta.kind, role: role === '' ? 'attendee' : role, roleOther: '', start: true })
             },
-          }, recording ? t('stop') : t('start')),
+          }, recording ? t('stop') : pendingStart ? t('preparing') : t('start')),
           // Pause sits beside Stop: a pause keeps the meeting open, Stop ends it (§5.6). The
           // button stays put for the whole recording — it used to vanish for the moment a
           // chunk was being written, which reads as a fault — and is only disabled then.
@@ -4242,7 +4295,14 @@ registerProcessor('meeting-capture', MeetingCapture)
         ]),
         note === '' ? null : h('p', { key: 'note', style: styles.note }, note),
         speech.ready === false ? h('div', { key: 'sp', style: styles.help }, [
-          h('p', { style: styles.subtitle }, speech.requesting ? (speechDetail !== '' ? speechDetail : t('speechPreparing')) : speech.phase === 'unavailable' ? t('speechUnavailableHint') : t('speechPrepareHint')),
+          h('p', { style: styles.subtitle }, speech.requesting
+            ? (speechDetail !== '' ? speechDetail : t('speechPreparing'))
+            // Each unresolved state says what it actually is: still checking, the route is
+            // missing (a broken install, and the person can fix it), or the service is out.
+            : speech.phase === 'checking' ? t('speechChecking')
+              : speech.phase === 'missing' ? t('speechRouteMissing')
+                : speech.phase === 'unavailable' ? t('speechUnavailableHint')
+                  : t('speechPrepareHint')),
           pendingStart ? h('p', { style: styles.status }, t('speechAutoStart')) : null,
           h('div', { style: styles.row }, [
             h(Btn, { key: 'dl', type: 'button', style: styles.button, disabled: speech.requesting, onClick: () => { void prepareSpeech() } }, speech.requesting ? t('preparingInPanel') : t('speechPrepareAction')),
@@ -6068,7 +6128,21 @@ registerProcessor('meeting-capture', MeetingCapture)
         const completedBytes = typeof reply.completedBytes === 'number' ? reply.completedBytes : 0
         const totalBytes = typeof reply.totalBytes === 'number' ? reply.totalBytes : 0
         return { ready, phase, busy: SPEECH_BUSY.includes(phase), message, completedBytes, totalBytes }
-      } catch { return { ready: true, phase: 'unavailable', busy: false, message: '', completedBytes: 0, totalBytes: 0 } }
+      } catch (failure) {
+      // A missing or unreachable route is NOT readiness. This fallback once said `ready: true`,
+      // which turned a half-installed plugin (no host routes registered at all) into "ready"
+      // and sent the first click down a path that could only fail.
+      const status = typeof failure?.status === 'number' ? failure.status : 0
+      return {
+        ready: false,
+        // 404 is its own case: the route does not exist, so no amount of waiting will help.
+        phase: status === 404 ? 'missing' : 'unavailable',
+        busy: false,
+        message: failure instanceof Error ? failure.message : String(failure),
+        completedBytes: 0,
+        totalBytes: 0,
+      }
+    }
     }
     function SetupNotice(props) {
       const [preparing, setPreparing] = React.useState(false)
