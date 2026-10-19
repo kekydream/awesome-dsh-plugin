@@ -11,7 +11,8 @@ DeepSeek Harness 的会议插件：**本机转写、发言人分离、要点与�
 - [FEATURES.md](FEATURES.md)——会议类型（晨会/复盘会/例会/总结会）、跨会提炼与月度评分的增量功能设计（含实现进度）；
 - [MODELS.md](MODELS.md)——**develop 分支施工图**：语音与发言人识别增强、云端模型接口、
   可安装更强的本地模型（设计稿，尚未实现）；
-- [TESTING.md](TESTING.md)——发布前系统化测试清单。
+- [TESTING.md](TESTING.md)——发布前系统化测试清单；
+- [CHANGELOG.md](CHANGELOG.md)——发布线每个预览版修了什么（**装哪个版本先看它**）。
 
 > 分支约定：`master` 只放发布状态（当前标签 `v0.1.0-preview.1`）；
 > 新功能在 `develop` 上做，稳定后再合回 `master` 并打新标签。
