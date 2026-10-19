@@ -326,6 +326,22 @@ check('版本接口回插件自己的版本与作者', version.status === 200
   && String(version.value.author).includes('yangdaoquan@qq.com'))
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 7f. 「开始记录」第一次点击就要有效
+// ---------------------------------------------------------------------------
+// A click was once spent because the panel believed speech was ready before its probe answered:
+// it took the record-now path, failed on an unprepared model, and the person had to click again.
+// Worse, a missing host route (the incomplete package) was caught and reported as `ready: true`.
+// These assertions guard the exact places that lied.
+const speechProbe = await call('/speech')
+check('/speech 路由已注册（缺 host-*.js 时这里会 404）', speechProbe.status !== 404, `status=${speechProbe.status}`)
+const routesSource = await fs.readFile(join(here, 'host-routes.js'), 'utf8')
+check('宿主注册了 /speech 与 /speech/prepare', routesSource.includes("route === '/speech'") && routesSource.includes("route === '/speech/prepare'"))
+const clientSource = await fs.readFile(join(here, 'client.js'), 'utf8')
+check('客户端不再把探测失败当作就绪', !/catch\s*\{\s*return\s*\{\s*ready:\s*true/u.test(clientSource))
+check('客户端初始状态不谎报就绪', !/useState\(\{\s*ready:\s*true/u.test(clientSource))
+check('失败的路由请求带上 HTTP 状态（用来区分 404 与忙）', clientSource.includes('failure.status = response.status'))
+check('准备过程对终态与停滞都有出口（不会空等十分钟）', clientSource.includes('setupPrepareStalled') && clientSource.includes("s.phase === 'missing'"))
 // 8. Agent 工具
 // ---------------------------------------------------------------------------
 const agent = { agent: { session: { id: 'session-m-brief' } } }
