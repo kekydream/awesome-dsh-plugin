@@ -69,6 +69,12 @@ window.__ModuleLoader__.load({
     /** Target sample rate for the speech provider. */
     const TARGET_RATE = 16000
 
+    /**
+     * Cue shaping: the defaults, replaced at runtime by the settings the host reports (a longer
+     * cue means fewer requests, a shorter silence hold means a snappier transcript).
+     */
+    const CUES = { minSeconds: 1.2, maxSeconds: 5, silenceRms: 0.012, silenceHoldSeconds: 0.5 }
+
     /** Shortest audio a cue may hold; below this a pause is not treated as an endpoint. */
     const MIN_CHUNK_SECONDS = 1.2
 
@@ -78,6 +84,26 @@ window.__ModuleLoader__.load({
      * decides how live the transcript feels during a long uninterrupted sentence.
      */
     const MAX_CHUNK_SECONDS = 5
+
+    /**
+     * Adopt the cue settings the host reports. The capture loop reads CUES on every block, so
+     * this takes effect on the next block rather than on the next meeting.
+     * @param stored - the transcript settings from the host.
+     */
+    function applyCueSettings(stored) {
+      if (stored === null || typeof stored !== "object") return
+      const numbers = {
+        minSeconds: Number(stored.minChunkSeconds),
+        maxSeconds: Number(stored.maxChunkSeconds),
+        silenceRms: Number(stored.silenceRms),
+        silenceHoldSeconds: Number(stored.silenceHoldSeconds),
+      }
+      for (const [key, value] of Object.entries(numbers)) {
+        if (Number.isFinite(value) && value > 0) CUES[key] = value
+      }
+      // Order matters: a minimum above the maximum would make every cue the maximum.
+      if (CUES.minSeconds > CUES.maxSeconds) CUES.maxSeconds = CUES.minSeconds
+    }
 
     /** Block RMS under which the microphone hears room noise rather than speech. */
     const SILENCE_RMS = 0.012
@@ -349,6 +375,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       cloudFallback: '已回退到本机识别',
       cloudUsed: '这一段由云端识别',
       speakerTitle: '发言人识别',
+      transcriptTitle: '实录书写与切句',
+      transcriptNormalize: '把数字、日期、时间写成平时写的样子',
+      transcriptNormalizeHint: '例如「二零二六年十月十九号」→「2026年10月19日」、「百分之三十」→「30%」、「三点半」→「3点半」。这是本机规则、不联网；原文仍保留在实录里，可随时对照。',
+      transcriptMinCue: '最短一段（秒）',
+      transcriptMaxCue: '最长一段（秒）',
+      transcriptSilenceHold: '停顿多久算说完（秒）',
+      transcriptSilenceRms: '静音判定阈值',
+      transcriptCueHint: '录音在浏览器里切段：停顿超过「停顿多久算说完」就结束一段，最短一段之内的停顿不算切点。最长一段越小，文字上屏越快、请求越多；越大则相反。',
+      transcriptRules: '启用的规整规则',
+      transcriptSave: '保存实录设置',
       speakerThreshold: '聚类的严格程度',
       speakerFullRelabel: '结束录音时全量重判所有实录（推荐）',
       speakerSettingsHint: '人多时把阈值调高（更严格：宁可多分几个声音，也不把两个人合成一个）；人少、或同一个人语气变化大时调低。全量重判替换了旧的「只补最后 60 条」，长会议的标签不容易断裂。改了阈值需要重新准备一次语音识别（识别进程会自动重启）。',
@@ -685,6 +721,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       cloudFallback: 'Fell back to on-machine recognition',
       cloudUsed: 'This cue came from the cloud',
       speakerTitle: 'Speaker recognition',
+      transcriptTitle: 'How the transcript reads, and where it is cut',
+      transcriptNormalize: 'Write numbers, dates and times the way people write them',
+      transcriptNormalizeHint: 'For example 二零二六年十月十九号 becomes 2026年10月19日, 百分之三十 becomes 30%, 三点半 becomes 3点半. These are local rules with no network involved, and the literal recognition stays in the transcript for comparison.',
+      transcriptMinCue: 'Shortest cue (s)',
+      transcriptMaxCue: 'Longest cue (s)',
+      transcriptSilenceHold: 'Pause that ends a cue (s)',
+      transcriptSilenceRms: 'Silence threshold',
+      transcriptCueHint: 'Cues are cut in the browser: a pause longer than the hold ends a cue, and no pause inside the shortest cue counts. A smaller maximum puts words on screen sooner at the cost of more requests; a larger one does the opposite.',
+      transcriptRules: 'Normalisation rules enabled',
+      transcriptSave: 'Save transcript settings',
       speakerThreshold: 'How strictly voices are separated',
       speakerFullRelabel: 'Re-judge every cue when the recording stops (recommended)',
       speakerSettingsHint: 'Raise the threshold for a crowded room (stricter: rather split one voice than merge two people); lower it for a small meeting, or a voice that varies a lot. The full pass replaces the old rule of backfilling only the last 60 cues, which is what used to break labels apart in a long meeting. Changing the threshold needs a fresh prepare — the recogniser restarts itself.',
@@ -1483,8 +1529,8 @@ registerProcessor('meeting-capture', MeetingCapture)
      */
     function shouldFlush(active) {
       const rate = active.audio.sampleRate
-      if (active.frames >= rate * MAX_CHUNK_SECONDS) return true
-      return active.frames >= rate * MIN_CHUNK_SECONDS && active.silenceFrames >= rate * SILENCE_HOLD_SECONDS
+      if (active.frames >= rate * CUES.maxSeconds) return true
+      return active.frames >= rate * CUES.minSeconds && active.silenceFrames >= rate * CUES.silenceHoldSeconds
     }
 
     /**
@@ -3448,7 +3494,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             // Endpoint at a pause instead of a fixed clock: a cue then holds what a
             // speaker actually said, rather than being cut mid-sentence. The cap keeps
             // a long monologue from growing without bound.
-            if (blockRms(block) < SILENCE_RMS) active.silenceFrames += block.length
+            if (blockRms(block) < CUES.silenceRms) active.silenceFrames += block.length
             else active.silenceFrames = 0
             if (!active.inflight && shouldFlush(active)) void flush(active)
           }
@@ -5288,6 +5334,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [speakerSettings, setSpeakerSettings] = React.useState({ threshold: 0.6, fullRelabel: true, backfillCap: 60, presets: [], library: [], libraryFile: '' })
       const [speakerDraft, setSpeakerDraft] = React.useState({ threshold: 0.6, fullRelabel: true, backfillCap: 60 })
       const [voiceNote, setVoiceNote] = React.useState('')
+      /**
+       * Transcript settings: how numbers and dates are written back, and where a cue is cut.
+       * The cue limits are applied to the live capture loop, not just displayed.
+       */
+      const [transcript, setTranscript] = React.useState({ normalize: true, normalizeRules: [], minChunkSeconds: 1.2, maxChunkSeconds: 5, silenceRms: 0.012, silenceHoldSeconds: 0.5 })
+      const [transcriptDraft, setTranscriptDraft] = React.useState(null)
+      const [transcriptRules, setTranscriptRules] = React.useState([])
+      const [transcriptNote, setTranscriptNote] = React.useState('')
 
       /** Load settings, the roster and any cached department tree when either tab opens. */
       React.useEffect(() => {
@@ -5438,6 +5492,37 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [])
 
+      /** Read the transcript settings and the rule catalogue. */
+      const loadTranscript = React.useCallback(async () => {
+        try {
+          const value = await get('/transcript')
+          const stored = value.transcript ?? {}
+          setTranscript(stored)
+          setTranscriptDraft(stored)
+          setTranscriptRules(Array.isArray(value.rules) ? value.rules : [])
+          // The browser half cuts cues, so the limits have to reach the capture loop; without
+          // this the settings page would be describing something that never happened.
+          applyCueSettings(stored)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /** Store the transcript settings and apply the cue limits immediately. */
+      const saveTranscript = React.useCallback(async () => {
+        setError('')
+        setTranscriptNote('')
+        try {
+          const reply = await post('/transcript', transcriptDraft ?? {})
+          setTranscript(reply.transcript)
+          setTranscriptDraft(reply.transcript)
+          applyCueSettings(reply.transcript)
+          setTranscriptNote(t('cloudSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [transcriptDraft, t])
+
       /** Read the speaker settings and the voice library. */
       const loadSpeakerSettings = React.useCallback(async () => {
         try {
@@ -5531,7 +5616,8 @@ registerProcessor('meeting-capture', MeetingCapture)
         if (hubTab !== 'settings') return
         void loadCloud()
         void loadSpeakerSettings()
-      }, [hubTab, loadCloud, loadSpeakerSettings])
+        void loadTranscript()
+      }, [hubTab, loadCloud, loadSpeakerSettings, loadTranscript])
 
       /** Read the model catalog and what is on disk. */
       const loadModels = React.useCallback(async () => {
@@ -6079,6 +6165,62 @@ registerProcessor('meeting-capture', MeetingCapture)
             h('div', { key: 'speakeractions', style: styles.row }, [
               h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSpeakerSettings() } }, t('speakerSave')),
               voiceNote === '' ? null : h('span', { key: 'note', style: styles.status }, voiceNote),
+            ]),
+            // Transcript: how it reads, and where a cue is cut.
+            h('span', { key: 'transcripttitle', style: styles.label }, t('transcriptTitle')),
+            h('div', { key: 'normalize', style: styles.row }, [
+              h(Field, {
+                key: 'on',
+                type: 'checkbox',
+                checked: transcriptDraft?.normalize !== false,
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), normalize: event.target.checked })),
+              }),
+              h('span', { key: 'label', style: styles.status }, t('transcriptNormalize')),
+            ]),
+            h('span', { key: 'normalizehint', style: styles.hint }, t('transcriptNormalizeHint')),
+            // The switch decides whether the cue is shaped for a local recogniser or sent whole
+            // to the cloud, so it has to say which one this installation will actually use.
+            h('div', { key: 'cues', style: styles.row }, [
+              h('span', { key: 'min', style: styles.status }, t('transcriptMinCue')),
+              h(Field, {
+                key: 'minvalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.minChunkSeconds ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), minChunkSeconds: Number(event.target.value) })),
+              }),
+              h('span', { key: 'max', style: styles.status }, t('transcriptMaxCue')),
+              h(Field, {
+                key: 'maxvalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.maxChunkSeconds ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), maxChunkSeconds: Number(event.target.value) })),
+              }),
+            ]),
+            h('div', { key: 'vad', style: styles.row }, [
+              h('span', { key: 'hold', style: styles.status }, t('transcriptSilenceHold')),
+              h(Field, {
+                key: 'holdvalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.silenceHoldSeconds ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), silenceHoldSeconds: Number(event.target.value) })),
+              }),
+              h('span', { key: 'rms', style: styles.status }, t('transcriptSilenceRms')),
+              h(Field, {
+                key: 'rmsvalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.silenceRms ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), silenceRms: Number(event.target.value) })),
+              }),
+            ]),
+            h('span', { key: 'cuehint', style: styles.hint }, t('transcriptCueHint')),
+            h('span', { key: 'rulecount', style: styles.hint }, `${t('transcriptRules')}：${(transcriptDraft?.normalizeRules ?? []).length}/${transcriptRules.length}`),
+            h('div', { key: 'transcriptactions', style: styles.row }, [
+              h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveTranscript() } }, t('transcriptSave')),
+              transcriptNote === '' ? null : h('span', { key: 'note', style: styles.status }, transcriptNote),
             ]),
           ]),
         ]) : null,

@@ -63,9 +63,27 @@ import {
   suggestNames,
   learnFromMeeting,
 } from './host-voices.js'
+import { readTranscriptSettings, writeTranscriptSettings } from './host-transcript.js'
+import { DEFAULT_RULES } from './host-text.js'
 
 /** Ceiling for an imported archive: a long meeting's recording travels inside one. */
 const IMPORT_BODY_BYTES = 512 * 1024 * 1024
+
+/**
+ * Whether this installation can recognise speech on the machine at all.
+ *
+ * It decides whether the panel offers the local path or the cloud one — a question the
+ * transcript settings page has to answer honestly rather than showing a switch that cannot work.
+ * @param ctx - Host context.
+ * @returns true when the speech capability is present.
+ */
+function localAsrAvailable(ctx) {
+  try {
+    return ctx.get('speechToText') !== undefined
+  } catch {
+    return false
+  }
+}
 
 /**
  * The vocabulary to send with a cue when cloud recognition is on: the meeting's own terminology,
@@ -568,6 +586,24 @@ export function createHandler(ctx) {
         // panel must be able to say "saved" honestly before it switches away.
         await flushMeetings(ctx)
         sendJson(res, 200, { saved: true })
+        return
+      }
+
+      if (method === 'GET' && route === '/transcript') {
+        // How the transcript is written back, and where the browser half cuts a cue. The panel
+        // needs the cue limits with its own state, so they travel here instead of being
+        // duplicated as constants on both sides.
+        sendJson(res, 200, {
+          transcript: await readTranscriptSettings(),
+          rules: DEFAULT_RULES,
+          local: await localAsrAvailable(ctx),
+        })
+        return
+      }
+
+      if (method === 'POST' && route === '/transcript') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        sendJson(res, 200, { transcript: await writeTranscriptSettings(body) })
         return
       }
 

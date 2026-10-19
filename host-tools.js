@@ -72,6 +72,8 @@ import { meetingForSession } from './host-sessions.js'
 
 import { relabelFromRecording, knownSpeakerLabels } from './host-speaker.js'
 import { centroidsOf } from './host-voices.js'
+import { normalizeText } from './host-text.js'
+import { readTranscriptSettings } from './host-transcript.js'
 
 // Re-export regex constants and seenText so consumers can import from this module.
 export {
@@ -545,11 +547,22 @@ export async function appendChunk(ctx, meeting, pcm, collectedSeconds) {
   }
   const end = collectedSeconds + pcm.length / 2 / SAMPLE_RATE
   if (text !== '') {
+    // Read once per cue: the normalisation rules and cue limits are settings, and a cue that
+    // arrives after a change should follow the change.
+    const transcriptSettings = await readTranscriptSettings().catch(() => null)
     const revised = await correctText(ctx, text, meeting.terms)
     // The raw recognition records what was heard; a correction is stored beside it and never
     // replaces it, so the original stays auditable.
     const segment = { id: `${meeting.segments.length + 1}`, start: collectedSeconds, end, text }
     if (revised !== text) segment.revised = revised
+    // Numbers, dates and clocks written the way a person writes them: a purely local rewrite
+    // (host-text.js), stored BESIDE the recognition rather than replacing it, so the literal
+    // output stays auditable and a later rule change can be re-derived from it. The rules are
+    // a setting, so a meeting can keep numerals exactly as they were said.
+    if (transcriptSettings.normalize) {
+      const normalised = normalizeText(revised, transcriptSettings.normalizeRules)
+      if (normalised !== revised) segment.normalised = normalised
+    }
     meeting.segments.push(segment)
   }
   meeting.seconds = end
@@ -1282,6 +1295,8 @@ export async function readSettings() {
     if (parsed.cloud !== null && typeof parsed.cloud === 'object') empty.cloud = parsed.cloud
     // Same for the speaker section (the speaker settings routes and the voice library read it).
     if (parsed.speaker !== null && typeof parsed.speaker === 'object') empty.speaker = parsed.speaker
+    // Same for the transcript section (normalisation rules and cue limits).
+    if (parsed.transcript !== null && typeof parsed.transcript === 'object') empty.transcript = parsed.transcript
   } catch {
     // Absent or unreadable: nothing is configured yet, which is not an error.
   }

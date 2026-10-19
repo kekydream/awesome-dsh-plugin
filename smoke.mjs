@@ -528,6 +528,40 @@ check('会议记录不落 embedding 与质心', !packedRecord.includes('embeddin
 check('会议记录仍保留发言人姓名与标签', packedRecord.includes('张三') && packedRecord.includes('S1'))
 
 // ---------------------------------------------------------------------------
+// 7h. M4：数字日期规整、切句参数可调
+// ---------------------------------------------------------------------------
+const textTools = await import(`${plugin}/host-text.js`)
+check('中文数字读得对', textTools.chineseNumber('十五') === 15 && textTools.chineseNumber('二十四') === 24 && textTools.chineseNumber('三百零五') === 305)
+check('数字写得像人写的', textTools.numeralOf(15) === '十五' && textTools.numeralOf(105) === '一百零五')
+check('规整把日期、百分比、金额写成平时写法', textTools.normalizeText('二零二六年十月十九号') === '2026年10月19日'
+  && textTools.normalizeText('完成百分之三十') === '完成30%'
+  && textTools.normalizeText('预算三千五百元') === '预算3500元'
+  && textTools.normalizeText('下午三点半') === '下午3点半')
+check('规整不碰人名与版本号', textTools.normalizeText('张三和李四都在') === '张三和李四都在'
+  && textTools.normalizeText('版本二点零') === '版本二点零'
+  && textTools.normalizeText('十年之前') === '十年之前')
+check('关掉规则后一字不动', textTools.normalizeText('二零二六年十月十九号', []) === '二零二六年十月十九号')
+
+const transcriptRead = await call('/transcript')
+check('实录设置给出默认规整与切句参数', transcriptRead.status === 200
+  && transcriptRead.value.transcript.normalize === true
+  && transcriptRead.value.transcript.maxChunkSeconds === 5
+  && Array.isArray(transcriptRead.value.rules) && transcriptRead.value.rules.length >= 5)
+check('实录设置诚实报告本机是否有语音能力', typeof transcriptRead.value.local === 'boolean')
+const transcriptWrite = await call('/transcript', { normalize: false, minChunkSeconds: 0.8, maxChunkSeconds: 12, silenceHoldSeconds: 0.3 }, 'POST')
+check('切句参数可写入并回读', transcriptWrite.status === 200
+  && transcriptWrite.value.transcript.maxChunkSeconds === 12
+  && transcriptWrite.value.transcript.silenceHoldSeconds === 0.3
+  && (await call('/transcript')).value.transcript.minChunkSeconds === 0.8)
+check('越界的切句参数被夹到合法区间', (await call('/transcript', { maxChunkSeconds: 999, silenceRms: 99 }, 'POST')).value.transcript.maxChunkSeconds <= 30)
+check('最短大于最长时自动对齐', (await call('/transcript', { minChunkSeconds: 9, maxChunkSeconds: 3 }, 'POST')).value.transcript.maxChunkSeconds >= 9)
+check('不认识的规整规则被丢弃', (await call('/transcript', { normalizeRules: ['percent', '不存在'] }, 'POST')).value.transcript.normalizeRules.length === 1)
+await call('/transcript', { normalize: true, normalizeRules: textTools.DEFAULT_RULES, minChunkSeconds: 1.2, maxChunkSeconds: 5, silenceRms: 0.012, silenceHoldSeconds: 0.5 }, 'POST')
+const clientForM4 = await fs.readFile(join(here, 'client.js'), 'utf8')
+check('浏览器半边的切句参数来自设置而不是写死', clientForM4.includes('applyCueSettings') && clientForM4.includes('CUES.maxSeconds'))
+check('规整结果与被识别的原文并存', (await fs.readFile(join(here, 'host-tools.js'), 'utf8')).includes('segment.normalised = normalised'))
+
+// ---------------------------------------------------------------------------
 // 8. Agent 工具
 // ---------------------------------------------------------------------------
 const agent = { agent: { session: { id: 'session-m-brief' } } }
