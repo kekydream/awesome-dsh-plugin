@@ -68,7 +68,7 @@ grep -n 'dsh-meeting-room' <profile>/package.json      # 应出现在 dsh.profil
 # 2) 这一层真的进了配置
 dsh --profile <你的profile名> --dump-config            # 应出现一层 "# == dsh-meeting-room"
 # 3) 宿主代码齐全（缺 host-*.js 就是装到了旧包）
-ls node_modules/dsh-meeting-room/host-*.js             # 应列出 10 个
+ls node_modules/dsh-meeting-room/host-*.js             # 应列出 11 个
 ```
 
 **安装后需要重启 Harness**：宿主半边每个进程只加载一次。
@@ -89,7 +89,7 @@ ls node_modules/dsh-meeting-room/host-*.js             # 应列出 10 个
 
    自检一行命令（在插件目录里）：
    ```sh
-   ls node_modules/dsh-meeting-room/host-*.js   # 应当列出 10 个 host-*.js
+   ls node_modules/dsh-meeting-room/host-*.js   # 应当列出 11 个 host-*.js
    ```
 
 3. **`sherpa-onnx-node` 的 peer 警告可以忽略**。profile 的 pnpm 通常

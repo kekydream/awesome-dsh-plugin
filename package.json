@@ -51,6 +51,7 @@
     "THIRD-PARTY-NOTICES.md",
     "README.md",
     "CHANGELOG.md",
+    "PUBLISHING.md",
     "DESIGN.md",
     "FEATURES.md",
     "TESTING.md",
@@ -63,6 +64,14 @@
   },
   "peerDependencies": {
     "sherpa-onnx-node": "1.13.8"
+  },
+  "peerDependenciesMeta": {
+    "sherpa-onnx-node": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dsh": {
     "bundle": {
