@@ -153,6 +153,11 @@ check('标签集随会议落盘', Array.isArray(storedLabels.speakerLabels) && s
 check('日周期', tools.periodOf('briefing', started) === new Date(started).toLocaleDateString('sv-SE'))
 check('ISO 周周期', /^\d{4}-W\d{2}$/.test(tools.periodOf('weekly', started)))
 check('月周期', /^\d{4}-\d{2}$/.test(tools.periodOf('monthly', started)))
+// The reaper drops meetings that are still empty (by design: nothing is persisted). That
+// makes any reference taken earlier racy, so the section asks the host for the meeting again
+// rather than assuming it survived — a flaky suite is worse than no suite.
+const reEnsured = await call('/ensure', { sessionId: 's-root' }, 'POST')
+if (typeof reEnsured.value.meetingId === 'string' && reEnsured.value.meetingId !== '') owned.id = reEnsured.value.meetingId
 const k = await call('/kind', { meetingId: owned.id, kind: 'review', title: '复盘 · 今天' }, 'POST')
 check('类型与名称写入并派生周期', k.status === 200 && k.value.kind === 'review' && k.value.period !== '' && k.value.title === '复盘 · 今天')
 check('未知会议的类型写入被拒', (await call('/kind', { meetingId: 'nope', kind: 'review' }, 'POST')).status === 404)
@@ -476,6 +481,57 @@ await persistence.restoreMeetings(ctx)
 check('重启后恢复会议', meetings.has('m-brief') && meetings.get('m-brief').tasks.length >= 1)
 
 await fs.rm(tmp, { recursive: true, force: true })
+
+// ---------------------------------------------------------------------------
+// 0. 发布清单：装出去的包里必须带齐代码
+// ---------------------------------------------------------------------------
+// A published package once shipped without `host-*.js`: `files` listed only a few of them, so
+// the host half died at import time on the user's machine while every local test passed — the
+// files were all present here. This walks the real dependency graph and insists that the
+// manifest covers it, which is the only check that would have caught it.
+const publishManifest = JSON.parse(await fs.readFile(join(here, 'package.json'), 'utf8'))
+
+/** The subset of glob syntax npm's `files` uses: `*` inside one path segment. */
+function coveredByFiles(relative) {
+  const target = relative.replace(/\\/gu, '/')
+  return (publishManifest.files ?? []).some((pattern) => {
+    const expression = pattern
+      .replace(/[.+^${}()|[\]\\]/gu, '\\$&')
+      .replace(/\*/gu, '[^/]*')
+    return new RegExp(`^${expression}$`, 'u').test(target)
+  })
+}
+
+/** Every relative specifier one file imports. */
+async function relativeImportsOf(file) {
+  const text = await fs.readFile(join(here, file), 'utf8')
+  const found = new Set()
+  for (const match of text.matchAll(/from\s+'(\.[^']+)'/gu)) found.add(match[1].replace(/^\.\//u, ''))
+  for (const match of text.matchAll(/import\(\s*`\$\{plugin\}\/([^`]+)`\s*\)/gu)) found.add(match[1])
+  return [...found]
+}
+
+const shipped = new Set(['index.js', 'client.js', 'package.json', 'cordis.patch.yml'])
+for (const file of await fs.readdir(here)) {
+  if (/\.(js|mjs|py)$/u.test(file)) shipped.add(file)
+  if (file === 'locale') for (const inner of await fs.readdir(join(here, 'locale'))) shipped.add(`locale/${inner}`)
+}
+const missingFromFiles = []
+for (const file of shipped) {
+  for (const specifier of await relativeImportsOf(file)) {
+    if (specifier.startsWith('node:')) continue
+    // A bare specifier is a dependency, not a file of this package.
+    if (!specifier.startsWith('.') && !specifier.endsWith('.js') && !specifier.endsWith('.json')) continue
+    const target = specifier.replace(/^\.\//u, '')
+    if (!coveredByFiles(target)) missingFromFiles.push(`${file} → ${specifier}`)
+  }
+}
+check('发布清单覆盖 index.js 引用的每个兄弟模块', missingFromFiles.length === 0, missingFromFiles.join(' | '))
+check('发布清单用通配覆盖 host-*.js', coveredByFiles('host-routes.js') && coveredByFiles('host-constants.js'))
+check('发布清单覆盖客户端与两个 worker', coveredByFiles('client.js') && coveredByFiles('speaker-worker.js') && coveredByFiles('handwriting-worker.js'))
+check('发布清单漏掉的文件一个都没有（逐文件核对）', (await fs.readdir(here)).filter((file) => /\.js$/u.test(file) && !coveredByFiles(file)).length === 0,
+  (await fs.readdir(here)).filter((file) => /\.js$/u.test(file) && !coveredByFiles(file)).join(', '))
+
 const failed = results.filter(([, ok]) => !ok)
 console.log(`\n${results.length - failed.length}/${results.length} passed`)
 if (failed.length > 0) console.log('failed:', failed.map(([name]) => name).join(' | '))
