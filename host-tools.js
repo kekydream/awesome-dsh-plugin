@@ -1466,14 +1466,28 @@ export async function pushToPeople(meeting, settings) {
  * @param kinds - Robot kinds to send to.
  * @returns one result per robot.
  */
-export async function pushTasks(meeting, kinds) {
+export async function pushTasks(meeting, kinds, only = '') {
   const settings = await readSettings()
-  const confirmed = meeting.tasks.filter((task) => task.status === 'confirmed').length
-  if (confirmed === 0) return { sent: [], results: [], error: '没有已确认的任务可推送：请先在「工作安排」里确认' }
+  // One assignment can be sent on its own — a row's own button — and the confirmed rule holds
+  // either way: an unconfirmed assignment is never sent.
+  const selected = typeof only === 'string' && only !== ''
+    ? meeting.tasks.filter((task) => task.id === only)
+    : meeting.tasks
+  const confirmed = selected.filter((task) => task.status === 'confirmed')
+  if (confirmed.length === 0) {
+    return {
+      sent: [],
+      results: [],
+      error: typeof only === 'string' && only !== ''
+        ? '这条工作安排还没有确认，不能发送：请先勾选确认'
+        : '没有已确认的任务可推送：请先在「工作安排」里确认',
+    }
+  }
+  const pending = { ...meeting, tasks: selected }
   const results = []
-  if (settings.mode === 'group' || settings.mode === 'both') results.push(...await pushToGroups(meeting, kinds, settings))
-  if (settings.mode === 'work' || settings.mode === 'both') results.push(...await pushToPeople(meeting, settings))
-  return { sent: kinds, results, error: '', mode: settings.mode }
+  if (settings.mode === 'group' || settings.mode === 'both') results.push(...await pushToGroups(pending, kinds, settings))
+  if (settings.mode === 'work' || settings.mode === 'both') results.push(...await pushToPeople(pending, settings))
+  return { sent: kinds, results, error: '', mode: settings.mode, tasks: confirmed.length }
 }
 
 /**

@@ -147,7 +147,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubOpenMeetingHint: '切换到这场会议的对话，并在右侧打开它的会议记录',
       hubOpeningMeeting: '正在打开这场会议',
       pushNow: '一键同步到钉钉/企业微信',
-      pushNowHint: '按「会议管理 → 设置」里选择的推送方式，发送已确认的工作安排',
+      pushNowHint: '按「会议管理 → 设置」里选择的推送方式，发送已确认的工作安排（查看历史会议时发送的是该会议的）',
+      pushOne: '发送这条',
+      pushOneHint: '只发送这一条已确认的工作安排',
+      pushOneNeedsConfirm: '这条还没有确认：勾选后才能发送',
       pushed: '已推送',
       packageSaving: '正在打包这场会议',
       packageSaved: '已保存到文件',
@@ -363,7 +366,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: '会议术语',
       notesToggle: '手写笔记',
       helpToggle: '使用说明',
-      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听三个按钮，或在右侧「其他角色」里自己写）、选会议类型（通用／晨会／复盘会／例会／总结会）。选类型会**自动把标题填成「类型 · 今天日期」**，也可以自己改；不想命名就点「暂不命名并开始记录」。\n· 一个会话对应一场会议；分支出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟会提醒一次（不会自动停止）。\n· 状态行显示已录时长与当前发言人；所有按钮都在面板最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你往上滚就自动取消跟随，并出现「回到最新」可以一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx；两者都会弹出浏览器的下载保存对话框，纪要同时留在会议里可随时打开。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。负责人与发言人姓名都从「会议管理 → 人员」的名册（含从钉钉同步过来的人）里取候选。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n· 工作安排页签的「一键同步到钉钉/企业微信」按「会议管理 → 设置」里选的推送方式（群机器人／工作通知／两者）把**已确认**的任务发出去；没有配置目标时会告诉你原因。\n\n【发言人】\n· 每个声纹标签直接填姓名：可以自己输入，也可以从名册下拉里选（输入即过滤）。\n· 「重新识别发言人」会从录音重新判断，用于识别当时模型还没就绪、或长会议只补标了后段的情况。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时是只读的（历史内容不会被改动），可「打开原会话」或「返回本会话」。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【保存为文件 · 导入 · 关于】\n· 「更多 → 保存为文件」把这场会议打成**一个 zip 工程包**：会议记录、录音、以及纪要/图片等产出都在里面；右下角会显示进度提示（打包中 → 百分比 → 已保存到文件）。\n· 「会议管理 → 记录 → 导入会议」选择这样的 zip，就能把它导入本机（导入为新会议，不覆盖已有记录、不挂在任何会话上，重名文件自动改名），因此可以把一场会议带到另一台 DSH 上打开。\n· 「更多 → 关于」显示本机实际安装的**版本号**、作者与邮箱；发现 bug 或想提改进意见，点「发邮件」直接写给我，附上版本号与操作步骤即可。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要；「刷新」重新读取，「导入会议」导入工程包；点名称可在下方回看实录与播放。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式 —— 工作安排的「一键同步」就按这里的选择发送。\n· 人员：共享名单（姓名／手机／用户 ID），可手工维护，也可从钉钉通讯录同步部门；这份名单同时是任务负责人与发言人姓名的候选来源。\n· 术语：与「更多 → 会议术语」同一份内容。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
+      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听三个按钮，或在右侧「其他角色」里自己写）、选会议类型（通用／晨会／复盘会／例会／总结会）。选类型会**自动把标题填成「类型 · 今天日期」**，也可以自己改；不想命名就点「暂不命名并开始记录」。\n· 一个会话对应一场会议；分支出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟会提醒一次（不会自动停止）。\n· 状态行显示已录时长与当前发言人；所有按钮都在面板最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你往上滚就自动取消跟随，并出现「回到最新」可以一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx；两者都会弹出浏览器的下载保存对话框，纪要同时留在会议里可随时打开。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。负责人与发言人姓名都从「会议管理 → 人员」的名册（含从钉钉同步过来的人）里取候选。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n· 工作安排页签的「一键同步到钉钉/企业微信」按「会议管理 → 设置」里选的推送方式（群机器人／工作通知／两者）把**已确认**的任务发出去；没有配置目标时会告诉你原因；每条工作安排右侧还有「发送这条」，可以只发其中一条。\n\n【发言人】\n· 每个声纹标签直接填姓名：可以自己输入，也可以从名册下拉里选（输入即过滤）。\n· 「重新识别发言人」会从录音重新判断，用于识别当时模型还没就绪、或长会议只补标了后段的情况。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时是只读的（历史内容不会被改动），可「打开原会话」或「返回本会话」。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【保存为文件 · 导入 · 关于】\n· 「更多 → 保存为文件」把这场会议打成**一个 zip 工程包**：会议记录、录音、以及纪要/图片等产出都在里面；右下角会显示进度提示（打包中 → 百分比 → 已保存到文件）。\n· 「会议管理 → 记录 → 导入会议」选择这样的 zip，就能把它导入本机（导入为新会议，不覆盖已有记录、不挂在任何会话上，重名文件自动改名），因此可以把一场会议带到另一台 DSH 上打开。\n· 「更多 → 关于」显示本机实际安装的**版本号**、作者与邮箱；发现 bug 或想提改进意见，点「发邮件」直接写给我，附上版本号与操作步骤即可。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要；「刷新」重新读取，「导入会议」导入工程包；点名称可在下方回看实录与播放。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式 —— 工作安排的「一键同步」就按这里的选择发送。\n· 人员：共享名单（姓名／手机／用户 ID），可手工维护，也可从钉钉通讯录同步部门；这份名单同时是任务负责人与发言人姓名的候选来源。\n· 术语：与「更多 → 会议术语」同一份内容。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
       inkNote: '笔记文字',
       documents: '会议文档',
       openDocument: '查看',
@@ -426,7 +429,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubOpenMeetingHint: 'Switch to this meeting\'s conversation and open its record in the right panel',
       hubOpeningMeeting: 'Opening this meeting',
       pushNow: 'Send to DingTalk / WeCom',
-      pushNowHint: 'Sends the confirmed assignments the way the management page\'s settings chose',
+      pushNowHint: 'Sends the confirmed assignments the way Meeting management → Settings chose (for a past meeting, that meeting\'s own assignments)',
+      pushOne: 'Send this one',
+      pushOneHint: 'Sends only this confirmed assignment',
+      pushOneNeedsConfirm: 'Not confirmed yet: tick it before sending',
       pushed: 'Sent',
       packageSaving: 'Packaging this meeting',
       packageSaved: 'Saved to file',
@@ -642,7 +648,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: 'Terms',
       notesToggle: 'Handwritten note',
       helpToggle: 'Help',
-      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer buttons, or your own words under Other role) and the type (general / briefing / review / weekly / monthly). Choosing a type fills the title as "type · today" and you can still edit it; "Skip naming and start recording" begins without one.\n· One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with one reminder after 10 minutes (never an automatic stop).\n· The status line shows elapsed time and who is speaking. Every control lives in the top row of the panel.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority. Owners and speaker names are suggested from the roster on Meeting management → People, including the people synced from DingTalk.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n· "Send to DingTalk / WeCom" in the tasks tab sends the CONFIRMED assignments the way Meeting management → Settings chose (group robot, work notification, or both), and says why when nothing is configured.\n\n[Speakers]\n· Each voice label takes a name: type it, or pick from the roster dropdown (typing filters it).\n· "Identify speakers again" re-reads the recording — for a meeting whose model was not ready, or a long one the stop-time backfill only partly covered.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session".\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Save as file · Import · About]\n· More → Save as file packs this meeting into ONE zip project: the record, the recording, and the artifacts (minutes, images). A notice in the bottom-right corner tracks it (packaging → percentage → saved to file).\n· Meeting management → Records → Import meeting takes such a zip back in (as a NEW meeting: nothing is overwritten, it belongs to no conversation, and clashing file names are renamed), which is how a meeting travels to another DSH.\n· More → About shows the version actually installed here, the author and the address; use "Email" to report a problem or an idea, with the version and what you did.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview; "Refresh" re-reads the list and "Import meeting" brings in a package; click a name to review its transcript and recording below.\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed — the tasks tab\'s one-click send follows this choice.\n· People: the shared roster (name / phone / user id), maintained by hand or synced from DingTalk departments; it is also where task owners and speaker names are suggested from.\n· Terms: the same list as More → Meeting terms.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
+      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer buttons, or your own words under Other role) and the type (general / briefing / review / weekly / monthly). Choosing a type fills the title as "type · today" and you can still edit it; "Skip naming and start recording" begins without one.\n· One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with one reminder after 10 minutes (never an automatic stop).\n· The status line shows elapsed time and who is speaking. Every control lives in the top row of the panel.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority. Owners and speaker names are suggested from the roster on Meeting management → People, including the people synced from DingTalk.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n· "Send to DingTalk / WeCom" in the tasks tab sends the CONFIRMED assignments the way Meeting management → Settings chose (group robot, work notification, or both), and says why when nothing is configured. Each row also has "Send this one" for a single assignment.\n\n[Speakers]\n· Each voice label takes a name: type it, or pick from the roster dropdown (typing filters it).\n· "Identify speakers again" re-reads the recording — for a meeting whose model was not ready, or a long one the stop-time backfill only partly covered.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session".\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Save as file · Import · About]\n· More → Save as file packs this meeting into ONE zip project: the record, the recording, and the artifacts (minutes, images). A notice in the bottom-right corner tracks it (packaging → percentage → saved to file).\n· Meeting management → Records → Import meeting takes such a zip back in (as a NEW meeting: nothing is overwritten, it belongs to no conversation, and clashing file names are renamed), which is how a meeting travels to another DSH.\n· More → About shows the version actually installed here, the author and the address; use "Email" to report a problem or an idea, with the version and what you did.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview; "Refresh" re-reads the list and "Import meeting" brings in a package; click a name to review its transcript and recording below.\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed — the tasks tab\'s one-click send follows this choice.\n· People: the shared roster (name / phone / user id), maintained by hand or synced from DingTalk departments; it is also where task owners and speaker names are suggested from.\n· Terms: the same list as More → Meeting terms.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
       inkNote: 'Note text',
       documents: 'Meeting documents',
       openDocument: 'Open',
@@ -2385,19 +2391,22 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [ensureMeeting, meta.title, t, toast, updateToast])
 
       /**
-       * Send the confirmed assignments out. The host reads the management page's robot
-       * settings and picks the route itself: group robot, work notification, or both.
+       * Send confirmed assignments out. The host reads the management page's robot settings
+       * and picks the route itself: group robot, work notification, or both.
+       * @param taskId - one assignment to send, or '' for every confirmed one.
        */
-      const pushTasksNow = React.useCallback(async () => {
+      const pushTasksNow = React.useCallback(async (taskId = '') => {
         setError('')
         setNote('')
-        const id = await ensureMeeting()
+        // While a past meeting is open, THAT meeting is what the person is looking at — and
+        // what its own send buttons must act on.
+        const id = viewed !== null ? viewed.meetingId : await ensureMeeting()
         if (id === '') {
           setError(t('needSession'))
           return
         }
         try {
-          const reply = await post('/push', { meetingId: id })
+          const reply = await post('/push', { meetingId: id, taskId })
           if (typeof reply.error === 'string' && reply.error !== '') {
             setError(reply.error)
             return
@@ -2412,11 +2421,12 @@ registerProcessor('meeting-capture', MeetingCapture)
             setError(`${t('pushNothingConfigured')}${first === undefined ? '' : ` · ${first.message}`}`)
             return
           }
-          setNote(`${t('pushed')} · ${mode} · ${sent}`)
+          const count = typeof reply.tasks === 'number' ? reply.tasks : sent
+          setNote(`${t('pushed')} · ${mode} · ${count}`)
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
         }
-      }, [ensureMeeting, t])
+      }, [ensureMeeting, t, viewed])
 
       /** Write the meeting up as a minutes document the user can keep or send on. */
       const writeMinutes = React.useCallback(async (format = 'md') => {
@@ -3938,9 +3948,10 @@ registerProcessor('meeting-capture', MeetingCapture)
         bodyTab !== 'tasks' ? null : h('div', { key: 'tasks', style: styles.list }, [
           h('div', { key: 'title', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, `${t('tasks')} (${tasks.filter((task) => task.status === 'confirmed').length}/${tasks.length})`),
-            // One click sends the confirmed assignments out, in the way the management page's
-            // robot settings chose (group robot, work notification, or both).
-            viewed !== null ? null : h(Btn, {
+            // One click sends EVERY confirmed assignment out, in the way the management page's robot
+            // settings chose — including while a past meeting is open, which sends that past
+            // meeting's own assignments.
+            h(Btn, {
               key: 'push',
               type: 'button',
               style: styles.button,
@@ -4037,6 +4048,16 @@ registerProcessor('meeting-capture', MeetingCapture)
                 title: t('priority'),
                 onChange: (event) => { void editEntry('task', task.id, { priority: event.target.value }) },
               }, TASK_PRIORITY_VALUES.map((value) => h('option', { key: value, value }, t(PRIORITY_KEYS[value])))),
+              h(Btn, {
+                key: 'pushone',
+                type: 'button',
+                style: styles.smallButton,
+                // Only confirmed work is ever sent, so an unconfirmed row says why instead of
+                // offering a button that would be refused.
+                disabled: task.status !== 'confirmed',
+                title: task.status === 'confirmed' ? t('pushOneHint') : t('pushOneNeedsConfirm'),
+                onClick: () => { void pushTasksNow(task.id) },
+              }, t('pushOne')),
               h(Btn, {
                 key: 'del',
                 type: 'button',
@@ -4180,6 +4201,8 @@ registerProcessor('meeting-capture', MeetingCapture)
               h('span', { key: 'version', style: styles.fieldBlock }, `${t('aboutVersion')}：${about.version === '' ? '—' : about.version}`),
               h('span', { key: 'author', style: styles.fieldBlock }, `${t('aboutAuthor')}：${ABOUT_AUTHOR}（${t('aboutLab')}）`),
               h('span', { key: 'license', style: styles.fieldBlock }, `${t('aboutLicense')}：MIT`),
+              // The address in the body too, so it can be read and copied without the button.
+              h('span', { key: 'email', style: styles.fieldBlock }, `${t('aboutMail')}：${ABOUT_EMAIL}`),
             ]),
             h('p', { key: 'feedback', style: styles.note }, t('aboutFeedback')),
           ],

@@ -716,7 +716,13 @@ export function createHandler(ctx) {
           return
         }
         const asked = Array.isArray(body.kinds) ? body.kinds.filter((kind) => WEBHOOK_KINDS.includes(kind)) : WEBHOOK_KINDS
-        const outcome = await pushTasks(meeting, asked.length === 0 ? WEBHOOK_KINDS : asked)
+        // `taskId` narrows the send to one assignment; absent, every confirmed one goes.
+        const only = typeof body.taskId === 'string' ? body.taskId : ''
+        if (only !== '' && !(meeting.tasks ?? []).some((task) => task.id === only)) {
+          sendJson(res, 400, { error: 'unknown task' })
+          return
+        }
+        const outcome = await pushTasks(meeting, asked.length === 0 ? WEBHOOK_KINDS : asked, only)
         sendJson(res, outcome.error === '' ? 200 : 400, outcome)
         return
       }

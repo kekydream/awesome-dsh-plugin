@@ -204,6 +204,20 @@ check('核销会回一句确认', typeof closed === 'string' && closed.includes(
 check('草稿状态不因完成而改变', brief.tasks[0].status === 'draft')
 
 // ---------------------------------------------------------------------------
+// 5b. 单条工作安排的发送（每条自己的按钮）
+// ---------------------------------------------------------------------------
+const unknownTask = await call('/push', { meetingId: 'm-brief', taskId: 'nope' }, 'POST')
+check('指定不存在的工作安排被拒', unknownTask.status === 400 && String(unknownTask.value.error).includes('unknown task'))
+const unconfirmed = await call('/push', { meetingId: 'm-brief', taskId: 't1' }, 'POST')
+check('未确认的单条不能发送并说明原因', unconfirmed.status === 400 && String(unconfirmed.value.error).includes('确认'))
+brief.tasks[0].status = 'confirmed'
+const oneSent = await call('/push', { meetingId: 'm-brief', taskId: 't1' }, 'POST')
+check('已确认的单条可以发送且报告条数', oneSent.status === 200 && oneSent.value.error === '' && oneSent.value.tasks === 1)
+brief.tasks.push({ id: 't2', title: '另一件事', owner: '李四', due: '', priority: 'normal', status: 'confirmed', origin: 'agent', done: false })
+const bothSent = await call('/push', { meetingId: 'm-brief' }, 'POST')
+check('不带 taskId 时发送全部已确认的', bothSent.status === 200 && bothSent.value.tasks === 2)
+
+// ---------------------------------------------------------------------------
 // 6. 评分与导出
 // ---------------------------------------------------------------------------
 const monthly = seed('m-month', { kind: 'monthly', period: tools.periodOf('monthly', started), title: '月度总结' })
@@ -229,9 +243,14 @@ if (!hasPython) {
 // ---------------------------------------------------------------------------
 // 6b. 推送工作安排
 // ---------------------------------------------------------------------------
-const refused = await call('/push', { meetingId: 'm-brief' }, 'POST')
+// A meeting of its own for the "nothing confirmed yet" case: section 5b already confirmed
+// m-brief's assignment, and this check is about the state before any confirmation.
+seed('m-push-draft', {
+  title: '只有草稿任务',
+  tasks: [{ id: 'd1', title: '还没确认的事', owner: '', due: '', priority: 'normal', status: 'draft', origin: 'agent', done: false }],
+})
+const refused = await call('/push', { meetingId: 'm-push-draft' }, 'POST')
 check('没有已确认任务时推送被拒并说明原因', refused.status === 400 && String(refused.value.error).includes('确认'))
-brief.tasks[0].status = 'confirmed'
 const attempted = await call('/push', { meetingId: 'm-brief' }, 'POST')
 check('已确认任务时按设置的分发方式执行', attempted.status === 200 && typeof attempted.value.mode === 'string' && Array.isArray(attempted.value.results))
 check('未配置机器人时每个目标都带回失败原因，而不是假成功', attempted.value.results.length > 0 && attempted.value.results.every((entry) => entry.ok === false && String(entry.message) !== ''))
