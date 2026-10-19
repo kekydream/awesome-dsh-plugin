@@ -73,7 +73,7 @@ window.__ModuleLoader__.load({
      * Cue shaping: the defaults, replaced at runtime by the settings the host reports (a longer
      * cue means fewer requests, a shorter silence hold means a snappier transcript).
      */
-    const CUES = { minSeconds: 1.2, maxSeconds: 5, silenceRms: 0.012, silenceHoldSeconds: 0.5 }
+    const CUES = { minSeconds: 1.2, maxSeconds: 12, silenceRms: 0.012, silenceHoldSeconds: 0.7 }
 
     /** Shortest audio a cue may hold; below this a pause is not treated as an endpoint. */
     const MIN_CHUNK_SECONDS = 1.2
@@ -83,7 +83,7 @@ window.__ModuleLoader__.load({
      * recognizer is request/response, so this ceiling — not a partial hypothesis — is what
      * decides how live the transcript feels during a long uninterrupted sentence.
      */
-    const MAX_CHUNK_SECONDS = 5
+    const MAX_CHUNK_SECONDS = 12
 
     /**
      * Adopt the cue settings the host reports. The capture loop reads CUES on every block, so
@@ -109,7 +109,7 @@ window.__ModuleLoader__.load({
     const SILENCE_RMS = 0.012
 
     /** Silence that must accumulate before a cue is closed. */
-    const SILENCE_HOLD_SECONDS = 0.5
+    const SILENCE_HOLD_SECONDS = 0.7
 
     /**
      * Worklet source, installed from a Blob URL so the client bundle needs no asset.
@@ -166,7 +166,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubHowTo: '录制在会话作用域进行：它需要会话身份，才能让 Agent 用 meeting_read 读到这场实录。',
       hubRecords: '会议记录（每场会议一条）',
       hubRefresh: '刷新',
+        hubLoadMore: '加载更早的会议',
       hubEmpty: '还没有会议记录。开一场会后就会出现在这里。',
+        hubFilterEmpty: '这个类型下还没有会议。',
+        hubAll: '全部',
+        hubGroupBy: '分组',
+        hubGroupDay: '按天',
+        hubGroupWeek: '按周',
+        hubGroupMonth: '按月',
+        hubTasksDone: '已完成',
       hubSend: '发送到新对话',
       hubSendHint: '新建一个对话，把这场会议的实录放进去，确认后发送',
       hubOpenSession: '打开会议',
@@ -211,7 +219,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       point_question: '待定',
       taskDraft: '待确认',
       taskConfirmed: '已确认',
-      noAnalysis: '还没有要点或工作安排。点下面的按钮在本地生成。',
+      noAnalysis: '还没有要点或工作安排。点上面的「本地提取」按规则生成草稿，或在会话里让 Agent 精修。',
       pointsNoRecording: '本场还没有实录。点上方「开始记录」，也可以在下面直接写一条要点。',
       tasksNoRecording: '本场还没有实录。点上方「开始记录」，也可以在下面直接写一条工作安排。',
       tasksEmpty: '还没有工作安排。可以直接添加，或让 Agent 依据实录写进本会；勾选表示人已确认，确认后才能推送。',
@@ -220,6 +228,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       taskTextRequired: '请先写工作安排的内容',
       originManual: '手填',
       kindGeneral: '通用',
+        kindAdhoc: '临时会议',
       kindBriefing: '晨会',
       kindReview: '复盘会',
       kindWeekly: '例会',
@@ -241,6 +250,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardDiscard: '不保存并打开',
       meetingNameHint: '选一个常用名称，或自己写一个；名称会显示在面板、实录抬头与纪要里。',
       meetingNamePlaceholder: '会议名称，如「晨会 · 10月18日」',
+        meetingTitleHint: '改完点别处即保存；类型决定周期归属与一键提炼模板',
+        seriesPrev: '上一场',
+        seriesNext: '下一场',
+        seriesNone: '本类型没有更早/更晚的会议',
       meetingNameSkip: '暂不命名并开始记录',
       meetingNameNone: '（未命名）',
       periodNone: '（无周期）',
@@ -248,13 +261,28 @@ registerProcessor('meeting-capture', MeetingCapture)
       scoresPrefill: '统计预填',
       scoresExportCsv: '导出 CSV',
       scoresExportXlsx: '导出 Excel',
-      scoresHint: '完成率可按本月任务统计预填；质量与学习由人打分（1–10）。勾选＝已确认。总分＝质量 40% ＋ 完成率 40% ＋ 学习 20%。',
+      scoresHint: '完成率可按本月任务统计预填；质量与学习由人打分（1–10）。勾选＝已确认（需先填依据）。总分按「会议管理 → 设置 → 评分权重」计算，默认质量 40% ＋ 完成率 40% ＋ 学习 20%。',
+        scoreBasisPlaceholder: '依据：实录原文或任务 id（多条用；分隔）',
+        scoreBasisRequired: '先填一条依据（实录原文或任务 id）才能确认',
+        scoreBasisMissing: '缺依据',
       scoresAddPerson: '添加人员',
       scoreHours: '课时',
       scoreCompletion: '完成率 %',
       scoreQuality: '工作质量 1–10',
+        scoreWeightTitle: '评分权重',
+        scoreWeightHint: '月度总结会的总分按这三项加权：质量（1–10 换算百分制）、完成率（百分制）、学习（1–10 换算百分制）。三项之和须为 100%，保存后对已有评分同样生效。',
+        scoreWeightSum: '合计',
+        scoreWeightSave: '保存权重',
+        scoreWeightSaved: '权重已保存，之后重算的总分都按它算',
+        templateTitle: '一键提炼模板',
+        templateHint: '每种会议的一键提炼发给 Agent 的原文；留空使用内置文案。可用 {meetingId}、{title}、{period} 占位。',
+        templateSave: '保存模板',
+        templateSaved: '模板已保存',
       scoreLearn: '学习参与 1–10',
       scoreTotal: '总分',
+        scorePerson: '姓名',
+        scoreTotalAuto: '留空=按权重自动算',
+        scoreTotalManual: '已手改；清空回到自动',
       scoreHighlight: '亮点',
       scoreImprove: '待改进',
       scoreBasis: '依据',
@@ -268,6 +296,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       pausedStatus: '已暂停 · 已录',
       pauseLongHint: '仍在暂停（已超过 10 分钟）',
       carryOverPrompt: '昨天复盘会留下了 {count} 项未完成/遗留事项：\n{list}\n\n请在本次晨会实录里对照这些事项，决定今天派给谁、什么时候完成，并用 meeting_write 把结果写成本会 tasks（草稿，等人确认）。只依据实录与上面的清单，不要编造。',
+        distillBriefing: '一键提炼部署',
+        distillBriefingPrompt: '请整理这场晨会（{title}，{period}，meetingId={meetingId}）的部署安排：先用 meeting_read 读取本场实录，再用 meeting_write 把要点与工作写进这场会议（people 不填，tasks 的 owner/due 按实录写清）。只依据实录，不要编造。完成后在对话里用三句话说明今天谁做什么。',
+        distillReview: '一键复盘',
+        distillReviewPrompt: '请复盘这场会议（{title}，{period}，meetingId={meetingId}）：先用 meeting_read 读取实录，提炼结论、风险、待办与未决问题，再用 meeting_write 把要点与工作写进这场会议（tasks 到人到时间）。只依据实录；聊天里给出三条最重要的结论。',
+        distillWeekly: '一键整理本周',
+        distillWeeklyPrompt: '请整理这场例会（{title}，{period}，meetingId={meetingId}）：先用 meeting_query 取本周（period="this-week"）的晨会与复盘会，再结合本场实录，用 meeting_write 把本周进展、风险与下周计划写成要点和任务（写回 meetingId={meetingId}）。只依据记录，不要编造；聊天里给出本周三条结论。',
+        distillMonthly: '一键生成评分',
+        distillMonthlyPrompt: '请为这场月度总结会（{title}，{period}，meetingId={meetingId}）生成评分建议：先用 meeting_query 取本月（period="this-month"）的会议与任务完成情况，按人给出完成率、质量、学习三项建议分数，每一项都带依据（实录原文或任务 id），再用 meeting_write 写入这场会议的 scores（草稿，等人确认）。没有依据就不打分，并在回复里说明缺什么。',
+        extractNow: '本地提取',
+        extractDone: '已提取',
       historyPlaceholder: '搜索历史会议（名称 / 日期 / 类型 / 实录关键词）',
       historyOpen: '打开会议',
       historyLoading: '正在读取…',
@@ -294,7 +332,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       ownerPh: '负责人',
       duePh: '时间',
       originRule: '规则',
-      originAgent: 'AI',
+      originAgent: 'Agent',
       ink: '手写笔记',
       inkHint: '用笔或鼠标在下面书写；Windows 触屏笔的橡皮端会被识别为橡皮。',
       inkPen: '笔',
@@ -311,6 +349,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       inkSelection: '识别选中',
       inkToTask: '转为任务',
       inkToTaskDone: '已转为待确认任务',
+        taskMarkDone: '标记为已完成（核销）',
+        taskDoneAt: '完成于',
       needSession: '这需要一个会话：请先在某个对话里打开会议记录面板',
       roleLabel: '我的角色',
       speakingNow: '正在说',
@@ -320,7 +360,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       roleHint: '复盘时会按这个角色组织内容',
       review: '复盘会议',
       pushDone: '已推送到机器人',
-      robotSettings: '机器人设置',
+      robotSettings: '设置',
+      settingsTabs: '设置分类',
+      settingsTabPush: '推送与机器人',
+      settingsTabCloud: '云端识别',
+      settingsTabTranscript: '实录与切句',
+      settingsTabSpeaker: '发言人识别',
+      settingsTabWeights: '评分权重',
+      settingsTabTemplates: '提炼模板',
       robotHint: '填入钉钉 / 企业微信机器人的 Webhook 地址，留空表示不推送；只推送【已确认】的任务。地址保存在本机。',
       robotSave: '保存地址',
       robotSaved: '已保存',
@@ -380,9 +427,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       transcriptNormalizeHint: '例如「二零二六年十月十九号」→「2026年10月19日」、「百分之三十」→「30%」、「三点半」→「3点半」。这是本机规则、不联网；原文仍保留在实录里，可随时对照。',
       transcriptMinCue: '最短一段（秒）',
       transcriptMaxCue: '最长一段（秒）',
+      transcriptMaxLine: '每行最多多少字',
       transcriptSilenceHold: '停顿多久算说完（秒）',
       transcriptSilenceRms: '静音判定阈值',
-      transcriptCueHint: '录音在浏览器里切段：停顿超过「停顿多久算说完」就结束一段，最短一段之内的停顿不算切点。最长一段越小，文字上屏越快、请求越多；越大则相反。',
+      transcriptCueHint: '录音在浏览器里切段：停顿超过「停顿多久算说完」就结束一段，最短一段之内的停顿不算切点。最长一段越小，文字上屏越快、请求越多；越大则相反。识别出的长句会按标点拆成「每行最多多少字」的行，语速快时特别有用。',
       transcriptRules: '启用的规整规则',
       transcriptSave: '保存实录设置',
       speakerThreshold: '聚类的严格程度',
@@ -396,7 +444,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       voiceForget: '忘记',
       voiceClear: '清空声纹库',
       hubTabTerms: '会议术语',
-      hubTabSettings: '机器人设置',
+      stopFinishing: '正在收尾：等待最后几段识别完成…',
+      stopRemaining: '剩余',
+      stopFinished: '收尾完成，会议已保存',
+      hubLastTopic: '上次会议',
+      hubTabSettings: '设置',
       hubTabPeople: '人员管理',
       panelTabTranscript: '会议实录',
       panelTabSpeakers: '发言人',
@@ -513,7 +565,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubHowTo: 'Recording runs in the session scope: the session identity is what lets the agent read this meeting through meeting_read.',
       hubRecords: 'Meetings (one row per meeting)',
       hubRefresh: 'Refresh',
+        hubLoadMore: 'Load older meetings',
       hubEmpty: 'No meetings recorded yet — hold one and it appears here.',
+        hubFilterEmpty: 'No meeting of this type yet.',
+        hubAll: 'All',
+        hubGroupBy: 'Group by',
+        hubGroupDay: 'Day',
+        hubGroupWeek: 'Week',
+        hubGroupMonth: 'Month',
+        hubTasksDone: 'done',
       hubSend: 'Send to new chat',
       hubSendHint: 'Open a new conversation with this meeting\'s transcript, ready to send',
       hubOpenSession: 'Open meeting',
@@ -558,7 +618,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       point_question: 'Open question',
       taskDraft: 'Draft',
       taskConfirmed: 'Confirmed',
-      noAnalysis: 'No points or assignments yet. Use the button below to extract them locally.',
+      noAnalysis: 'No points or assignments yet. Use "Extract locally" above for rule-based drafts, or ask the agent to refine them in the conversation.',
       pointsNoRecording: 'This meeting has no recording yet. Press Start above, or write a point below.',
       tasksNoRecording: 'This meeting has no recording yet. Press Start above, or write an assignment below.',
       tasksEmpty: 'No assignments yet. Add one directly, or ask the agent to write them from the transcript; the checkbox is the human confirmation that sending requires.',
@@ -567,6 +627,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       taskTextRequired: 'Write the assignment first',
       originManual: 'written',
       kindGeneral: 'General',
+        kindAdhoc: 'Ad-hoc meeting',
       kindBriefing: 'Morning briefing',
       kindReview: 'Daily review',
       kindWeekly: 'Weekly meeting',
@@ -588,6 +649,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardDiscard: 'Open without saving',
       meetingNameHint: 'Pick a common name or type your own; it shows in the panel, the transcript header and the minutes.',
       meetingNamePlaceholder: 'Meeting name, e.g. "Briefing · Oct 18"',
+        meetingTitleHint: 'Click elsewhere to save; the type decides the period and the one-click template',
+        seriesPrev: 'Previous',
+        seriesNext: 'Next',
+        seriesNone: 'No earlier/later meeting of this type',
       meetingNameSkip: 'Skip naming and start recording',
       meetingNameNone: '(unnamed)',
       periodNone: '(no period)',
@@ -595,13 +660,28 @@ registerProcessor('meeting-capture', MeetingCapture)
       scoresPrefill: 'Pre-fill completion',
       scoresExportCsv: 'Export CSV',
       scoresExportXlsx: 'Export Excel',
-      scoresHint: 'Completion can be pre-filled from this period\'s tasks; quality and learning are scored by a person (1–10). Checked = confirmed. Total = quality 40% + completion 40% + learning 20%.',
+      scoresHint: 'Completion can be pre-filled from this period\'s tasks; quality and learning are scored by a person (1–10). Checked = confirmed (evidence is required first). The total follows Meeting management → Settings → Score weights; the defaults are quality 40% + completion 40% + learning 20%.',
+        scoreBasisPlaceholder: 'Evidence: a transcript quote or a task id (separate several with ;)',
+        scoreBasisRequired: 'Add evidence (a transcript quote or a task id) before confirming',
+        scoreBasisMissing: 'no evidence',
       scoresAddPerson: 'Add a person',
       scoreHours: 'Hours',
       scoreCompletion: 'Completion %',
       scoreQuality: 'Quality 1–10',
+        scoreWeightTitle: 'Score weights',
+        scoreWeightHint: 'A monthly review total weighs these three: quality (1–10 as a percentage), completion (percentage) and learning (1–10 as a percentage). They must add up to 100%; saving applies to existing rows too.',
+        scoreWeightSum: 'Total',
+        scoreWeightSave: 'Save weights',
+        scoreWeightSaved: 'Weights saved; totals are recomputed with them from now on',
+        templateTitle: 'One-click distillation templates',
+        templateHint: 'The text each type\'s distillation sends to the agent; leave it empty to use the built-in wording. {meetingId}, {title} and {period} are placeholders.',
+        templateSave: 'Save templates',
+        templateSaved: 'Templates saved',
       scoreLearn: 'Learning 1–10',
       scoreTotal: 'Total',
+        scorePerson: 'Name',
+        scoreTotalAuto: 'Empty = computed from the weights',
+        scoreTotalManual: 'Overridden; clear to compute again',
       scoreHighlight: 'Highlight',
       scoreImprove: 'To improve',
       scoreBasis: 'Evidence',
@@ -615,6 +695,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       pausedStatus: 'Paused · recorded',
       pauseLongHint: 'Still paused (over 10 minutes)',
       carryOverPrompt: 'Yesterday\'s review left {count} item(s) unfinished or carried over:\n{list}\n\nCheck them against this briefing\'s transcript, decide who takes each one and by when, then write the result into this meeting\'s tasks with meeting_write (drafts a human confirms). Use only the transcript and the list above; do not invent anything.',
+        distillBriefing: 'Distil the briefing',
+        distillBriefingPrompt: 'Turn this briefing ({title}, {period}, meetingId={meetingId}) into a deployment plan: call meeting_read for the transcript, then meeting_write to store the points and assignments in this meeting (fill owner and due from the transcript). Use only the transcript; never invent. Finish with three sentences on who does what today.',
+        distillReview: 'Distil the review',
+        distillReviewPrompt: 'Review this meeting ({title}, {period}, meetingId={meetingId}): call meeting_read for the transcript, extract conclusions, risks, actions and open questions, then meeting_write to store them in this meeting (assignments need an owner and a time). Use only the transcript; finish with the three most important conclusions.',
+        distillWeekly: 'Summarise the week',
+        distillWeeklyPrompt: 'Summarise this weekly meeting ({title}, {period}, meetingId={meetingId}): call meeting_query for this week\'s briefings and reviews (period="this-week"), then combine them with this transcript and use meeting_write to store the week\'s progress, risks and next week\'s plan as points and tasks in meetingId={meetingId}. Use only the records; finish with three conclusions.',
+        distillMonthly: 'Draft the scores',
+        distillMonthlyPrompt: 'Draft scores for this monthly review ({title}, {period}, meetingId={meetingId}): call meeting_query for this month\'s meetings and task completion (period="this-month"), propose completion, quality and learning scores per person, each with evidence (a transcript quote or a task id), then meeting_write them into this meeting\'s scores (drafts a human confirms). Do not score without evidence; say what is missing.',
+        extractNow: 'Extract locally',
+        extractDone: 'Extracted',
       historyPlaceholder: 'Search meetings (name / date / type / transcript)',
       historyOpen: 'Open meeting',
       historyLoading: 'Loading…',
@@ -641,7 +731,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       ownerPh: 'Owner',
       duePh: 'Due',
       originRule: 'Rule',
-      originAgent: 'AI',
+      originAgent: 'Agent',
       ink: 'Handwritten note',
       inkHint: 'Write below with the pen or the mouse; the Windows pen eraser end is read as an eraser.',
       inkPen: 'Pen',
@@ -658,6 +748,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       inkSelection: 'Recognize selection',
       inkToTask: 'To task',
       inkToTaskDone: 'Added as a draft task',
+        taskMarkDone: 'Mark as done (checked off)',
+        taskDoneAt: 'Done at',
       needSession: 'This needs a session: open the meeting panel from a conversation first',
       roleLabel: 'My role',
       speakingNow: 'speaking',
@@ -667,7 +759,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       roleHint: 'Reviews are organised around this role',
       review: 'Review the meeting',
       pushDone: 'Pushed to the group robot',
-      robotSettings: 'Robot settings',
+      robotSettings: 'Settings',
+      settingsTabs: 'Settings groups',
+      settingsTabPush: 'Push & robots',
+      settingsTabCloud: 'Cloud recognition',
+      settingsTabTranscript: 'Transcript & cues',
+      settingsTabSpeaker: 'Speaker recognition',
+      settingsTabWeights: 'Score weights',
+      settingsTabTemplates: 'Distillation prompts',
       robotHint: 'Paste the DingTalk / WeCom robot webhook addresses; leave one empty to skip it. Only confirmed tasks are pushed, and the addresses stay on this machine.',
       robotSave: 'Save addresses',
       robotSaved: 'Saved',
@@ -726,6 +825,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       transcriptNormalizeHint: 'For example 二零二六年十月十九号 becomes 2026年10月19日, 百分之三十 becomes 30%, 三点半 becomes 3点半. These are local rules with no network involved, and the literal recognition stays in the transcript for comparison.',
       transcriptMinCue: 'Shortest cue (s)',
       transcriptMaxCue: 'Longest cue (s)',
+      transcriptMaxLine: 'Most characters per line',
       transcriptSilenceHold: 'Pause that ends a cue (s)',
       transcriptSilenceRms: 'Silence threshold',
       transcriptCueHint: 'Cues are cut in the browser: a pause longer than the hold ends a cue, and no pause inside the shortest cue counts. A smaller maximum puts words on screen sooner at the cost of more requests; a larger one does the opposite.',
@@ -742,7 +842,11 @@ registerProcessor('meeting-capture', MeetingCapture)
       voiceForget: 'Forget',
       voiceClear: 'Clear the library',
       hubTabTerms: 'Terms',
-      hubTabSettings: 'Robot settings',
+      stopFinishing: 'Finishing up: waiting for the last cues…',
+      stopRemaining: 'left',
+      stopFinished: 'Finished — the meeting is saved',
+      hubLastTopic: 'Last meeting',
+      hubTabSettings: 'Settings',
       hubTabPeople: 'People',
       panelTabTranscript: 'Transcript',
       panelTabSpeakers: 'Speakers',
@@ -906,6 +1010,57 @@ registerProcessor('meeting-capture', MeetingCapture)
         borderRadius: '6px',
         border: '1px dashed var(--dsw-alias-border-l2)',
       },
+      /** The panel's title row: the meeting's name, larger than the controls beside it. */
+      templateArea: {
+      width: '100%',
+      minHeight: 64,
+      padding: 6,
+      borderRadius: 6,
+      border: '1px solid var(--dsw-alias-border-l2)',
+      background: 'transparent',
+      color: 'inherit',
+      fontFamily: 'inherit',
+      fontSize: 12,
+      lineHeight: 1.5,
+      resize: 'vertical',
+      boxSizing: 'border-box',
+    },
+    scoreHeadRow: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 6,
+      alignItems: 'center',
+      padding: '2px 6px',
+    },
+    scoreHead: {
+      flex: 1,
+      minWidth: 56,
+      fontSize: 11,
+      color: 'var(--dsh-text-secondary, #6b7280)',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    },
+    titleStatic: {
+      flex: 1,
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      fontWeight: 600,
+    },
+    titleInput: {
+        flex: '1 1 160px',
+        minWidth: '120px',
+        padding: '2px 4px',
+        border: 'none',
+        borderRadius: '4px',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        fontSize: '15px',
+        fontWeight: 600,
+      },
       taskTitleInput: {
         flex: 1,
         minWidth: '160px',
@@ -957,6 +1112,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       toasts: { position: 'fixed', right: '16px', bottom: '16px', zIndex: 4000, display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: 'min(420px, 80vw)' },
       toastCard: { padding: '8px 12px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' },
       hubTitle: { margin: 0, fontSize: '18px', fontWeight: 600 },
+      /** A day/week/month heading above one group of records. */
+      groupHead: { fontSize: '11px', fontWeight: 600, opacity: 0.7, padding: '6px 8px 2px', letterSpacing: '0.02em' },
       /** One meeting in the management page: fixed columns, so the rows line up. */
       hubRecord: { display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
       hubRecordWhen: { flex: '0 0 128px', fontSize: '11px', opacity: 0.7, fontVariantNumeric: 'tabular-nums' },
@@ -1334,7 +1491,7 @@ registerProcessor('meeting-capture', MeetingCapture)
      * @param maxWidth - the widest the dropdown may become.
      * @returns fixed-position coordinates, or null when the element cannot be measured.
      */
-    function measureUnder(element, maxWidth) {
+    function measureUnder(element, maxWidth, height = 0) {
       if (element === null || element === undefined || typeof element.getBoundingClientRect !== 'function') return null
       const section = typeof element.closest === 'function' ? element.closest('section') : null
       const box = (section ?? element).getBoundingClientRect()
@@ -1343,8 +1500,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       // Hung off the button's bottom-LEFT corner: the left edges line up, and the panel's
       // width only caps how wide it may get. Clamped so it cannot leave the window.
       const viewport = typeof window === 'undefined' ? box.width : window.innerWidth
+      const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight
       const left = Math.min(Math.max(8, rect.left), Math.max(8, viewport - width - 8))
-      return { top: rect.bottom + 6, left, width }
+      // A tall dropdown opened near the bottom would run off the window; flip it above the
+      // button instead of letting the last rows become unreachable.
+      const below = rect.bottom + 6
+      const top = height > 0 && viewportHeight > 0 && below + height > viewportHeight - 8
+        ? Math.max(8, rect.top - height - 6)
+        : below
+      return { top, left, width }
     }
 
     /**
@@ -1871,6 +2035,40 @@ registerProcessor('meeting-capture', MeetingCapture)
     /** Meeting kinds the panel offers, and the copy each one uses. */
     const KIND_VALUES = ['', 'briefing', 'review', 'weekly', 'monthly']
     const KIND_LABEL_KEYS = { '': 'kindGeneral', briefing: 'kindBriefing', review: 'kindReview', weekly: 'kindWeekly', monthly: 'kindMonthly' }
+    // The one-click distillation each type offers (§3.1–§3.4): a button label and the recipe
+    // it hands the agent, the same words a person would type in the conversation.
+    // §5.5 names the general type "临时会议" where §2.1 calls it 通用; the start dialog uses the
+// §5.5 wording, the panel and filters keep the data model's name.
+    const NAMING_LABEL_KEYS = { ...KIND_LABEL_KEYS, '': 'kindAdhoc' }
+    const DISTILL_LABEL_KEYS = { briefing: 'distillBriefing', review: 'distillReview', weekly: 'distillWeekly', monthly: 'distillMonthly' }
+    const DISTILL_PROMPT_KEYS = { briefing: 'distillBriefingPrompt', review: 'distillReviewPrompt', weekly: 'distillWeeklyPrompt', monthly: 'distillMonthlyPrompt' }
+
+/**
+ * The local calendar bucket a meeting falls into, for the management page's day / week /
+ * month grouping (FEATURES §5.2). The weekly bucket is the ISO week (Monday-based), the
+ * same definition the host derives `period` from, so a group heading matches the badge the
+ * panel shows for that meeting.
+ * @param startedAt - when the meeting started, in milliseconds.
+ * @param unit - 'day', 'week' or 'month'.
+ * @returns the bucket key, e.g. 2026-10-19, 2026-W43 or 2026-10.
+ */
+function periodBucketOf(startedAt, unit) {
+  const date = new Date(startedAt)
+  const pad = (value) => String(value).padStart(2, '0')
+  if (unit === 'month') return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`
+  if (unit === 'week') {
+    // ISO week: the Monday of this date's week, then the Thursday of that week decides the
+    // ISO year (a week can straddle New Year, and the year must be the ISO one).
+    const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
+    const thursday = new Date(monday)
+    thursday.setDate(monday.getDate() + 3)
+    const firstThursday = new Date(thursday.getFullYear(), 0, 4)
+    const week = 1 + Math.round((((thursday - firstThursday) / 86400000) - 3 + ((firstThursday.getDay() + 6) % 7)) / 7)
+    return `${thursday.getFullYear()}-W${pad(week)}`
+  }
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
 
     /** Id of the datalist that offers this meeting's speaker names as owners. */
     const OWNER_LIST_ID = 'meeting-room-owners'
@@ -1882,6 +2080,17 @@ registerProcessor('meeting-capture', MeetingCapture)
     /** Cloud providers the settings page offers, and their locale keys. */
     const CLOUD_PROVIDER_VALUES = ['off', 'openai-compatible', 'custom']
     const CLOUD_PROVIDER_KEYS = { off: 'cloudOff', 'openai-compatible': 'cloudOpenAi', custom: 'cloudCustom' }
+
+    /** Settings groups, in the order a person configures them: what leaves the machine
+     *  first (push, cloud), then how this installation scores and writes, then voices. */
+    const SETTINGS_TABS = [
+      ['push', 'settingsTabPush'],
+      ['cloud', 'settingsTabCloud'],
+      ['transcript', 'settingsTabTranscript'],
+      ['speaker', 'settingsTabSpeaker'],
+      ['weights', 'settingsTabWeights'],
+      ['templates', 'settingsTabTemplates'],
+    ]
 
     /** Hub sections, in the order a user meets them. */
     const HUB_TAB_VALUES = ['records', 'models', 'terms', 'settings', 'people']
@@ -2120,6 +2329,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [namesOpen, setNamesOpen] = React.useState(false)
       /** Whether a whole-meeting re-identification is running. */
       const [relabeling, setRelabeling] = React.useState(false)
+      /** Per-type distillation wording saved in settings (§9 P4); empty = built-in. */
+      const [templates, setTemplates] = React.useState({})
+      React.useEffect(() => {
+        let live = true
+        void get('/webhooks').then(
+          (value) => { if (live && value !== null && typeof value === 'object') setTemplates(value.templates ?? {}) },
+          () => { /* settings unreadable: the built-in wording still works */ },
+        )
+        return () => { live = false }
+      }, [])
       /** Tasks whose row is showing the free date-and-time picker rather than a quick choice. */
       const [customDueIds, setCustomDueIds] = React.useState([])
       /** Voice labels found in this meeting and the real names assigned to them. */
@@ -2129,6 +2348,12 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [suggestions, setSuggestions] = React.useState([])
       /** The monthly review's score table (FEATURES.md §5.1). */
       const [scores, setScores] = React.useState([])
+      /**
+       * Unsaved text per score field, keyed `person:field`. The inputs are controlled by
+       * these drafts so typing is never blocked by the round-trip, and a value the host
+       * clamps is shown as stored once the field loses focus.
+       */
+      const [scoreDrafts, setScoreDrafts] = React.useState({})
       /** The person being added to that table by hand. */
       const [newScorePerson, setNewScorePerson] = React.useState('')
       const [draftNames, setDraftNames] = React.useState({})
@@ -2138,10 +2363,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [meta, setMeta] = React.useState({ kind: '', period: '', title: '', summary: '' })
       /** The start-of-recording name dialog; null when it is closed (§5.5). */
       const [namePrompt, setNamePrompt] = React.useState(null)
+      /** The same kind's previous and next meeting, for the title row's series navigation (§5.1). */
+      const [series, setSeries] = React.useState({ prev: null, next: null })
       /** What the previous day's review left open, shown while a briefing is prepared (§3.1). */
       const [carry, setCarry] = React.useState({ review: null, items: [] })
       /** Whether capture is paused, and since when (FEATURES.md §5.6). */
-      const [paused, setPaused] = React.useState(false)
+      // Seeded from the shared recorder: the capture outlives a panel remount, so a
+// remounted panel must show "继续" when the meeting is still paused (§5.6).
+      const [paused, setPaused] = React.useState(recorder.active !== null && recorder.active.paused === true)
       const pausedAt = React.useRef(0)
       const pauseWarned = React.useRef(false)
       /** The meeting picker: open flag, query and the slices loaded so far (FEATURES.md §5.4). */
@@ -2304,6 +2533,26 @@ registerProcessor('meeting-capture', MeetingCapture)
         return () => { live = false }
       }, [meetingId, meta.kind])
 
+      // Series navigation: the same kind's previous and next meeting (§5.1). It is part of
+      // the title row, so a briefing can step back through the week without searching — and
+      // it is reloaded whenever either the meeting or its type changes.
+      React.useEffect(() => {
+        if (meetingId === '' || meta.kind === '') {
+          setSeries({ prev: null, next: null })
+          return undefined
+        }
+        let live = true
+        void (async () => {
+          try {
+            const value = await get(`/series?meetingId=${encodeURIComponent(meetingId)}`)
+            if (live) setSeries({ prev: value.prev ?? null, next: value.next ?? null })
+          } catch {
+            // Optional navigation: a failure simply leaves the arrows hidden.
+          }
+        })()
+        return () => { live = false }
+      }, [meetingId, meta.kind])
+
       /**
        * Pull the stored cues, points, and tasks — including ones the agent wrote.
        * @returns the stored points and tasks, or undefined when no meeting is reachable.
@@ -2381,7 +2630,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       const relabelRecording = React.useCallback(async () => {
         if (relabeling) return
         setError('')
-        const id = await ensureMeeting()
+        // A past meeting can be re-labelled too (§5.1): address the meeting on screen, so
+        // the repair never lands on the session's own record (§5.4).
+        const viewing = viewedRef.current
+        const id = viewing !== null ? viewing.meetingId : await ensureMeeting()
         if (id === '') {
           setError(t('needSession'))
           return
@@ -2562,7 +2814,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       const savePackage = React.useCallback(async () => {
         setError('')
         setNote('')
-        const id = await ensureMeeting()
+        // Addressing follows what the panel shows: exporting while a past meeting is open
+        // must export THAT meeting, not the session's own (§5.4).
+        const id = viewedRef.current !== null ? viewedRef.current.meetingId : await ensureMeeting()
         if (id === '') {
           setError(t('needSession'))
           return
@@ -2642,7 +2896,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       const writeMinutes = React.useCallback(async (format = 'md') => {
         setError('')
         setNote('')
-        const id = await ensureMeeting()
+        // Same rule as packaging: a document written while viewing history belongs to the
+        // meeting on screen (§5.4).
+        const id = viewedRef.current !== null ? viewedRef.current.meetingId : await ensureMeeting()
         if (id === '') {
           setError(t('needSession'))
           return
@@ -2660,6 +2916,63 @@ registerProcessor('meeting-capture', MeetingCapture)
 
 
       /**
+       * One-click local extraction (§3, §5.7): the same rules the agent gets, without a model
+       * round-trip. It only ever writes drafts, which is why it is safe to offer in the panel.
+       */
+      const extractNow = React.useCallback(async () => {
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/extract', { meetingId: id })
+          const foundPoints = Array.isArray(reply.points) ? reply.points : []
+          const foundTasks = Array.isArray(reply.tasks) ? reply.tasks : []
+          setPoints(foundPoints)
+          setTasks(foundTasks)
+          setNote(foundPoints.length + foundTasks.length === 0
+            ? t('extractEmpty')
+            : `${t('extractDone')}：${t('points')} ${foundPoints.length} · ${t('tasks')} ${foundTasks.length}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, post, t])
+
+      /**
+       * The type's one-click distillation (§3.1–§3.4, §5.1): it hands the agent the meeting
+       * id and the type's recipe, so the button does exactly what asking in the conversation
+       * would do. It writes through the agent's tools, never through a shortcut.
+       */
+      const distillNow = React.useCallback(async () => {
+        const viewing = viewedRef.current
+        if (viewing !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
+        const promptKey = DISTILL_PROMPT_KEYS[meta.kind] ?? ''
+        if (promptKey === '') return
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        const custom = typeof templates[meta.kind] === 'string' ? templates[meta.kind].trim() : ''
+        const prompt = (custom === '' ? t(promptKey) : custom)
+          .replace('{meetingId}', id)
+          .replace('{title}', meta.title === '' ? t('meetingNameNone') : meta.title)
+          .replace('{period}', meta.period === '' ? '-' : meta.period)
+        const asked = await props.askText(sessionId, prompt)
+        if (asked.ok !== true) setError(`${t('reviewNoSession')}: ${asked.error}`)
+      }, [ensureMeeting, meta.kind, meta.period, meta.title, props, sessionId, t, templates])
+
+      /**
        * Confirm, edit, or remove one stored entry. Only a human reaches this path, which
        * is what keeps an unconfirmed draft from becoming somebody else's todo.
        * @param kind - 'point' or 'task'.
@@ -2672,7 +2985,9 @@ registerProcessor('meeting-capture', MeetingCapture)
         // A past meeting stays read-only for its CONTENT, but confirming an assignment is not
         // content: it is the human step that lets that assignment be sent, and opening a past
         // meeting to check off what is done and send it on is exactly the point.
-        const confirming = op === 'update' && Object.keys(patch).length === 1 && typeof patch.status === 'string'
+        // Only an assignment's confirmation is allowed in a past meeting: it is the human step
+// that lets it be sent, not a content edit. A point's confirmation stays out (§5.4).
+        const confirming = kind === 'task' && op === 'update' && Object.keys(patch).length === 1 && typeof patch.status === 'string'
         if (viewing !== null && !confirming) {
           setNote(t('historyViewOnly'))
           return
@@ -2770,6 +3085,12 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       /** Write one key point by hand — a meeting that was never recorded still gets notes. */
       const addPoint = React.useCallback(async () => {
+        // A viewed history is read-only: this would write to the session's own meeting,
+        // which is not what the panel is showing (§5.4).
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
         const text = newPoint.text.trim()
         if (text === '') {
           setError(t('pointTextRequired'))
@@ -2801,6 +3122,11 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       /** Write one work assignment by hand; it stays a draft until a human confirms it. */
       const addTask = React.useCallback(async () => {
+        // Same rule as the points tab: viewing a past meeting never writes elsewhere (§5.4).
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
         const text = newTask.trim()
         if (text === '') {
           setError(t('taskTextRequired'))
@@ -2849,6 +3175,28 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       /** Patch one person's row. */
       const editScore = React.useCallback((person, patch) => postScores({ person, patch }), [postScores])
+
+      /** What a score input shows: the unsaved draft, else the stored value. */
+      const scoreValueOf = (person, field, stored) => {
+        const key = `${person}:${field}`
+        return Object.prototype.hasOwnProperty.call(scoreDrafts, key) ? scoreDrafts[key] : stored
+      }
+      /** Keep a keystroke local until the field is left. */
+      const setScoreDraft = (person, field, value) => {
+        const key = `${person}:${field}`
+        setScoreDrafts((drafts) => ({ ...drafts, [key]: value }))
+      }
+      /** Send the field on blur, then drop the draft so the stored value takes over. */
+      const commitScore = (person, field, patch) => {
+        const key = `${person}:${field}`
+        void editScore(person, patch).finally(() => {
+          setScoreDrafts((drafts) => {
+            const next = { ...drafts }
+            delete next[key]
+            return next
+          })
+        })
+      }
       /** Drop one person's row. */
       const removeScore = React.useCallback((person) => postScores({ person, op: 'remove' }), [postScores])
       /** Fill completion rates from the period's tasks (a confirmed row is never touched). */
@@ -2921,6 +3269,12 @@ registerProcessor('meeting-capture', MeetingCapture)
         if (active === null) return
         const next = active.paused !== true
         active.paused = next
+        // Pause means "stop capturing", not "keep capturing and throw it away": turning the
+        // track off releases the microphone indicator too, which is what makes pausing safe
+        // for a private aside (§5.6).
+        try {
+          for (const track of active.stream?.getAudioTracks?.() ?? []) track.enabled = !next
+        } catch { /* a closed stream has nothing to switch off */ }
         // A pause boundary is a boundary: buffered audio is dropped, never split later.
         if (next) active.pending.length = 0
         setPaused(next)
@@ -3005,8 +3359,10 @@ registerProcessor('meeting-capture', MeetingCapture)
        */
       const onQueryChange = React.useCallback((value) => {
         setPicker((current) => ({ ...current, query: value, open: true }))
-        if (composingRef.current) return
+        // A pending search from before the composition started must be cancelled even while
+        // composing, or it fires with the previous text and rebuilds the list mid-typing.
         window.clearTimeout(searchTimer.current)
+        if (composingRef.current) return
         searchTimer.current = window.setTimeout(() => { void loadHistory(value) }, 150)
       }, [loadHistory])
 
@@ -3371,6 +3727,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         if (active === null) return
         recorder.active = null
         try {
+          clearInterval(active.ticker)
           active.node.port.onmessage = null
           active.node.disconnect()
           active.sink.disconnect()
@@ -3478,6 +3835,10 @@ registerProcessor('meeting-capture', MeetingCapture)
             audio, stream, source, node, sink, url,
             pending: [],
             frames: 0,
+            // Audio captured so far in this meeting, in samples. It drives the live elapsed
+            // clock; the host's own count stays authoritative once a cue is transcribed.
+            captured: 0,
+            ticker: 0,
             silenceFrames: 0,
             inflight: false,
             stopping: false,
@@ -3491,6 +3852,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             const block = event.data
             active.pending.push(block)
             active.frames += block.length
+            active.captured += block.length
             // Endpoint at a pause instead of a fixed clock: a cue then holds what a
             // speaker actually said, rather than being cut mid-sentence. The cap keeps
             // a long monologue from growing without bound.
@@ -3498,6 +3860,12 @@ registerProcessor('meeting-capture', MeetingCapture)
             else active.silenceFrames = 0
             if (!active.inflight && shouldFlush(active)) void flush(active)
           }
+          // The elapsed clock ticks on captured audio, not on wall time: a pause stops the
+          // count without leaving a gap in the recording (§5.6).
+          active.ticker = setInterval(() => {
+            if (active.paused === true) return
+            setSeconds(Math.round(active.captured / active.audio.sampleRate))
+          }, 1000)
           setPaused(false)
           pausedAt.current = 0
           pauseWarned.current = false
@@ -3528,22 +3896,38 @@ registerProcessor('meeting-capture', MeetingCapture)
         const active = recorder.active
         if (active === null) return
         active.stopping = true
+        // Stop always leaves the panel unpaused, even when the meeting was paused: a
+        // finished meeting cannot be "resumed" (§5.6).
+        setPaused(false)
+        pausedAt.current = 0
         setPhase('transcribing')
-        for (let attempt = 0; attempt < 120 && (active.inflight || active.pending.length > 0); attempt++) {
-          if (active.inflight) await new Promise((resolve) => setTimeout(resolve, 200))
-          else await flush(active)
-        }
-        await release()
+        // Draining the last cues and re-labelling the whole recording takes a while on a
+        // long meeting. Say so, and keep saying how much is left, so the pause after
+        // pressing Stop does not look like a hang.
+        const waiting = toast(t('stopFinishing'))
         try {
+          for (let attempt = 0; attempt < 120 && (active.inflight || active.pending.length > 0); attempt++) {
+            if (active.inflight) {
+              updateToast(waiting, `${t('stopFinishing')} ${t('stopRemaining')} ${active.pending.length + 1}`)
+              await new Promise((resolve) => setTimeout(resolve, 200))
+            } else {
+              updateToast(waiting, `${t('stopFinishing')} ${t('stopRemaining')} ${active.pending.length}`)
+              await flush(active)
+            }
+          }
+          await release()
           const reply = await post('/stop', { meetingId: active.meetingId })
           setSegments(reply.segments)
           setSeconds(reply.seconds)
           if (typeof reply.audioName === 'string') setAudioName(reply.audioName)
+          updateToast(waiting, t('stopFinished'))
+          setTimeout(() => dismissToast(waiting), 2000)
         } catch (failure) {
+          dismissToast(waiting)
           setError(failure instanceof Error ? failure.message : String(failure))
         }
         setPhase('idle')
-      }, [flush, release])
+      }, [dismissToast, flush, release, t, toast, updateToast])
 
       /** Write the SRT record and its Markdown companion into the host's meetings directory. */
 
@@ -3609,6 +3993,67 @@ registerProcessor('meeting-capture', MeetingCapture)
         // player and the content tabs; only what follows it scrolls, so a long transcript
         // cannot push those controls out of reach.
         h('div', { key: 'head', style: styles.panelHead }, [
+          // The title row: the meeting's own name and type, the derived period, and the
+          // same kind's previous/next meeting (§5.1). The name and type are readable and
+          // changeable here at any time, including mid-recording: a meeting first thought
+          // to be a discussion can turn out to be a briefing.
+          h('div', { key: 'titlerow', style: styles.row }, [
+            // A past meeting still shows its own name and type, just not as editable
+            // fields: the name belongs to the meeting, editing belongs to the session that
+            // owns it (§5.4).
+            viewed !== null ? h('span', { key: 'titleview', style: styles.titleStatic }, meta.title === '' ? t('meetingNameNone') : meta.title) : h(Field, {
+              // Uncontrolled on purpose: the name is written when the field loses focus, so
+              // typing does not POST on every keystroke. The key remounts it per meeting, so
+              // switching conversations shows that meeting's own name.
+              key: `title-${meetingId}`,
+              type: 'text',
+              style: styles.titleInput,
+              defaultValue: meta.title,
+              placeholder: t('meetingNamePlaceholder'),
+              title: t('meetingTitleHint'),
+              'aria-label': t('meetingNamePlaceholder'),
+              spellCheck: false,
+              onBlur: (event) => {
+                const next = event.target.value.trim()
+                // Only a real change writes: focusing the field and leaving it must not
+                // create a meeting as a side effect.
+                if (next !== meta.title) void saveMeta({ title: next })
+              },
+              onKeyDown: (event) => { if (event.key === 'Enter') event.currentTarget.blur() },
+            }),
+            viewed !== null
+              ? h('span', { key: 'kindview', style: styles.chip }, t(KIND_LABEL_KEYS[meta.kind] ?? 'kindGeneral'))
+              : h(Picker, {
+                key: 'kind',
+                style: styles.inlineInput,
+                value: meta.kind,
+                title: t('kindLabel'),
+                'aria-label': t('kindLabel'),
+                onChange: (event) => { void saveMeta({ kind: event.target.value }) },
+              }, KIND_VALUES.map((value) => h('option', {
+                key: value === '' ? 'general' : value,
+                value,
+              }, t(KIND_LABEL_KEYS[value])))),
+            meta.period === '' ? null : h('span', { key: 'period', style: styles.chip }, meta.period),
+            series.prev === null && series.next === null ? null : h('div', { key: 'series', style: styles.row }, [
+              h(Btn, {
+                key: 'prev',
+                type: 'button',
+                style: styles.smallButton,
+                disabled: series.prev === null,
+                title: series.prev === null ? t('seriesNone') : `${t('seriesPrev')}: ${series.prev.title === '' ? t('meetingNameNone') : series.prev.title}`,
+                onClick: () => openSeries(series.prev),
+              }, `‹ ${t('seriesPrev')}`),
+              h(Btn, {
+                key: 'next',
+                type: 'button',
+                style: styles.smallButton,
+                disabled: series.next === null,
+                title: series.next === null ? t('seriesNone') : `${t('seriesNext')}: ${series.next.title === '' ? t('meetingNameNone') : series.next.title}`,
+                onClick: () => openSeries(series.next),
+              }, `${t('seriesNext')} ›`),
+            ]),
+          ]),
           viewed !== null ? null : h('div', { key: 'notebar', style: styles.row }, [
           h(Btn, {
             key: 'toggle',
@@ -3630,7 +4075,9 @@ registerProcessor('meeting-capture', MeetingCapture)
             key: 'pause',
             type: 'button',
             style: paused ? styles.buttonActive : styles.button,
-            disabled: phase === 'transcribing',
+            // Pausing is local and must work immediately; only a capture that has not
+            // started yet has nothing to pause (§5.6).
+            disabled: phase === 'starting',
             onClick: () => togglePause(),
           }, paused ? t('resumeRecording') : t('pauseRecording')) : null,
           h(Btn, {
@@ -3645,6 +4092,15 @@ registerProcessor('meeting-capture', MeetingCapture)
             style: styles.button,
             onClick: () => { void review() },
           }, t('review')),
+          // The type's own one-click distillation (§3.1–§3.4): only a typed meeting has a
+          // recipe, and the button is hidden while a past meeting is open because the
+          // distillation belongs to the session's own meeting (§5.4).
+          viewed !== null || meta.kind === '' ? null : h(Btn, {
+            key: 'distill',
+            type: 'button',
+            style: styles.buttonActive,
+            onClick: () => { void distillNow() },
+          }, t(DISTILL_LABEL_KEYS[meta.kind] ?? 'review')),
           h(Btn, {
             key: 'minutes',
             type: 'button',
@@ -3669,13 +4125,8 @@ registerProcessor('meeting-capture', MeetingCapture)
                 if (open) {
                   // The dropdown is as wide as the panel it lives in, measured rather than
                   // guessed, and fixed so the panel's own scrolling cannot clip it.
-                  const section = event.currentTarget.closest('section')
-                  const box = (section ?? event.currentTarget).getBoundingClientRect()
-                  setPickerRect({
-                    left: box.left + 8,
-                    top: event.currentTarget.getBoundingClientRect().bottom + 6,
-                    width: Math.max(260, box.width - 16),
-                  })
+                  // Measured, clamped to the viewport on both axes; the list is at most 320px tall.
+                  setPickerRect(measureUnder(event.currentTarget, 640, 340))
                 }
                 setPicker((value) => ({ ...value, open }))
                 if (open) void loadHistory(picker.query)
@@ -3858,7 +4309,8 @@ registerProcessor('meeting-capture', MeetingCapture)
           ]),
           // Recording and the meeting's own actions belong to the session's meeting, so they
           // step aside while a historical meeting is being read (§5.4).
-        h('span', { key: 'status', style: styles.status }, status),
+        // Pause/resume and the switch guard are state changes a screen reader must hear.
+        h('span', { key: 'status', style: styles.status, role: 'status', 'aria-live': 'polite' }, status),
         // The note pad is the handwriting pad and nothing else: one tool, one body, no tabs to
         // switch between. The terminology list lives with the other occasional settings, in
         // the More menu.
@@ -4018,7 +4470,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           // only revealed the fields was a step in the way.
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, t('speakerNames')),
-            viewed !== null ? null : h(Btn, {
+            h(Btn, {
               key: 'relabel',
               type: 'button',
               style: styles.button,
@@ -4101,7 +4553,17 @@ registerProcessor('meeting-capture', MeetingCapture)
           openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
         ]),
         bodyTab !== 'points' ? null : h('div', { key: 'points', style: styles.list }, [
-          h('div', { key: 'title', style: styles.label }, `${t('points')} (${points.length})`),
+          h('div', { key: 'title', style: styles.row }, [
+            h('span', { key: 'label', style: styles.label }, `${t('points')} (${points.length})`),
+            // The empty state used to point at a button that did not exist; this is it (§5.7).
+            viewed !== null ? null : h(Btn, {
+              key: 'extract',
+              type: 'button',
+              style: styles.smallButton,
+              disabled: segments.length === 0,
+              onClick: () => { void extractNow() },
+            }, t('extractNow')),
+          ]),
           points.length === 0
             // An empty tab must explain itself and stay usable: no recording yet, nothing
             // extracted yet, or the person simply wants to type an entry in.
@@ -4166,7 +4628,8 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t('remove')),
           ]))),
           // Hand-writing an entry is always possible: no recording, or nothing extracted yet.
-          h('div', { key: 'add', style: styles.row }, [
+          // The exception is a viewed history, which is read-only (§5.4).
+          viewed !== null ? null : h('div', { key: 'add', style: styles.row }, [
             h(Field, {
               key: 'text',
               type: 'text',
@@ -4194,6 +4657,13 @@ registerProcessor('meeting-capture', MeetingCapture)
         bodyTab !== 'tasks' ? null : h('div', { key: 'tasks', style: styles.list }, [
           h('div', { key: 'title', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, `${t('tasks')} (${tasks.filter((task) => task.status === 'confirmed').length}/${tasks.length})`),
+            viewed !== null ? null : h(Btn, {
+              key: 'extract',
+              type: 'button',
+              style: styles.smallButton,
+              disabled: segments.length === 0,
+              onClick: () => { void extractNow() },
+            }, t('extractNow')),
             // One click sends EVERY confirmed assignment out, in the way the management page's robot
             // settings chose — including while a past meeting is open, which sends that past
             // meeting's own assignments.
@@ -4226,17 +4696,30 @@ registerProcessor('meeting-capture', MeetingCapture)
               style: task.status === 'confirmed' ? styles.taskRow : styles.taskRowDraft,
             }, [
               h(Field, {
-                key: 'done',
+                key: 'confirmed',
                 type: 'checkbox',
                 checked: task.status === 'confirmed',
                 title: t('confirm'),
                 onChange: (event) => { void editEntry('task', task.id, { status: event.target.checked ? 'confirmed' : 'draft' }) },
+              }),
+              // Checked off is a separate fact from confirmed (§2.3): a review meeting ticks
+              // what got done without touching the status it was accepted with.
+              h(Field, {
+                key: 'done',
+                type: 'checkbox',
+                checked: task.done === true,
+                disabled: viewed !== null,
+                title: task.done === true
+                  ? `${t('taskDoneAt')}${typeof task.doneAt === 'number' ? ` ${new Date(task.doneAt).toLocaleString()}` : ''}`
+                  : t('taskMarkDone'),
+                onChange: (event) => { void editEntry('task', task.id, { done: event.target.checked }) },
               }),
               h(Field, {
                 key: 'title',
                 type: 'text',
                 style: styles.taskTitleInput,
                 defaultValue: task.title,
+                readOnly: viewed !== null,
                 placeholder: t('taskTitlePh'),
                 spellCheck: false,
                 title: task.status === 'draft' ? t('taskDraft') : t('taskConfirmed'),
@@ -4246,6 +4729,8 @@ registerProcessor('meeting-capture', MeetingCapture)
                   else event.target.value = task.title
                 },
               }),
+              // Where the assignment came from (§5.7): a rule, the agent, or a person.
+              h('span', { key: 'origin', style: styles.chip }, t(task.origin === 'agent' ? 'originAgent' : task.origin === 'rule' ? 'originRule' : 'originManual')),
               h(Picker, {
                 key: 'owner',
                 style: styles.inlineInput,
@@ -4312,8 +4797,9 @@ registerProcessor('meeting-capture', MeetingCapture)
               }, t('remove')),
             ])
           }),
-          // The same promise as the points tab: this tab is never a dead end.
-          h('div', { key: 'add', style: styles.row }, [
+          // The same promise as the points tab: this tab is never a dead end. A viewed
+          // history is the one exception — adding there would write to another meeting (§5.4).
+          viewed !== null ? null : h('div', { key: 'add', style: styles.row }, [
             h(Field, {
               key: 'text',
               type: 'text',
@@ -4332,7 +4818,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t('addEntry')),
           ]),
         ]),
-        bodyTab !== 'scores' ? null : h('div', { key: 'scores', style: styles.list }, [
+        bodyTab !== 'scores' ? null : h('div', { key: 'scores', style: styles.list, role: 'table', 'aria-label': t('panelTabScores') }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, `${t('panelTabScores')} (${scores.length})`),
             viewed !== null ? null : h(Btn, { key: 'prefill', type: 'button', style: styles.button, onClick: () => { void prefillScores() } }, t('scoresPrefill')),
@@ -4340,29 +4826,85 @@ registerProcessor('meeting-capture', MeetingCapture)
             viewed !== null ? null : h(Btn, { key: 'xlsx', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('xlsx') } }, t('scoresExportXlsx')),
           ]),
           h('span', { key: 'hint', style: styles.hint }, t('scoresHint')),
-          scores.length === 0 ? null : h('div', { key: 'rows', style: styles.list }, scores.map((row) => h('div', {
+          // Column headers, so the table reads as a table rather than a row of unnamed
+          // number boxes (§5.1).
+          scores.length === 0 ? null : h('div', { key: 'headers', style: styles.scoreHeadRow, role: 'row' }, [
+            h('span', { key: 'pad', style: styles.scoreHead, role: 'presentation', 'aria-hidden': 'true' }, ''),
+            h('span', { key: 'person', style: styles.scoreHead, role: 'columnheader', id: 'score-col-person' }, t('scorePerson')),
+            h('span', { key: 'hours', style: styles.scoreHead, role: 'columnheader', id: 'score-col-hours' }, t('scoreHours')),
+            h('span', { key: 'completion', style: styles.scoreHead, role: 'columnheader', id: 'score-col-completion' }, t('scoreCompletion')),
+            h('span', { key: 'quality', style: styles.scoreHead, role: 'columnheader', id: 'score-col-quality' }, t('scoreQuality')),
+            h('span', { key: 'learn', style: styles.scoreHead, role: 'columnheader', id: 'score-col-learn' }, t('scoreLearn')),
+            h('span', { key: 'total', style: styles.scoreHead, role: 'columnheader', id: 'score-col-total' }, t('scoreTotal')),
+            h('span', { key: 'highlight', style: styles.scoreHead, role: 'columnheader', id: 'score-col-highlight' }, t('scoreHighlight')),
+            h('span', { key: 'improve', style: styles.scoreHead, role: 'columnheader', id: 'score-col-improve' }, t('scoreImprove')),
+            h('span', { key: 'basis', style: styles.scoreHead, role: 'columnheader', id: 'score-col-basis' }, t('scoreBasis')),
+          ]),
+          scores.length === 0 ? null : h('div', { key: 'rows', style: styles.list, role: 'rowgroup' }, scores.map((row) => h('div', {
             key: row.person,
+            role: 'row',
             style: row.status === 'confirmed' ? styles.segment : styles.taskDone,
           }, [
             h(Field, {
               key: 'confirmed',
               type: 'checkbox',
               checked: row.status === 'confirmed',
-              title: t('confirm'),
+              // Evidence is required to confirm a row (§2.4): without it the box says why
+              // instead of sending a request the host would refuse.
+              disabled: row.status !== 'confirmed' && (row.basis ?? []).length === 0,
+              title: row.status !== 'confirmed' && (row.basis ?? []).length === 0 ? t('scoreBasisRequired') : t('confirm'),
+              'aria-label': `${t('confirm')}：${row.person}`,
               onChange: (event) => { void editScore(row.person, { status: event.target.checked ? 'confirmed' : 'draft' }) },
             }),
-            h('span', { key: 'person', style: styles.chip }, row.person),
-            h(Field, { key: 'hours', type: 'number', style: styles.inlineInput, defaultValue: String(row.hours ?? 0), title: t('scoreHours'), onBlur: (event) => { void editScore(row.person, { hours: Number(event.target.value) }) } }),
-            h(Field, { key: 'completion', type: 'number', style: styles.inlineInput, defaultValue: String(row.completion ?? 0), title: t('scoreCompletion'), onBlur: (event) => { void editScore(row.person, { completion: Number(event.target.value) }) } }),
-            h(Field, { key: 'quality', type: 'number', style: styles.inlineInput, defaultValue: String(row.quality ?? 0), title: t('scoreQuality'), onBlur: (event) => { void editScore(row.person, { quality: Number(event.target.value) }) } }),
-            h(Field, { key: 'learn', type: 'number', style: styles.inlineInput, defaultValue: String(row.learn ?? 0), title: t('scoreLearn'), onBlur: (event) => { void editScore(row.person, { learn: Number(event.target.value) }) } }),
-            h('span', { key: 'total', style: styles.chip }, `${t('scoreTotal')} ${row.total ?? 0}`),
-            h(Field, { key: 'highlight', type: 'text', style: styles.inlineWide, defaultValue: row.highlight ?? '', placeholder: t('scoreHighlight'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { highlight: event.target.value }) } }),
-            h(Field, { key: 'improve', type: 'text', style: styles.inlineWide, defaultValue: row.improve ?? '', placeholder: t('scoreImprove'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { improve: event.target.value }) } }),
-            (row.basis ?? []).length === 0 ? null : h('span', { key: 'basis', style: styles.chip, title: (row.basis ?? []).join('\n') }, `${t('scoreBasis')} ${(row.basis ?? []).length}`),
+            h('span', { key: 'person', style: styles.chip, role: 'rowheader' }, row.person),
+            // Each control names its column and person for screen readers; the column headers
+            // above are visual only, because a div grid cannot associate them by itself.
+            h(Field, { key: 'hours', type: 'number', style: styles.inlineInput, value: scoreValueOf(row.person, 'hours', String(row.hours ?? 0)), title: t('scoreHours'), 'aria-label': `${t('scoreHours')}：${row.person}`, onChange: (event) => setScoreDraft(row.person, 'hours', event.target.value), onBlur: (event) => commitScore(row.person, 'hours', { hours: Number(event.target.value) }) }),
+            h(Field, { key: 'completion', type: 'number', style: styles.inlineInput, value: scoreValueOf(row.person, 'completion', String(row.completion ?? 0)), title: t('scoreCompletion'), 'aria-label': `${t('scoreCompletion')}：${row.person}`, onChange: (event) => setScoreDraft(row.person, 'completion', event.target.value), onBlur: (event) => commitScore(row.person, 'completion', { completion: Number(event.target.value) }) }),
+            h(Field, { key: 'quality', type: 'number', style: styles.inlineInput, value: scoreValueOf(row.person, 'quality', String(row.quality ?? 0)), title: t('scoreQuality'), 'aria-label': `${t('scoreQuality')}：${row.person}`, onChange: (event) => setScoreDraft(row.person, 'quality', event.target.value), onBlur: (event) => commitScore(row.person, 'quality', { quality: Number(event.target.value) }) }),
+            h(Field, { key: 'learn', type: 'number', style: styles.inlineInput, value: scoreValueOf(row.person, 'learn', String(row.learn ?? 0)), title: t('scoreLearn'), 'aria-label': `${t('scoreLearn')}：${row.person}`, onChange: (event) => setScoreDraft(row.person, 'learn', event.target.value), onBlur: (event) => commitScore(row.person, 'learn', { learn: Number(event.target.value) }) }),
+            // The weighted total is a default: a person may override it, and clearing the
+            // box goes back to the computed value (§2.4).
+            h(Field, {
+              key: 'total',
+              type: 'number',
+              style: styles.inlineInput,
+              // Empty means "computed"; the computed value shows as the placeholder.
+              value: scoreValueOf(row.person, 'total', row.totalOverride === true ? String(row.total ?? '') : ''),
+              placeholder: String(row.total ?? 0),
+              title: row.totalOverride === true ? t('scoreTotalManual') : t('scoreTotalAuto'),
+              'aria-label': `${t('scoreTotal')}：${row.person}`,
+              onChange: (event) => setScoreDraft(row.person, 'total', event.target.value),
+              onBlur: (event) => {
+                const text = event.target.value.trim()
+                commitScore(row.person, 'total', { total: text === '' ? null : Number(text) })
+              },
+            }),
+            h(Field, { key: 'highlight', type: 'text', style: styles.inlineWide, value: scoreValueOf(row.person, 'highlight', row.highlight ?? ''), placeholder: t('scoreHighlight'), 'aria-label': `${t('scoreHighlight')}：${row.person}`, spellCheck: false, onChange: (event) => setScoreDraft(row.person, 'highlight', event.target.value), onBlur: (event) => commitScore(row.person, 'highlight', { highlight: event.target.value }) }),
+            h(Field, { key: 'improve', type: 'text', style: styles.inlineWide, value: scoreValueOf(row.person, 'improve', row.improve ?? ''), placeholder: t('scoreImprove'), 'aria-label': `${t('scoreImprove')}：${row.person}`, spellCheck: false, onChange: (event) => setScoreDraft(row.person, 'improve', event.target.value), onBlur: (event) => commitScore(row.person, 'improve', { improve: event.target.value }) }),
+            // The evidence is editable here because it is what makes the score traceable:
+            // several entries are separated by a semicolon or a new line (§2.4).
+            h(Field, {
+              key: 'basis',
+              type: 'text',
+              style: styles.inlineWide,
+              value: scoreValueOf(row.person, 'basis', (row.basis ?? []).join('；')),
+              placeholder: t('scoreBasisPlaceholder'),
+              title: `${t('scoreBasis')}: ${(row.basis ?? []).join('\n')}`,
+              'aria-label': `${t('scoreBasis')}：${row.person}`,
+              spellCheck: false,
+              onChange: (event) => setScoreDraft(row.person, 'basis', event.target.value),
+              onBlur: (event) => {
+                const basis = event.target.value.split(/[；;\n]/u).map((entry) => entry.trim()).filter((entry) => entry !== '')
+                commitScore(row.person, 'basis', { basis })
+              },
+            }),
+            (row.basis ?? []).length === 0
+              ? h('span', { key: 'basisbad', style: styles.error }, t('scoreBasisMissing'))
+              : h('span', { key: 'basis', style: styles.chip, title: (row.basis ?? []).join('\n') }, `${t('scoreBasis')} ${(row.basis ?? []).length}`),
             h(Btn, { key: 'del', type: 'button', style: styles.smallButton, onClick: () => { void removeScore(row.person) } }, t('remove')),
           ]))),
-          h('div', { key: 'add', style: styles.row }, [
+          viewed === null ? h('div', { key: 'add', style: styles.row }, [
             h(Field, {
               key: 'person',
               type: 'text',
@@ -4374,7 +4916,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               onKeyDown: (event) => { if (event.key === 'Enter') void addScore() },
             }),
             h(Btn, { key: 'add', type: 'button', style: styles.smallButton, onClick: () => { void addScore() } }, t('addEntry')),
-          ]),
+          ]) : null,
         ]),
         notes.length === 0 ? null : h('div', { key: 'notes', style: styles.list }, [
           h('div', { key: 'label', style: styles.label }, `${t('inkNote')} (${notes.length})`),
@@ -4431,7 +4973,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         }) : null,
         // Notices float at the document root so nothing in the panel can cover them, and sit
         // below dialogs in the layering (4000 against 5000).
-        toasts.length === 0 ? null : float(h('div', { key: 'toasts', style: styles.toasts }, toasts.map((item) => (
+        toasts.length === 0 ? null : float(h('div', { key: 'toasts', style: styles.toasts, role: 'status', 'aria-live': 'polite' }, toasts.map((item) => (
           HostToast === null
             ? h('div', {
               key: item.id,
@@ -4585,9 +5127,9 @@ registerProcessor('meeting-capture', MeetingCapture)
                 kind: value,
                 // Choosing a type names the meeting after it: the title is a default the
                 // person can still edit, and a name left over from another type is worse.
-                text: `${t(KIND_LABEL_KEYS[value])} · ${new Date().toLocaleDateString()}`,
+                text: `${t(NAMING_LABEL_KEYS[value])} · ${new Date().toLocaleDateString()}`,
               })),
-            }, t(KIND_LABEL_KEYS[value])))),
+            }, t(NAMING_LABEL_KEYS[value])))),
             ]),
           ],
           footer: [
@@ -5295,12 +5837,23 @@ registerProcessor('meeting-capture', MeetingCapture)
     function MeetingHubPage(props) {
       const t = props.t
       const [records, setRecords] = React.useState([])
+      // The hub used to read the newest 200 and silently stop there; the host caps at 200,
+      // so an older archive needs explicit pages (§5.2).
+      const [recordsTotal, setRecordsTotal] = React.useState(0)
       const [preview, setPreview] = React.useState(null)
       const [error, setError] = React.useState('')
       const [termsText, setTermsText] = React.useState(readTerms)
       /** Push settings and the shared roster live here, not in a single meeting's panel. */
       const [settings, setSettings] = React.useState({ configured: [], people: [], departments: [] })
       const [settingsDraft, setSettingsDraft] = React.useState({ dingtalk: '', wecom: '', appKey: '', appSecret: '', agentId: '', mode: 'group' })
+      /** Which settings group is open. One tab per configuration function (§5.2). */
+      const [settingsTab, setSettingsTab] = React.useState('push')
+      /** The monthly score weights, as percentages; the host stores them normalised (§2.4). */
+      const [weightsDraft, setWeightsDraft] = React.useState({ quality: 40, completion: 40, learn: 20 })
+      const [weightsNote, setWeightsNote] = React.useState('')
+      /** Per-type distillation wording (§9 P4); an empty entry keeps the built-in text. */
+      const [templateDraft, setTemplateDraft] = React.useState({ briefing: '', review: '', weekly: '', monthly: '' })
+      const [templatesNote, setTemplatesNote] = React.useState('')
       const [personDraft, setPersonDraft] = React.useState({ name: '', phone: '', userId: '' })
       const [deptId, setDeptId] = React.useState(0)
       const [directoryBusy, setDirectoryBusy] = React.useState(false)
@@ -5310,6 +5863,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [importing, setImporting] = React.useState(false)
       /** Which hub section is showing; the page keeps its own tabs, not the panel's. */
       const [hubTab, setHubTab] = React.useState('records')
+      /** The records page's kind filter chip and its day/week/month grouping (§5.2). */
+      // '__all__' is a state of its own: '' is "general meeting" and must not double as "all".
+      const [hubKind, setHubKind] = React.useState('__all__')
+      const [hubGroup, setHubGroup] = React.useState('day')
       /**
        * The model catalog: which models exist, which are installed here, which one each
        * capability runs, and how a download in flight is going.
@@ -5338,7 +5895,7 @@ registerProcessor('meeting-capture', MeetingCapture)
        * Transcript settings: how numbers and dates are written back, and where a cue is cut.
        * The cue limits are applied to the live capture loop, not just displayed.
        */
-      const [transcript, setTranscript] = React.useState({ normalize: true, normalizeRules: [], minChunkSeconds: 1.2, maxChunkSeconds: 5, silenceRms: 0.012, silenceHoldSeconds: 0.5 })
+      const [transcript, setTranscript] = React.useState({ normalize: true, normalizeRules: [], minChunkSeconds: 1.2, maxChunkSeconds: 12, silenceRms: 0.012, silenceHoldSeconds: 0.7, maxLineChars: 60 })
       const [transcriptDraft, setTranscriptDraft] = React.useState(null)
       const [transcriptRules, setTranscriptRules] = React.useState([])
       const [transcriptNote, setTranscriptNote] = React.useState('')
@@ -5352,6 +5909,21 @@ registerProcessor('meeting-capture', MeetingCapture)
             const config = await get('/webhooks')
             const roster = await get('/people')
             if (cancelled) return
+            if (config.scoreWeights !== null && typeof config.scoreWeights === 'object') {
+              setWeightsDraft({
+                quality: Math.round(Number(config.scoreWeights.quality ?? 0.4) * 100),
+                completion: Math.round(Number(config.scoreWeights.completion ?? 0.4) * 100),
+                learn: Math.round(Number(config.scoreWeights.learn ?? 0.2) * 100),
+              })
+            }
+            if (config.templates !== null && typeof config.templates === 'object') {
+              setTemplateDraft({
+                briefing: typeof config.templates.briefing === 'string' ? config.templates.briefing : '',
+                review: typeof config.templates.review === 'string' ? config.templates.review : '',
+                weekly: typeof config.templates.weekly === 'string' ? config.templates.weekly : '',
+                monthly: typeof config.templates.monthly === 'string' ? config.templates.monthly : '',
+              })
+            }
             setSettings({
               ...config,
               people: Array.isArray(roster.people) ? roster.people : [],
@@ -5381,6 +5953,45 @@ registerProcessor('meeting-capture', MeetingCapture)
           setError(failure instanceof Error ? failure.message : String(failure))
         }
       }, [settingsDraft, t])
+
+      /** Store the monthly score weights; the host refuses a set that does not add up. */
+      const saveWeights = React.useCallback(async () => {
+        setError('')
+        setWeightsNote('')
+        try {
+          const reply = await post('/webhooks', { scoreWeights: weightsDraft })
+          if (reply.scoreWeights !== null && typeof reply.scoreWeights === 'object') {
+            setWeightsDraft({
+              quality: Math.round(Number(reply.scoreWeights.quality) * 100),
+              completion: Math.round(Number(reply.scoreWeights.completion) * 100),
+              learn: Math.round(Number(reply.scoreWeights.learn) * 100),
+            })
+          }
+          setWeightsNote(t('scoreWeightSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [t, weightsDraft])
+
+      /** Store the per-type distillation wording; empty fields fall back to the built-in text. */
+      const saveTemplates = React.useCallback(async () => {
+        setError('')
+        setTemplatesNote('')
+        try {
+          const reply = await post('/webhooks', { templates: templateDraft })
+          if (reply.templates !== null && typeof reply.templates === 'object') {
+            setTemplateDraft({
+              briefing: typeof reply.templates.briefing === 'string' ? reply.templates.briefing : '',
+              review: typeof reply.templates.review === 'string' ? reply.templates.review : '',
+              weekly: typeof reply.templates.weekly === 'string' ? reply.templates.weekly : '',
+              monthly: typeof reply.templates.monthly === 'string' ? reply.templates.monthly : '',
+            })
+          }
+          setTemplatesNote(t('templateSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [t, templateDraft])
 
       /**
        * Add, update or remove one person on the shared roster.
@@ -5461,12 +6072,14 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [termsText])
 
-      /** Re-read the exported artifacts from the host. */
-      const refresh = React.useCallback(async () => {
+      /** Re-read the first page of records from the host, or append the next one. */
+      const refresh = React.useCallback(async (offset = 0) => {
         setError('')
         try {
-          const value = await get('/history?limit=200')
-          setRecords(Array.isArray(value.meetings) ? value.meetings : [])
+          const value = await get(`/history?limit=200&offset=${offset}`)
+          const rows = Array.isArray(value.meetings) ? value.meetings : []
+          setRecords((current) => (offset === 0 ? rows : [...current, ...rows]))
+          setRecordsTotal(typeof value.total === 'number' ? value.total : rows.length)
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
         }
@@ -5866,6 +6479,65 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [props, t])
 
 
+      /** The records the kind chip keeps, grouped by the chosen calendar bucket (§5.2). */
+      const visibleRecords = records.filter((row) => hubKind === '__all__' || row.kind === hubKind)
+      const recordGroups = []
+      for (const row of visibleRecords) {
+        const bucket = periodBucketOf(row.startedAt, hubGroup)
+        const group = recordGroups.find((entry) => entry.bucket === bucket)
+        if (group === undefined) recordGroups.push({ bucket, rows: [row] })
+        else group.rows.push(row)
+      }
+
+      /**
+       * One meeting row: fixed columns — when, what, what it holds, what can be done with
+       * it — so the rows line up down the page instead of drifting with the name's length.
+       */
+      const recordRow = (row) => h('div', {
+        key: row.meetingId,
+        style: styles.hubRecord,
+      }, [
+        h('span', { key: 'when', style: styles.hubRecordWhen }, new Date(row.startedAt).toLocaleString()),
+        h('div', { key: 'main', style: styles.hubRecordMain }, [
+          h(Btn, {
+            key: 'open',
+            type: 'button',
+            style: styles.linkButton,
+            onClick: () => { void openTranscript(row) },
+          }, row.title === '' ? t('meetingNameNone') : row.title),
+          h('span', { key: 'meta', style: styles.hint }, [
+            // The type is a badge, not another word in the line: the filter chips and the
+            // list then use the same vocabulary.
+            row.kind === '' ? null : h('span', { key: 'kind', style: styles.chip }, t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')),
+            row.period === '' ? null : h('span', { key: 'period', style: styles.stamp }, row.period),
+            ` · ${t('panelTabTranscript')} ${row.counts.segments}`,
+            ` · ${t('points')} ${row.counts.points}`,
+            ` · ${t('tasks')} ${row.counts.tasks}`,
+            // The check-off count the design asks for: an assignment list without its
+            // completion says nothing about whether the work is being done.
+            row.counts.tasks === 0 ? null : ` · ${t('hubTasksDone')} ${row.counts.done ?? 0}/${row.counts.tasks}`,
+            row.counts.documents === 0 ? null : ` · ${t('panelTabMinutes')} ${row.counts.documents}`,
+          ]),
+          row.excerpt === '' ? null : h('span', { key: 'excerpt', style: styles.hubRecordExcerpt }, row.excerpt.length > 60 ? `${row.excerpt.slice(0, 60)}…` : row.excerpt),
+        ]),
+        h('div', { key: 'actions', style: styles.hubRecordActions }, [
+          h(Btn, {
+            key: 'send',
+            type: 'button',
+            style: styles.smallButton,
+            title: t('hubSendHint'),
+            onClick: () => { void sendToNewConversation({ meetingId: row.meetingId }) },
+          }, t('hubSend')),
+          row.sessionId === '' ? null : h(Btn, {
+            key: 'session',
+            type: 'button',
+            style: styles.smallButton,
+            title: t('hubOpenMeetingHint'),
+            onClick: () => { void openMeeting(row) },
+          }, t('hubOpenSession')),
+        ]),
+      ])
+
       return h(Boundary, null, h('section', { style: styles.hub }, [
         h('h1', { key: 'title', style: styles.hubTitle }, t('hubTitle')),
         h('p', { key: 'intro', style: styles.subtitle }, t('hubIntro')),
@@ -5979,7 +6651,18 @@ registerProcessor('meeting-capture', MeetingCapture)
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, t('robotSettings')),
           ]),
+          // One tab per configuration function: a single long card made every setting look
+          // equally important and hid the one a person came for.
+          h('div', { key: 'settingstabs', style: styles.row, role: 'tablist', 'aria-label': t('settingsTabs') }, SETTINGS_TABS.map(([id, label]) => h(Btn, {
+            key: id,
+            type: 'button',
+            role: 'tab',
+            'aria-selected': settingsTab === id,
+            style: settingsTab === id ? styles.buttonActive : styles.button,
+            onClick: () => setSettingsTab(id),
+          }, t(label)))),
           h('div', { key: 'body', style: styles.list }, [
+            settingsTab !== 'push' ? null : h('div', { key: 'settings-push', style: styles.list }, [
             // The delivery choice comes first: it decides whether the fields below matter.
             h('div', { key: 'mode', style: styles.row }, [
               h('span', { key: 'label', style: styles.status }, t('pushMode')),
@@ -6037,6 +6720,59 @@ registerProcessor('meeting-capture', MeetingCapture)
               h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSettings() } }, t('robotSave')),
               settingsNote === '' ? null : h('span', { key: 'note', style: styles.status }, settingsNote),
             ]),
+            ]),
+            settingsTab !== 'weights' ? null : h('div', { key: 'settings-weights', style: styles.list }, [
+            // Monthly score weights (§2.4, P4). They are stored as fractions but edited as
+            // percentages, and the three must add up before anything is written.
+            h('span', { key: 'weightstitle', style: styles.label }, t('scoreWeightTitle')),
+            h('span', { key: 'weightshint', style: styles.hint }, t('scoreWeightHint')),
+            h('div', { key: 'weights', style: styles.row }, [
+              ...['quality', 'completion', 'learn'].map((key) => h('label', { key, style: styles.row }, [
+                h('span', { key: 'label', style: styles.status }, t(key === 'quality' ? 'scoreQuality' : key === 'completion' ? 'scoreCompletion' : 'scoreLearn')),
+                h(Field, {
+                  key: 'value',
+                  type: 'number',
+                  min: 0,
+                  max: 100,
+                  step: 1,
+                  style: styles.inlineInput,
+                  value: String(weightsDraft[key] ?? 0),
+                  onChange: (event) => setWeightsDraft((draft) => ({ ...draft, [key]: Number(event.target.value) })),
+                }),
+                h('span', { key: 'pct', style: styles.status }, '%'),
+              ])),
+              h('span', {
+                key: 'sum',
+                style: (weightsDraft.quality + weightsDraft.completion + weightsDraft.learn) === 100 ? styles.status : styles.error,
+              }, `${t('scoreWeightSum')} ${weightsDraft.quality + weightsDraft.completion + weightsDraft.learn}%`),
+            ]),
+            h('div', { key: 'weightsactions', style: styles.row }, [
+              h(Btn, { key: 'saveweights', type: 'button', style: styles.button, onClick: () => { void saveWeights() } }, t('scoreWeightSave')),
+              weightsNote === '' ? null : h('span', { key: 'note', style: styles.status }, weightsNote),
+            ]),
+            ]),
+            settingsTab !== 'templates' ? null : h('div', { key: 'settings-templates', style: styles.list }, [
+            // Per-type distillation wording (§9 P4): the prompt behind each one-click button
+            // can be replaced without touching the code. An empty box uses the built-in text.
+            h('span', { key: 'templatestitle', style: styles.label }, t('templateTitle')),
+            h('span', { key: 'templateshint', style: styles.hint }, t('templateHint')),
+            ...['briefing', 'review', 'weekly', 'monthly'].map((kind) => h('label', { key: kind, style: styles.fieldBlock }, [
+              h('span', { key: 'label', style: styles.status }, t(KIND_LABEL_KEYS[kind])),
+              h('textarea', {
+                key: 'text',
+                style: styles.templateArea,
+                value: templateDraft[kind] ?? '',
+                placeholder: t(DISTILL_PROMPT_KEYS[kind]),
+                spellCheck: false,
+                onChange: (event) => setTemplateDraft((draft) => ({ ...draft, [kind]: event.target.value })),
+              }),
+            ])),
+            h('div', { key: 'templateactions', style: styles.row }, [
+              h(Btn, { key: 'savetemplates', type: 'button', style: styles.button, onClick: () => { void saveTemplates() } }, t('templateSave')),
+              templatesNote === '' ? null : h('span', { key: 'note', style: styles.status }, templatesNote),
+            ]),
+            ]),
+            settingsTab !== 'cloud' ? null : h('div', { key: 'settings-cloud', style: styles.list }, [
             // Cloud recognition sits with the robots because it is the same kind of decision:
             // something leaves this machine, and only when a person says so.
             h('span', { key: 'cloudtitle', style: styles.label }, t('cloudTitle')),
@@ -6105,6 +6841,8 @@ registerProcessor('meeting-capture', MeetingCapture)
               h(Btn, { key: 'test', type: 'button', style: styles.button, disabled: cloudBusy, onClick: () => { void runCloudTest() } }, t('cloudTest')),
               cloudNote === '' ? null : h('span', { key: 'note', style: styles.status }, cloudNote),
             ]),
+            ]),
+            settingsTab !== 'speaker' ? null : h('div', { key: 'settings-speaker', style: styles.list }, [
             // Speaker recognition: how voices are told apart, and the library that remembers them.
             h('span', { key: 'speakertitle', style: styles.label }, t('speakerTitle')),
             h('div', { key: 'presets', style: styles.row }, [
@@ -6166,6 +6904,8 @@ registerProcessor('meeting-capture', MeetingCapture)
               h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSpeakerSettings() } }, t('speakerSave')),
               voiceNote === '' ? null : h('span', { key: 'note', style: styles.status }, voiceNote),
             ]),
+            ]),
+            settingsTab !== 'transcript' ? null : h('div', { key: 'settings-transcript', style: styles.list }, [
             // Transcript: how it reads, and where a cue is cut.
             h('span', { key: 'transcripttitle', style: styles.label }, t('transcriptTitle')),
             h('div', { key: 'normalize', style: styles.row }, [
@@ -6198,6 +6938,16 @@ registerProcessor('meeting-capture', MeetingCapture)
                 onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), maxChunkSeconds: Number(event.target.value) })),
               }),
             ]),
+            h('div', { key: 'lines', style: styles.row }, [
+              h('span', { key: 'linechars', style: styles.status }, t('transcriptMaxLine')),
+              h(Field, {
+                key: 'linevalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.maxLineChars ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), maxLineChars: Number(event.target.value) })),
+              }),
+            ]),
             h('div', { key: 'vad', style: styles.row }, [
               h('span', { key: 'hold', style: styles.status }, t('transcriptSilenceHold')),
               h(Field, {
@@ -6221,6 +6971,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             h('div', { key: 'transcriptactions', style: styles.row }, [
               h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveTranscript() } }, t('transcriptSave')),
               transcriptNote === '' ? null : h('span', { key: 'note', style: styles.status }, transcriptNote),
+            ]),
             ]),
           ]),
         ]) : null,
@@ -6352,53 +7103,51 @@ registerProcessor('meeting-capture', MeetingCapture)
               },
             }),
           ]),
-          records.length === 0
-            ? h('p', { key: 'empty', style: styles.empty }, t('hubEmpty'))
+          // Where the last meeting left off: opening the record page should answer "what did
+          // we last talk about?" before the person scrolls the list.
+          records.length === 0 ? null : h('span', { key: 'lasttopic', style: styles.hint },
+            `${t('hubLastTopic')}：${records[0].title === '' ? t('meetingNameNone') : records[0].title}`
+            + `${records[0].excerpt === '' ? '' : ` · ${records[0].excerpt.length > 50 ? `${records[0].excerpt.slice(0, 50)}…` : records[0].excerpt}`}`),
+          // Kind filter chips and the day/week/month grouping (§5.2): the same history,
+          // asked for by type and by the calendar unit that type is judged on.
+          h('div', { key: 'filters', style: styles.row }, [
+            h('div', { key: 'kinds', className: 'mr-chips' }, ['__all__', ...KIND_VALUES].map((value) => h(Btn, {
+              key: value === '' ? 'general' : value,
+              type: 'button',
+              style: hubKind === value ? styles.buttonActive : styles.button,
+              onClick: () => setHubKind(value),
+            }, t(value === '__all__' ? 'hubAll' : KIND_LABEL_KEYS[value])))),
+            h(Picker, {
+              key: 'group',
+              style: styles.inlineInput,
+              value: hubGroup,
+              title: t('hubGroupBy'),
+              onChange: (event) => setHubGroup(event.target.value),
+            }, [['day', 'hubGroupDay'], ['week', 'hubGroupWeek'], ['month', 'hubGroupMonth']].map(([value, key]) => h('option', {
+              key: value,
+              value,
+            }, t(key)))),
+          ]),
+          visibleRecords.length === 0
+            ? h('p', { key: 'empty', style: styles.empty }, records.length === 0 ? t('hubEmpty') : t('hubFilterEmpty'))
             // One row per MEETING, not per exported file: the meeting is the record, and its
             // files are artifacts of it (FEATURES §5.4's rule, applied to this page too).
-            : h('div', { key: 'list', className: 'mr-list' }, records.map((row) => h('div', {
-              key: row.meetingId,
-              style: styles.hubRecord,
+            : h('div', { key: 'list', className: 'mr-list' }, recordGroups.map((group) => h('div', {
+              key: group.bucket,
+              style: styles.list,
             }, [
-              // Fixed columns — when, what, what it holds, what can be done with it — so the
-              // rows line up down the page instead of drifting with the length of a name.
-              h('span', { key: 'when', style: styles.hubRecordWhen }, new Date(row.startedAt).toLocaleString()),
-              h('div', { key: 'main', style: styles.hubRecordMain }, [
-                h(Btn, {
-                  key: 'open',
-                  type: 'button',
-                  style: styles.linkButton,
-                  onClick: () => { void openTranscript(row) },
-                }, row.title === '' ? t('meetingNameNone') : row.title),
-                h('span', { key: 'meta', style: styles.hint }, [
-                  row.kind === '' ? t('kindGeneral') : t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral'),
-                  row.period === '' ? null : ` · ${row.period}`,
-                  ` · ${t('panelTabTranscript')} ${row.counts.segments}`,
-                  ` · ${t('points')} ${row.counts.points}`,
-                  ` · ${t('tasks')} ${row.counts.tasks}`,
-                  row.counts.documents === 0 ? null : ` · ${t('panelTabMinutes')} ${row.counts.documents}`,
-                ].filter((part) => part !== null).join('')),
-                row.excerpt === '' ? null : h('span', { key: 'excerpt', style: styles.hubRecordExcerpt }, row.excerpt.length > 60 ? `${row.excerpt.slice(0, 60)}…` : row.excerpt),
-              ]),
-              h('div', { key: 'actions', style: styles.hubRecordActions }, [
-                h(Btn, {
-                  key: 'send',
-                  type: 'button',
-                  style: styles.smallButton,
-                  title: t('hubSendHint'),
-                  onClick: () => { void sendToNewConversation({ meetingId: row.meetingId }) },
-                }, t('hubSend')),
-                row.sessionId === '' ? null : h(Btn, {
-                  key: 'session',
-                  type: 'button',
-                  style: styles.smallButton,
-                  // Switch to that conversation AND open this meeting in the panel beside it:
-                  // the record's own meeting is what the person clicked for.
-                  title: t('hubOpenMeetingHint'),
-                  onClick: () => { void openMeeting(row) },
-                }, t('hubOpenSession')),
-              ]),
+              h('div', { key: 'bucket', style: styles.groupHead }, group.bucket),
+              ...group.rows.map(recordRow),
             ]))),
+          // More than one page: say how many are left and let the person ask for them.
+          records.length < recordsTotal ? h('div', { key: 'more', style: styles.row }, [
+            h(Btn, {
+              key: 'load',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { void refresh(records.length) },
+            }, `${t('hubLoadMore')} (${recordsTotal - records.length})`),
+          ]) : null,
         ]) : null,
         hubTab === 'records' && preview !== null ? h('div', { key: 'preview', className: 'mr-card' }, [
           h('div', { key: 'head', style: styles.row }, [

@@ -311,7 +311,7 @@ export async function prepareSpeakers(ctx) {
  * @param pcm - Raw PCM16 bytes of the cue.
  * @returns the speaker label and its base64 embedding, both empty when unjudged.
  */
-export async function labelCue(ctx, pcm) {
+export async function labelCue(ctx, pcm, contextPcm) {
   const none = { speaker: '', embedding: '' }
   if (speakerState.phase !== 'ready') {
     // A worker that died mid-meeting must not silently end labeling for the rest of
@@ -340,7 +340,13 @@ export async function labelCue(ctx, pcm) {
       clearTimeout(timer)
       resolve(typeof reply === 'string' ? { speaker: reply, embedding: '' } : reply ?? none)
     })
-    worker.child.stdin.write(`${JSON.stringify({ id, pcmBase64: pcm.toString('base64') })}\n`)
+    // `contextBase64` lets the worker match a very short cue against the audio just
+// before it instead of enrolling a new voice from two syllables.
+    const request = { id, pcmBase64: pcm.toString('base64') }
+    if (Buffer.isBuffer(contextPcm) && contextPcm.length > 0) {
+      request.contextBase64 = contextPcm.toString('base64')
+    }
+    worker.child.stdin.write(`${JSON.stringify(request)}\n`)
   })
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-meeting-room",
-  "version": "0.1.0-preview.4",
+  "version": "0.1.0-preview.6",
   "description": "会议记录：本机转写、发言人分离、要点与工作安排、手写笔记、复盘与纪要 · Meeting notes inside DeepSeek Harness",
   "author": "杨道泉 <yangdaoquan@qq.com> (博尔塔拉融媒体中心媒体传播与认知重点实验室)",
   "type": "module",
@@ -38,6 +38,7 @@
   "files": [
     "index.js",
     "host-*.js",
+    "skill-meeting-scribe.js",
     "speaker-worker.js",
     "handwriting-worker.js",
     "minutes-docx.py",

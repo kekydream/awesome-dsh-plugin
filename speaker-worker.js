@@ -81,31 +81,72 @@ function rmsOf(samples) {
 }
 
 /**
+ * Shortest cue trusted to create a new voice. A sub-second fragment is enough to
+ * *match* a voice, but not enough to *become* one: enrolling from it used to mint a
+ * fresh speaker for every cough/short "对", splitting one person into several labels.
+ */
+const ENROLL_MIN_SECONDS = 1.5
+
+/** The label of the last confidently matched/enrolled voice, kept for hysteresis. */
+let lastSpeaker = ''
+
+/**
+ * Compute one voice embedding.
+ * @param samples - Float samples at 16 kHz.
+ * @returns the embedding, or null when the extractor is not ready.
+ */
+function embed(samples) {
+  const stream = extractor.createStream()
+  stream.acceptWaveform({ sampleRate: 16000, samples })
+  stream.inputFinished()
+  if (!extractor.isReady(stream)) return null
+  // The second argument must be false under Electron's V8 memory cage.
+  return Float32Array.from(extractor.compute(stream, false))
+}
+
+/**
  * Label one cue: reuse the nearest gallery entry or enroll a new speaker.
  * @param pcmBase64 - Base64 PCM16 bytes at 16 kHz mono.
+ * @param contextBase64 - Base64 PCM16 of the audio just before this cue, when the host
+ *                        has it; a short cue is matched on context + cue so a two-word
+ *                        interjection does not get a speaker of its own.
  * @returns the speaker label and the embedding behind it, or an empty label.
  */
-function label(pcmBase64) {
+function label(pcmBase64, contextBase64 = '') {
   const samples = toFloatSamples(Buffer.from(pcmBase64, 'base64'))
   // Below roughly half a second an embedding is dominated by noise; leave it unlabelled.
   if (samples.length < 8000) return { speaker: '', embedding: '' }
   // A quiet cue would otherwise enroll silence as the first speaker and hold that slot
   // for the rest of the meeting, because the gallery never re-clusters.
   if (rmsOf(samples) < MIN_CUE_RMS) return { speaker: '', embedding: '' }
-  const stream = extractor.createStream()
-  stream.acceptWaveform({ sampleRate: 16000, samples })
-  stream.inputFinished()
-  if (!extractor.isReady(stream)) return { speaker: '', embedding: '' }
-  // The second argument must be false under Electron's V8 memory cage.
-  const computed = extractor.compute(stream, false)
-  // Copied out of the native buffer so the host can keep it for the end-of-meeting pass.
-  const embedding = Float32Array.from(computed)
-  const encoded = Buffer.from(embedding.buffer).toString('base64')
-  const known = gallery.search({ v: embedding, threshold })
-  if (known !== '') return { speaker: known, embedding: encoded }
+  const seconds = samples.length / 16000
+  const own = embed(samples)
+  if (own === null) return { speaker: '', embedding: '' }
+  const encoded = Buffer.from(own.buffer).toString('base64')
+  // Match on the longer window, but keep the cue's own embedding: the end-of-meeting
+  // repass re-clusters on that, and context audio belongs to the previous cue.
+  let probe = own
+  if (seconds < ENROLL_MIN_SECONDS && typeof contextBase64 === 'string' && contextBase64 !== '') {
+    const previous = toFloatSamples(Buffer.from(contextBase64, 'base64'))
+    if (previous.length > 0) {
+      const joined = new Float32Array(previous.length + samples.length)
+      joined.set(previous, 0)
+      joined.set(samples, previous.length)
+      probe = embed(joined) ?? own
+    }
+  }
+  const known = gallery.search({ v: probe, threshold })
+  if (known !== '') {
+    lastSpeaker = known
+    return { speaker: known, embedding: encoded }
+  }
+  // A short cue may simply be too thin to match; hold the previous voice rather than
+  // inventing a new label that the repass then has to merge away.
+  if (seconds < ENROLL_MIN_SECONDS) return { speaker: lastSpeaker, embedding: encoded }
   speakers += 1
   const name = `S${speakers}`
-  gallery.add({ name, v: embedding })
+  gallery.add({ name, v: own })
+  lastSpeaker = name
   return { speaker: name, embedding: encoded }
 }
 
@@ -123,7 +164,10 @@ lines.on('line', (line) => {
     return
   }
   try {
-    const result = label(typeof request.pcmBase64 === 'string' ? request.pcmBase64 : '')
+    const result = label(
+      typeof request.pcmBase64 === 'string' ? request.pcmBase64 : '',
+      typeof request.contextBase64 === 'string' ? request.contextBase64 : '',
+    )
     process.stdout.write(`${JSON.stringify({ id: request.id, ...result })}\n`)
   } catch (error) {
     process.stdout.write(`${JSON.stringify({ id: request.id, error: error instanceof Error ? error.message : String(error) })}\n`)

@@ -30,6 +30,10 @@ import {
   ROLE_LABELS,
   seenText,
   SPEAKER_THRESHOLD_PRESETS,
+  SCORE_WEIGHT_KEYS,
+  scoreWeights,
+  setScoreWeights,
+  newMeetingId,
 } from './host-constants.js'
 
 import {
@@ -126,6 +130,8 @@ import {
   pushTasks,
   relabelSpeakers,
   publicSegments,
+  mergeContinuation,
+  splitCueIntoSentences,
   speakerLabels,
   displaySpeaker,
   writeDocx,
@@ -188,6 +194,10 @@ export function createHandler(ctx) {
         )
         if (pending !== undefined) {
           pending.startedAt = startedAt
+          // The period is derived from the start time, so moving the start must move the
+          // bucket too — otherwise a meeting resumed after midnight stays in yesterday's
+          // day bucket and the cross-meeting queries miss it (§2.2).
+          pending.period = periodOf(pending.kind ?? '', startedAt)
           if (typeof body.terms === 'string') pending.terms = body.terms
           pending.controller = new AbortController()
           pending.audioName = audioName
@@ -197,7 +207,7 @@ export function createHandler(ctx) {
           sendJson(res, 200, { meetingId: pending.id, sampleRate: SAMPLE_RATE, startedAt, audioName })
           return
         }
-        const id = `meeting-${Date.now().toString(36)}`
+        const id = newMeetingId()
         meetings.set(id, {
           id,
           startedAt,
@@ -237,7 +247,7 @@ export function createHandler(ctx) {
         }
         // Notes and tasks belong to a meeting even when nothing was recorded, so the first
         // write creates the container; a later recording joins it.
-        const id = `meeting-${Date.now().toString(36)}`
+        const id = newMeetingId()
         meetings.set(id, {
           id,
           startedAt: Date.now(),
@@ -283,6 +293,11 @@ export function createHandler(ctx) {
           return
         }
         const pcm = Buffer.from(body.pcm, 'base64')
+        // The last few seconds of audio before this cue: a very short cue is matched
+        // against this window, so a two-word reply keeps the previous speaker instead of
+        // enrolling a voice of its own.
+        const contextPcm = meeting.recentPcm
+        meeting.recentPcm = Buffer.concat([contextPcm ?? Buffer.alloc(0), pcm]).subarray(-SAMPLE_RATE * 2 * 3)
         // Persist the audio before recognition, so a transcription failure never costs
         // the recording itself.
         if (meeting.audioHandle !== undefined) {
@@ -295,6 +310,8 @@ export function createHandler(ctx) {
         // (the gate returns `skipped` before any request) and never costs the local text: a
         // failure keeps what the on-machine recogniser produced and says what happened.
         let cloud = { used: false, skipped: true, message: '' }
+        // Real sentence boundaries from the cloud recognizer, when it reports them.
+        let cloudHints = []
         if (meeting.segments.length > before) {
           const cue = meeting.segments[before]
           try {
@@ -307,9 +324,13 @@ export function createHandler(ctx) {
             if (answer.skipped === true) {
               cloud = { used: false, skipped: true, message: '' }
             } else {
+              // The on-machine result stays beside the cloud one: turning on a cloud model
+              // must never erase what this machine heard (DESIGN §3.2).
+              if (typeof cue.localText !== 'string') cue.localText = cue.text
               cue.text = answer.text
               cue.asrModel = answer.model
               meeting.asrModel = answer.model
+              cloudHints = Array.isArray(answer.segments) ? answer.segments : []
               cloud = { used: true, skipped: false, message: '', model: answer.model }
             }
           } catch (failure) {
@@ -324,7 +345,7 @@ export function createHandler(ctx) {
         // Label the cue that was just appended. One cue can span a speaker change; that
         // case keeps the dominant voice and is a documented limitation.
         if (meeting.segments.length > before) {
-          const judged = await labelCue(ctx, pcm)
+          const judged = await labelCue(ctx, pcm, contextPcm)
           if (judged.speaker !== '') {
             meeting.segments[before].speaker = judged.speaker
             // Noted on the meeting as well: a reopened record must still know this voice
@@ -339,6 +360,20 @@ export function createHandler(ctx) {
           // The embedding is kept for the end-of-meeting pass, which merges voices the online
           // gallery could not; it never leaves this process.
           if (judged.embedding !== '') meeting.segments[before].embedding = judged.embedding
+          // Fast speech puts several sentences in one cue. Split it at the recognizer's
+          // punctuation (or its own cloud segments) before merging, so a line is a
+          // sentence, not ten seconds of speech.
+          const transcriptSettings = await readTranscriptSettings().catch(() => null)
+          const pieces = splitCueIntoSentences(meeting, before, {
+            maxChars: transcriptSettings?.maxLineChars ?? 60,
+            hints: cloudHints,
+            normalizeRules: transcriptSettings?.normalize === true ? transcriptSettings.normalizeRules : null,
+          })
+          if (pieces <= 1) {
+            // A sentence cut by the endpointing pause is folded back into one readable
+            // line once the speaker is known (text-only; times still span the audio).
+            mergeContinuation(meeting, before)
+          }
         }
         sendJson(res, 200, {
           text,
@@ -450,7 +485,7 @@ export function createHandler(ctx) {
               meeting.scores.push(row)
             } else if (existing.status !== 'confirmed') {
               existing.completion = stat.completion
-              existing.total = scoreTotal(existing)
+              if (existing.totalOverride !== true) existing.total = scoreTotal(existing)
             }
           }
           sendJson(res, 200, { scores: meeting.scores, filled: stats.length })
@@ -469,6 +504,16 @@ export function createHandler(ctx) {
         }
         const row = meeting.scores[index]
         const patch = body.patch !== null && typeof body.patch === 'object' ? body.patch : {}
+        // Evidence is part of the row, not decoration: a human may edit it here (the agent
+        // supplies it when drafting), and a row without any cannot be confirmed (§2.4).
+        const nextBasis = Array.isArray(patch.basis)
+          ? patch.basis.filter((entry) => typeof entry === 'string' && entry.trim() !== '').map((entry) => entry.trim())
+          : (row.basis ?? [])
+        if (patch.status === 'confirmed' && nextBasis.length === 0) {
+          sendJson(res, 400, { error: '这条评分还没有依据：请先填一条实录原文或任务 id，再确认' })
+          return
+        }
+        if (Array.isArray(patch.basis)) row.basis = nextBasis
         // Only a human may confirm; the agent's drafts always arrive as drafts.
         if (patch.status === 'draft' || patch.status === 'confirmed') row.status = patch.status
         for (const [field, max] of [['hours', 10000], ['completion', 100], ['quality', 10], ['learn', 10]]) {
@@ -477,7 +522,15 @@ export function createHandler(ctx) {
         }
         if (typeof patch.highlight === 'string') row.highlight = patch.highlight.trim()
         if (typeof patch.improve === 'string') row.improve = patch.improve.trim()
-        row.total = scoreTotal(row)
+        // The weighted total is a default a person may override; clearing the field goes
+        // back to the computed value (§2.4).
+        if (patch.total === null || patch.total === '') {
+          delete row.totalOverride
+        } else if (Number.isFinite(Number(patch.total))) {
+          row.total = Math.min(Math.max(Math.round(Number(patch.total)), 0), 100)
+          row.totalOverride = true
+        }
+        if (row.totalOverride !== true) row.total = scoreTotal(row)
         sendJson(res, 200, { scores: meeting.scores })
         return
       }
@@ -542,6 +595,10 @@ export function createHandler(ctx) {
         const offset = Number.isFinite(askedOffset) && askedOffset > 0 ? Math.floor(askedOffset) : 0
         const rows = []
         for (const meeting of meetings.values()) {
+          // Only meetings that actually hold something belong in the history: every live
+          // conversation owns an eager (often still empty) meeting, and listing those would
+          // bury the real records (DESIGN §4).
+          if (meetingIsEmpty(meeting)) continue
           const points = meeting.points ?? []
           const tasks = meeting.tasks ?? []
           const segments = meeting.segments ?? []
@@ -568,6 +625,8 @@ export function createHandler(ctx) {
               segments: segments.length,
               points: points.length,
               tasks: tasks.length,
+              // The management page reports how much of the work is checked off (§5.2).
+              done: tasks.filter((task) => task.done === true).length,
               notes: (meeting.notes ?? []).length,
               documents: (meeting.documents ?? []).length,
               scores: (meeting.scores ?? []).length,
@@ -584,8 +643,14 @@ export function createHandler(ctx) {
       if (method === 'POST' && route === '/flush') {
         // The picker's "auto-save": the periodic flush covers it within seconds, but the
         // panel must be able to say "saved" honestly before it switches away.
-        await flushMeetings(ctx)
-        sendJson(res, 200, { saved: true })
+        const result = await flushMeetings(ctx)
+        // "Saved" has to mean saved: a failed write is reported, not hidden, because the
+        // panel switches away on this answer (§5.4).
+        sendJson(res, result.failed.length === 0 ? 200 : 500, {
+          saved: result.failed.length === 0,
+          written: result.written,
+          failed: result.failed,
+        })
         return
       }
 
@@ -725,6 +790,10 @@ export function createHandler(ctx) {
           hasSecret: settings.appSecret !== '',
           mode: settings.mode,
           configured: WEBHOOK_KINDS.filter((kind) => settings[kind] !== ''),
+          // The score weights, as fractions; the panel shows them as percentages (§2.4).
+          scoreWeights: settings.scoreWeights,
+          // Custom distillation wording per type; an empty entry uses the built-in text.
+          templates: settings.templates ?? {},
         })
         return
       }
@@ -748,10 +817,36 @@ export function createHandler(ctx) {
           if (typeof value === 'string') next[key] = value.trim()
         }
         if (PUSH_MODES.includes(body.mode)) next.mode = body.mode
-        const directory = dirname(webhookFile())
+        // Score weights arrive as percentages, because that is what a person types; they are
+        // stored normalised, so the three always add up (§2.4, P4). A set that does not add
+        // up to 100% is refused with the reason rather than silently reweighted.
+        if (body.scoreWeights !== null && typeof body.scoreWeights === 'object') {
+          const values = SCORE_WEIGHT_KEYS.map((key) => Number(body.scoreWeights[key]))
+          const sum = values.reduce((total, value) => total + value, 0)
+          if (!values.every((value) => Number.isFinite(value) && value >= 0) || Math.abs(sum - 100) > 0.5) {
+            sendJson(res, 400, { error: '评分权重三项必须是非负数，且加起来为 100%' })
+            return
+          }
+          next.scoreWeights = setScoreWeights(Object.fromEntries(SCORE_WEIGHT_KEYS.map((key, index) => [key, values[index] / 100])))
+        }
+        // Custom distill wording: only the four known types, trimmed, bounded. An empty string
+    // restores the built-in text instead of storing an unusable template.
+    if (body.templates !== null && typeof body.templates === 'object') {
+      const kept = {}
+      for (const kind of ['briefing', 'review', 'weekly', 'monthly']) {
+        if (typeof body.templates[kind] === 'string') kept[kind] = body.templates[kind].slice(0, 4000)
+      }
+      next.templates = kept
+    }
+    const directory = dirname(webhookFile())
         await mkdir(directory, { recursive: true })
         await writeFile(webhookFile(), JSON.stringify(next, null, 2), 'utf8')
-        sendJson(res, 200, { mode: next.mode, configured: WEBHOOK_KINDS.filter((kind) => next[kind] !== '') })
+        sendJson(res, 200, {
+          mode: next.mode,
+          configured: WEBHOOK_KINDS.filter((kind) => next[kind] !== ''),
+          scoreWeights: { ...scoreWeights },
+          templates: next.templates ?? {},
+        })
         return
       }
 

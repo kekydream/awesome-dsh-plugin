@@ -16,7 +16,8 @@ import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { deflateRawSync, inflateRawSync } from 'node:zlib'
 import { join, basename } from 'node:path'
 
-import { meetings } from './host-constants.js'
+import { MEETING_KINDS, meetings } from './host-constants.js'
+import { periodOf } from './host-tools.js'
 import { exportDirectory } from './host-helpers.js'
 import { recordOf } from './host-persistence.js'
 
@@ -24,6 +25,10 @@ import { recordOf } from './host-persistence.js'
 export const PACKAGE_FORMAT = 'dsh-meeting-room-package'
 /** Bumped when the archive layout changes in a way an older reader cannot handle. */
 export const PACKAGE_VERSION = 1
+/** A meeting package is small; a few-hundred-KB zip must not expand to gigabytes. */
+const MAX_ENTRIES = 2000
+const MAX_ENTRY_BYTES = 64 * 1024 * 1024
+const MAX_UNPACKED_BYTES = 512 * 1024 * 1024
 
 const CRC_TABLE = (() => {
   const table = new Int32Array(256)
@@ -131,8 +136,10 @@ export function zipRead(buffer) {
   })()
   if (end < 0) throw new Error('not a zip archive')
   const count = buffer.readUInt16LE(end + 10)
+  if (count > MAX_ENTRIES) throw new Error(`this archive has too many entries (${count})`)
   let cursor = buffer.readUInt32LE(end + 16)
   const entries = []
+  let unpacked = 0
   for (let index = 0; index < count; index += 1) {
     if (buffer.readUInt32LE(cursor) !== 0x02014b50) throw new Error('damaged zip directory')
     const method = buffer.readUInt16LE(cursor + 10)
@@ -146,7 +153,15 @@ export function zipRead(buffer) {
     const localExtra = buffer.readUInt16LE(localOffset + 28)
     const start = localOffset + 30 + localName + localExtra
     const raw = buffer.subarray(start, start + size)
-    entries.push({ name, data: method === 8 ? inflateRawSync(raw) : Buffer.from(raw) })
+    let data
+    try {
+      data = method === 8 ? inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_BYTES }) : Buffer.from(raw)
+    } catch {
+      throw new Error(`entry ${name} could not be read (it may expand past the size limit)`)
+    }
+    unpacked += data.length
+    if (unpacked > MAX_UNPACKED_BYTES) throw new Error('this archive expands past the size limit')
+    entries.push({ name, data })
     cursor += 46 + nameLength + extraLength + commentLength
   }
   return entries
@@ -226,6 +241,19 @@ export async function importPackage(buffer) {
     importedAt: Date.now(),
     importedFrom: record.id ?? '',
   }
+  // A record from another machine (or an older version) is not trusted blindly: one missing
+// array would make every later flush throw, and a stale period would hide the meeting from
+// the cross-meeting queries (§2.2). Normalise, then recompute the derived fields.
+  for (const key of ['segments', 'points', 'tasks', 'notes', 'revisions', 'scores', 'speakerLabels', 'people', 'documents']) {
+    if (!Array.isArray(imported[key])) imported[key] = []
+  }
+  if (imported.speakers === null || typeof imported.speakers !== 'object' || Array.isArray(imported.speakers)) imported.speakers = {}
+  imported.kind = MEETING_KINDS.includes(imported.kind) ? imported.kind : ''
+  const importedAt = typeof imported.startedAt === 'number' && Number.isFinite(imported.startedAt) ? imported.startedAt : Date.now()
+  imported.startedAt = importedAt
+  imported.period = periodOf(imported.kind, importedAt)
+  imported.title = typeof imported.title === 'string' ? imported.title : ''
+
   const directory = exportDirectory()
   await mkdir(directory, { recursive: true })
   let copied = 0

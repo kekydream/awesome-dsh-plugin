@@ -22,11 +22,12 @@ import { mkdirSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
-import { meetings } from './host-constants.js'
+import { meetings, setScoreWeights } from './host-constants.js'
 import { createHandler } from './host-routes.js'
 import { disposeSpeakers } from './host-speaker.js'
 import { disposeHandwriting } from './host-handwriting.js'
 import { flushMeetings, restoreMeetings } from './host-persistence.js'
+import { migrateLegacyExports } from './host-helpers.js'
 import { setSessionStore, ensureMeetingForSession, reapMeetingForSession, recordingMeetingForSession } from './host-sessions.js'
 import {
   readTranscript,
@@ -37,7 +38,10 @@ import {
   saveDocument,
   writeNote,
   finalizeRecording,
+  readSettings,
+  meetingSession,
 } from './host-tools.js'
+import { MEETING_SCRIBE_SKILL, MEETING_SESSION_TOOL } from './skill-meeting-scribe.js'
 
 /**
  * Append one line to the boot canary so a broken activation is diagnosable
@@ -141,6 +145,43 @@ export function apply(ctx) {
   }, 'meeting-room: meeting_read tool')
 
   registerTool({
+    name: MEETING_SESSION_TOOL.name,
+    description: MEETING_SESSION_TOOL.description,
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['create', 'status'], description: 'create configures the meeting; status (default) reports recording state and counts.' },
+        meetingId: { type: 'string', description: 'Exact meeting id; omit for this session\'s meeting.' },
+        title: { type: 'string', description: 'Meeting name to store (create only).' },
+        kind: { type: 'string', enum: ['', 'briefing', 'review', 'weekly', 'monthly'], description: 'Meeting type (create only); empty string is an ad-hoc meeting.' },
+        summary: { type: 'string', description: 'One or two sentences about the meeting (create only).' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    execute: meetingSession,
+  }, 'meeting-room: meeting_session tool')
+
+  // The scribe skill is registered into the catalog the agent already reads. Optional
+  // access: a composition without a skills service must still load this plugin.
+  try {
+    const skills = ctx.get('skills')
+    if (skills !== null && skills !== undefined && typeof skills.register === 'function') {
+      ctx.effect(() => skills.register(MEETING_SCRIBE_SKILL), 'meeting-room: meeting-scribe skill')
+      bootLog('skill-ok')
+    } else {
+      bootLog('skill-unavailable')
+    }
+  } catch (error) {
+    bootLog('skill-failed', error)
+    warn(ctx, 'dsh-meeting-room: skill registration failed: %s', error)
+  }
+
+  registerTool({
     name: 'meeting_query',
     description: 'Find this machine\'s meetings by type, period, date range or person and read what each one holds: a short summary by default, plus tasks, points or scores on request. Read-only, and every hit carries its meeting id — which is how a later meeting writes back to an earlier one (meeting_write with an explicit meetingId), e.g. a review meeting checking off what a briefing assigned. Results read oldest first; when more meetings match than fit the limit, the older ones are omitted and the report says so.',
     parameters: {
@@ -194,6 +235,7 @@ export function apply(ctx) {
       properties: {
         meetingId: { type: 'string', description: 'Exact meeting id; omit to write to this session\'s most recent meeting.' },
         mode: { type: 'string', enum: ['append', 'replace'], description: 'append (default) adds and skips duplicates; replace clears what was stored before.' },
+        summary: { type: 'string', description: 'One or two sentences on what the meeting was about; stored on the meeting and shown above the transcript.' },
         points: {
           type: 'array',
           description: 'Key points in meeting order.',
@@ -240,6 +282,7 @@ export function apply(ctx) {
               highlight: { type: 'string', description: 'What went well, in one line.' },
               improve: { type: 'string', description: 'What to improve, in one line.' },
               basis: { type: 'array', items: { type: 'string' }, description: 'Evidence behind the numbers: transcript quotes or task ids. Never score without evidence.' },
+              total: { type: 'number', description: 'Override the weighted total 0–100; omit to let the saved weights compute it.' },
             },
             required: ['person'],
             additionalProperties: false,
@@ -395,7 +438,13 @@ export function apply(ctx) {
   ctx.effect(() => disposeHandwriting, 'meeting-room: handwriting worker')
 
   // ── Periodic flush ─────────────────────────────────────────────────────
-  const flushTimer = setInterval(() => { void flushMeetings(ctx) }, 5000)
+  const flushTimer = setInterval(() => {
+    // A rejected flush must never become an unhandled rejection: Node would terminate the
+    // host and every meeting after the bad record would stop being written.
+    void flushMeetings(ctx).catch((error) => {
+      warn(ctx, 'dsh-meeting-room: periodic flush failed: %s', error)
+    })
+  }, 5000)
   ctx.effect(() => () => {
     clearInterval(flushTimer)
     void flushMeetings(ctx)
@@ -416,7 +465,21 @@ export function apply(ctx) {
       warn(ctx, 'dsh-meeting-room: session sweep failed: %s', error)
     }
   }
-  const recovered = restoreMeetings(ctx)
+  // The score weights are a stored setting (FEATURES §2.4): load them at activation, so any
+  // total computed from now on follows the person's choice. Until this resolves the
+  // defaults are in force, which is the same value a fresh install would show.
+  void readSettings().then(
+    (settings) => { setScoreWeights(settings.scoreWeights) },
+    () => {},
+  )
+
+  // Older versions wrote recordings and artifacts to `$DSH_HOME/meetings`; bring them under
+// the plugin's own root before anything reads a bare file name (DESIGN §3.2).
+void migrateLegacyExports().then(
+  (moved) => { if (moved > 0) ctx.logger?.info('dsh-meeting-room: moved %d artifact(s) into meeting-room/exports', moved) },
+  (error) => { ctx.logger?.warn('dsh-meeting-room: could not migrate old exports: %s', error instanceof Error ? error.message : String(error)) },
+)
+const recovered = restoreMeetings(ctx)
   void recovered.then(
     (count) => {
       if (count > 0) ctx.logger?.info('dsh-meeting-room: recovered %d meeting record(s)', count)

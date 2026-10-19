@@ -5,6 +5,7 @@
  * the same values without circular imports.
  */
 import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 /** Route prefix owned by this plugin. */
@@ -111,6 +112,33 @@ export const MAX_QUERY_LIMIT = 100
  */
 export const SCORE_WEIGHTS = { quality: 0.4, completion: 0.4, learn: 0.2 }
 
+/**
+ * The weights actually in force (FEATURES §2.4, P4): the stored setting when one exists,
+ * the defaults otherwise. Kept as module state so `scoreTotal` — a pure function used by
+ * the tools and the routes alike — computes the same total everywhere.
+ */
+export const scoreWeights = { ...SCORE_WEIGHTS }
+
+/** The keys a stored weight may carry, in the order the panel shows them. */
+export const SCORE_WEIGHT_KEYS = ['quality', 'completion', 'learn']
+
+/**
+ * Replace the weights in force. Values are normalised to sum to 1, so a caller that stores
+ * percentages (40 / 40 / 20) and one that stores fractions (0.4 / 0.4 / 0.2) agree; a
+ * value set that is not three finite, non-negative numbers leaves the current weights
+ * untouched rather than silently scoring everyone zero.
+ * @param next - the candidate weights, keyed quality / completion / learn.
+ * @returns the weights now in force.
+ */
+export function setScoreWeights(next) {
+  const values = SCORE_WEIGHT_KEYS.map((key) => (next !== null && typeof next === 'object' ? Number(next[key]) : Number.NaN))
+  if (!values.every((value) => Number.isFinite(value) && value >= 0)) return { ...scoreWeights }
+  const sum = values.reduce((total, value) => total + value, 0)
+  if (!(sum > 0)) return { ...scoreWeights }
+  SCORE_WEIGHT_KEYS.forEach((key, index) => { scoreWeights[key] = values[index] / sum })
+  return { ...scoreWeights }
+}
+
 /** Point kinds the model may use; anything else is stored as a plain point. */
 export const POINT_KINDS = ['decision', 'point', 'risk', 'question']
 
@@ -129,8 +157,15 @@ export const MAX_CUE_LIMIT = 4000
 /** In-memory meetings, keyed by meeting id. */
 export const meetings = new Map()
 
-/** Serialized text last written per meeting, so a flush skips unchanged records. */
-export const persisted = new Map()
+/**
+ * A meeting id that cannot collide. A bare millisecond timestamp did: the boot sweep can
+ * create several meetings inside one tick, and two records with the same id overwrite each
+ * other in memory and on disk (DESIGN §2.1 requires a unique id).
+ * @returns a unique id of the form meeting-<timestamp36>-<random>.
+ */
+export function newMeetingId() {
+  return `meeting-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`
+}
 
 /**
  * Speaker support as this process sees it: the model must be present and verified, and

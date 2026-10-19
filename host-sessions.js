@@ -10,7 +10,7 @@
  *   - 会话销毁时回收：空且从未落盘的会议随会话一起消失；有内容的会议已经是历史
  *     记录，继续保留并可由「会议管理」打开。
  */
-import { meetings } from './host-constants.js'
+import { meetings, newMeetingId } from './host-constants.js'
 import { meetingIsEmpty, persisted } from './host-persistence.js'
 import { findMeeting } from './host-helpers.js'
 
@@ -32,7 +32,7 @@ export function setSessionStore(value) {
  * @returns the new meeting.
  */
 export function newMeeting(sessionId, startedAt) {
-  const id = `meeting-${Date.now().toString(36)}`
+  const id = newMeetingId()
   return {
     id,
     startedAt,
@@ -87,6 +87,12 @@ export function ownsMeeting(session) {
  * @returns the owned meeting, or undefined for delegated or invalid sessions.
  */
 export function ensureMeetingForSession(ctx, session) {
+  // The sessions service can register after this plugin activates; resolving it lazily
+  // keeps the subagent lineage walk working instead of silently reading a null store.
+  if (sessionStore === null && typeof ctx?.get === 'function') {
+    const live = ctx.get('sessions')
+    if (live !== null && live !== undefined) sessionStore = live
+  }
   const sessionId = typeof session?.id === 'string' ? session.id : ''
   if (sessionId === '') return undefined
   if (!ownsMeeting(session)) return undefined

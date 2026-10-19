@@ -10,14 +10,25 @@
 import { readSettings, writeSettings } from './host-tools.js'
 import { DEFAULT_RULES } from './host-text.js'
 
-/** Cue shaping defaults — the values the browser half has always used. */
+/**
+ * Cue shaping defaults. A cue should end on a pause, not mid-sentence: 12 s is enough for
+ * a full spoken sentence plus its clause, and 0.7 s of silence is a real pause rather than
+ * the breath between words. The panel still shows text as each cue returns.
+ */
 export const MIN_CHUNK_SECONDS = 1.2
-export const MAX_CHUNK_SECONDS = 5
+export const MAX_CHUNK_SECONDS = 12
 export const SILENCE_RMS = 0.012
-export const SILENCE_HOLD_SECONDS = 0.5
+export const SILENCE_HOLD_SECONDS = 0.7
+
+/**
+ * Longest text put on one transcript line. A cue may hold twelve seconds of fast speech —
+ * several sentences — so the host splits it at the recognizer's punctuation until no line
+ * is longer than this. Short enough to read, long enough to keep a sentence together.
+ */
+export const MAX_LINE_CHARS = 60
 
 /** The limits a cue's length may be set to, so a typo cannot make recording unusable. */
-export const CHUNK_LIMITS = { minSeconds: 0.5, maxSeconds: 30, silenceRms: [0.002, 0.08], holdSeconds: 0.1 }
+export const CHUNK_LIMITS = { minSeconds: 0.5, maxSeconds: 30, silenceRms: [0.002, 0.08], holdSeconds: 0.1, lineChars: [20, 200] }
 
 /** Defaults for the transcript section. */
 export function defaultTranscriptSettings() {
@@ -29,6 +40,7 @@ export function defaultTranscriptSettings() {
     maxChunkSeconds: MAX_CHUNK_SECONDS,
     silenceRms: SILENCE_RMS,
     silenceHoldSeconds: SILENCE_HOLD_SECONDS,
+    maxLineChars: MAX_LINE_CHARS,
   }
 }
 
@@ -58,6 +70,8 @@ export async function readTranscriptSettings() {
   if (Number.isFinite(rms)) transcript.silenceRms = clamp(rms, CHUNK_LIMITS.silenceRms[0], CHUNK_LIMITS.silenceRms[1])
   const hold = Number(stored.silenceHoldSeconds)
   if (Number.isFinite(hold)) transcript.silenceHoldSeconds = clamp(hold, CHUNK_LIMITS.holdSeconds, 5)
+  const lineChars = Number(stored.maxLineChars)
+  if (Number.isFinite(lineChars)) transcript.maxLineChars = Math.round(clamp(lineChars, CHUNK_LIMITS.lineChars[0], CHUNK_LIMITS.lineChars[1]))
   return transcript
 }
 
@@ -84,6 +98,8 @@ export async function writeTranscriptSettings(patch) {
   if (Number.isFinite(rms)) next.silenceRms = clamp(rms, CHUNK_LIMITS.silenceRms[0], CHUNK_LIMITS.silenceRms[1])
   const hold = Number(patch?.silenceHoldSeconds)
   if (Number.isFinite(hold)) next.silenceHoldSeconds = clamp(hold, CHUNK_LIMITS.holdSeconds, 5)
+  const lineChars = Number(patch?.maxLineChars)
+  if (Number.isFinite(lineChars)) next.maxLineChars = Math.round(clamp(lineChars, CHUNK_LIMITS.lineChars[0], CHUNK_LIMITS.lineChars[1]))
   settings.transcript = next
   await writeSettings({ ...settings, transcript: next })
   return next

@@ -26,7 +26,8 @@ if (process.env.DSH_PYTHON === undefined) {
 }
 const hasPython = process.env.DSH_PYTHON !== undefined || process.env.PATH?.includes('python') === true
 
-const { meetings } = await import(`${plugin}/host-constants.js`)
+const constants = await import(`${plugin}/host-constants.js`)
+const { meetings } = constants
 const tools = await import(`${plugin}/host-tools.js`)
 const sessions = await import(`${plugin}/host-sessions.js`)
 const persistence = await import(`${plugin}/host-persistence.js`)
@@ -34,7 +35,7 @@ const { createHandler } = await import(`${plugin}/host-routes.js`)
 const { exportDirectory } = await import(`${plugin}/host-helpers.js`)
 /** The registry module, used directly for the "which model is actually in use" assertions. */
 const speakerModels = await import(`${plugin}/host-models.js`)
-const { zipRead, importPackage, PACKAGE_FORMAT } = await import(`${plugin}/host-package.js`)
+const { zipRead, zipWrite, importPackage, PACKAGE_FORMAT } = await import(`${plugin}/host-package.js`)
 
 const results = []
 const check = (name, ok) => {
@@ -107,6 +108,8 @@ function seed(id, extra = {}) {
 // ---------------------------------------------------------------------------
 // 1. 会话 ↔ 会议
 // ---------------------------------------------------------------------------
+const ids = new Set(Array.from({ length: 200 }, () => constants.newMeetingId()))
+check('会议 id 不靠毫秒时间戳，不会互相覆盖', ids.size === 200)
 const owned = sessions.ensureMeetingForSession(ctx, { id: 's-root', header: { createdAt: started } })
 check('一个会话建出且只建出一场会议', owned !== undefined && sessions.ensureMeetingForSession(ctx, { id: 's-root', header: {} })?.id === owned.id)
 check('同一会话再问一次不会多建', [...meetings.values()].filter((m) => m.sessionId === 's-root').length === 1)
@@ -179,7 +182,9 @@ const brief = seed('m-brief', {
   tasks: [{ id: 't1', title: '排期评审', owner: '张三', due: '明天', priority: 'high', status: 'draft', origin: 'agent', done: false }],
 })
 const review = seed('m-review', { kind: 'review', period: tools.periodOf('review', started - day), title: '复盘 · 昨天', startedAt: started - day })
-seed('m-blank', { startedAt: started - 2 * day, title: '临时碰头' })
+// Deliberately nameless and empty: an eager meeting of a live session, which the history
+// must not list and the store must not write (DESIGN §4).
+seed('m-blank', { startedAt: started - 2 * day })
 
 const history = await call('/history?limit=2')
 check('历史按最近优先', history.value.meetings.length === 2 && history.value.meetings[0].meetingId === 'm-brief')
@@ -189,7 +194,7 @@ check('按名称过滤', (await call('/history?query=' + encodeURIComponent('复
 check('按实录文字过滤', (await call('/history?query=' + encodeURIComponent('上线风险'))).value.meetings.some((row) => row.meetingId === 'm-brief'))
 check('按要点过滤', (await call('/history?query=' + encodeURIComponent('周五上线'))).value.meetings.some((row) => row.meetingId === 'm-brief'))
 check('命中计数与摘要随行返回', history.value.meetings[0].counts.points === 1 && history.value.meetings[0].excerpt !== '')
-check('无内容会议标记为空', (await call('/history?query=' + encodeURIComponent('临时碰头'))).value.meetings[0].hasContent === false)
+check('空会议不出现在历史里', (await call('/history?limit=200')).value.meetings.every((row) => row.meetingId !== 'm-blank'))
 
 // ---------------------------------------------------------------------------
 // 4. 遗留结转
@@ -211,10 +216,24 @@ const byYesterday = await tools.queryMeetings({ kind: 'review', period: 'yesterd
 check('周期别名查询命中昨日复盘', typeof byYesterday === 'string' && byYesterday.includes('m-review'))
 const byPerson = await tools.queryMeetings({ person: '张三' }, { agent: { session: { id: 'session-m-brief' } } })
 check('按人查询命中', typeof byPerson === 'string' && byPerson.includes('m-brief'))
+
 const closed = await tools.writeAnalysis({ meetingId: 'm-brief', tasks: [{ id: 't1', done: true }] }, { agent: { session: { id: 'session-m-brief' } } })
 check('跨会核销把任务标为完成', brief.tasks[0].done === true && typeof brief.tasks[0].doneAt === 'number')
 check('核销会回一句确认', typeof closed === 'string' && closed.includes('m-brief'))
 check('草稿状态不因完成而改变', brief.tasks[0].status === 'draft')
+const historyDone = await call('/history?query=' + encodeURIComponent('晨会 · 排期'))
+check('历史行带回完成统计（管理页核销列）', historyDone.value.meetings[0].counts.done === 1
+  && historyDone.value.meetings[0].counts.tasks === brief.tasks.length)
+seed('m-week', { kind: 'weekly', period: tools.periodOf('weekly', started), startedAt: started, title: '本周例会' })
+seed('m-review-today', { kind: 'review', period: tools.periodOf('review', started), startedAt: started, title: '本周复盘' })
+const thisWeek = await tools.queryMeetings({ period: 'this-week' })
+check('本周别名跨类型命中晨会、复盘与例会', ['m-brief', 'm-review-today', 'm-week'].every((id) => thisWeek.includes(id)))
+check('period 与 from/to 同时给会被拒绝', String(await tools.queryMeetings({ period: 'this-week', from: '2026-01-01' })).includes('互斥'))
+check('非法日期不会悄悄滚到别的月份', String(await tools.queryMeetings({ from: '2026-13-40' })).includes('合法日期'))
+check('ISO 周范围按周一到周日', (() => {
+  const range = tools.periodRange('2026-W43')
+  return range !== undefined && new Date(range.from).getDay() === 1 && new Date(range.to).getDay() === 0
+})())
 
 // ---------------------------------------------------------------------------
 // 5b. 单条工作安排的发送（每条自己的按钮）
@@ -266,6 +285,41 @@ if (!hasPython) {
   const xlsxBytes = xlsx.status === 200 ? await fs.readFile(join(exportDirectory(), xlsx.value.name)).catch(() => Buffer.alloc(0)) : Buffer.alloc(0)
   check('xlsx 文件以 PK 开头', xlsxBytes.length > 4 && xlsxBytes.subarray(0, 2).toString() === 'PK')
 }
+
+// ---------------------------------------------------------------------------
+// 6a. 评分的依据与权重（FEATURES §2.4）
+// ---------------------------------------------------------------------------
+const scoreCount = monthly.scores.length
+const refusedScore = await tools.writeAnalysis({
+  meetingId: 'm-month',
+  scores: [{ person: '李四', quality: 8, completion: 50 }],
+}, { agent: { session: { id: 'session-m-month' } } })
+check('没有依据的评分被拒（不许凭空打分）', monthly.scores.length === scoreCount && String(refusedScore).includes('basis'))
+check('被拒的评分在提示里说明原因', String(refusedScore).includes('refused'))
+await call('/scores', { meetingId: 'm-month', person: '王五', op: 'add' }, 'POST')
+const confirmBare = await call('/scores', { meetingId: 'm-month', person: '王五', patch: { status: 'confirmed' } }, 'POST')
+check('缺依据的评分不能确认', confirmBare.status === 400 && String(confirmBare.value.error).includes('依据'))
+const confirmWithBasis = await call('/scores', { meetingId: 'm-month', person: '王五', patch: { basis: ['实录 12:30 交付完成'], status: 'confirmed' } }, 'POST')
+const wang = monthly.scores.find((entry) => entry.person === '王五')
+check('填上依据后可以确认', confirmWithBasis.status === 200 && wang?.status === 'confirmed' && wang?.basis.length === 1)
+const badWeights = await call('/webhooks', { scoreWeights: { quality: 40, completion: 40, learn: 30 } }, 'POST')
+check('权重之和不是 100% 被拒', badWeights.status === 400 && String(badWeights.value.error).includes('100'))
+const savedWeights = await call('/webhooks', { scoreWeights: { quality: 50, completion: 30, learn: 20 } }, 'POST')
+const gotWeights = await call('/webhooks')
+check('权重可保存为分数并回读', savedWeights.status === 200
+  && Math.abs(Number(gotWeights.value.scoreWeights.quality) - 0.5) < 1e-9
+  && Math.abs(Number(gotWeights.value.scoreWeights.learn) - 0.2) < 1e-9)
+await call('/scores', { meetingId: 'm-month', person: '张三', patch: { quality: 10, completion: 100, learn: 0 } }, 'POST')
+check('总分按保存后的权重重算', monthly.scores.find((entry) => entry.person === '张三')?.total === 80)
+await call('/webhooks', { scoreWeights: { quality: 40, completion: 40, learn: 20 } }, 'POST')
+check('权重可以恢复默认', tools.scoreTotal({ quality: 10, completion: 0, learn: 0 }) === 40)
+const savedTemplates = await call('/webhooks', { templates: { briefing: '自定义：{meetingId} / {title}', review: '' } }, 'POST')
+check('提炼模板可保存并回读', savedTemplates.status === 200
+  && savedTemplates.value.templates.briefing === '自定义：{meetingId} / {title}'
+  && (await call('/webhooks')).value.templates.briefing === '自定义：{meetingId} / {title}')
+const longTemplate = await call('/webhooks', { templates: { briefing: 'x'.repeat(5000) } }, 'POST')
+check('过长的模板被截断而不是整段存下', longTemplate.status === 200 && longTemplate.value.templates.briefing.length === 4000)
+await call('/webhooks', { templates: {} }, 'POST')
 
 // ---------------------------------------------------------------------------
 // 6b. 推送工作安排
@@ -323,6 +377,25 @@ check('导入得到新会议且不挂在会话上', restored.meetingId !== 'm-br
 check('导入保留内容与发言人标签', meetings.get(restored.meetingId)?.tasks.length === brief.tasks.length
   && JSON.stringify(meetings.get(restored.meetingId)?.speakerLabels ?? []) === JSON.stringify(brief.speakerLabels ?? []))
 check('导入记下来源会议', meetings.get(restored.meetingId)?.importedFrom === 'm-brief')
+// A package from an older (or hand-made) version may miss arrays and carry a stale period;
+// importing it must not hand the flush loop a record that throws (§2.2).
+const rough = zipWrite([
+  { name: 'manifest.json', data: Buffer.from(JSON.stringify({ format: PACKAGE_FORMAT, version: 1 })) },
+  {
+    name: 'meeting.json',
+    data: Buffer.from(JSON.stringify({
+      id: 'rough-1', sessionId: 's-rough', title: '旧包', kind: 'weekly', period: '1999-W01',
+      startedAt: started, segments: null, points: null, tasks: 'oops', scores: null,
+    })),
+  },
+])
+const roughImported = await importPackage(rough)
+const roughMeeting = meetings.get(roughImported.meetingId)
+check('导入补齐缺失数组，坏记录不会拖垮落盘', roughMeeting !== undefined
+  && Array.isArray(roughMeeting.segments) && Array.isArray(roughMeeting.points)
+  && Array.isArray(roughMeeting.tasks) && Array.isArray(roughMeeting.scores))
+check('导入按 startedAt 重算 period', roughMeeting?.period === tools.periodOf('weekly', started))
+check('拒绝过多条目的压缩包', await importPackage(zipWrite(Array.from({ length: 2001 }, (_, index) => ({ name: `f${index}.txt`, data: Buffer.alloc(1) })))).then(() => false, (error) => String(error.message).includes('too many')))
 
 // ---------------------------------------------------------------------------
 // 7c. 版本信息（「关于」对话框读的就是它）
@@ -466,6 +539,30 @@ check('客户端不再把探测失败当作就绪', !/catch\s*\{\s*return\s*\{\s
 check('客户端初始状态不谎报就绪', !/useState\(\{\s*ready:\s*true/u.test(clientSource))
 check('失败的路由请求带上 HTTP 状态（用来区分 404 与忙）', clientSource.includes('failure.status = response.status'))
 check('准备过程对终态与停滞都有出口（不会空等十分钟）', clientSource.includes('setupPrepareStalled') && clientSource.includes("s.phase === 'missing'"))
+// §5.1/§5.2/§5.5 的实际入口：这些名字或调用一旦被改掉，对应功能就会静默消失。
+check('面板标题行含名称、类型与系列导航', clientSource.includes('titlerow') && clientSource.includes('series.prev') && clientSource.includes("saveMeta({ kind"))
+check('四套一键提炼按钮都在', ['distillBriefing', 'distillReview', 'distillWeekly', 'distillMonthly'].every((key) => clientSource.includes(`${key}:`)))
+check('本地提取接到 /extract', clientSource.includes("post('/extract'"))
+check('命名弹窗有「临时会议」', clientSource.includes('kindAdhoc'))
+check('管理页类型筛选有独立的全部', clientSource.includes('__all__') && clientSource.includes('hubAll'))
+check('管理页可加载更早的会议', clientSource.includes('hubLoadMore') && clientSource.includes('offset='))
+check('历史会议也能重新识别发言人', clientSource.includes('const id = viewing !== null ? viewing.meetingId : await ensureMeeting()'))
+check('一键提炼使用设置里的模板', clientSource.includes('templates[meta.kind]') && clientSource.includes('custom === \'\''))
+// §2.4 的评分输入：受控草稿，输入不被往返打断，失焦后以服务端夹紧后的值为准。
+check('评分输入是受控草稿而不是 defaultValue', clientSource.includes('scoreValueOf(row.person') && clientSource.includes('commitScore(row.person')
+  && !clientSource.includes("key: `hours-${row.hours"))
+// 评分表的可访问性：表格/行/列头语义，且每个控件用自己的列名+人名做标签。
+check('评分表有表格语义与逐控件标签', clientSource.includes("role: 'table'")
+  && clientSource.includes("role: 'columnheader'") && clientSource.includes("role: 'rowheader'")
+  && clientSource.includes('${t(\'scoreHours\')}：${row.person}'))
+// 设置页按功能分 tab：六个分组各有自己的标签，且每块只在对应 tab 下渲染。
+check('设置页按功能分成六个 tab', clientSource.includes('settingsTab, setSettingsTab')
+  && ['push', 'cloud', 'transcript', 'speaker', 'weights', 'templates'].every((id) => clientSource.includes(`settingsTab !== '${id}' ? null`))
+  && ['settingsTabPush', 'settingsTabCloud', 'settingsTabTranscript', 'settingsTabSpeaker', 'settingsTabWeights', 'settingsTabTemplates'].every((key) => clientSource.includes(`'${key}'`)))
+check('会议记录页提示上次会议主题', clientSource.includes("key: 'lasttopic'") && clientSource.includes("t('hubLastTopic')"))
+// 停止录音要收尾（补识别 + 全量重判），这段等待必须有提示，否则像卡住。
+check('停止录音的收尾等待有 toast', clientSource.includes("const waiting = toast(t('stopFinishing'))")
+  && clientSource.includes("t('stopRemaining')") && clientSource.includes("t('stopFinished')"))
 
 // ---------------------------------------------------------------------------
 // 7g. M3：阈值可调、全量重判、跨会议声纹库（建议姓名需人确认）
@@ -545,18 +642,21 @@ check('关掉规则后一字不动', textTools.normalizeText('二零二六年十
 const transcriptRead = await call('/transcript')
 check('实录设置给出默认规整与切句参数', transcriptRead.status === 200
   && transcriptRead.value.transcript.normalize === true
-  && transcriptRead.value.transcript.maxChunkSeconds === 5
+  && transcriptRead.value.transcript.maxChunkSeconds === 12
+  && transcriptRead.value.transcript.maxLineChars === 60
   && Array.isArray(transcriptRead.value.rules) && transcriptRead.value.rules.length >= 5)
 check('实录设置诚实报告本机是否有语音能力', typeof transcriptRead.value.local === 'boolean')
-const transcriptWrite = await call('/transcript', { normalize: false, minChunkSeconds: 0.8, maxChunkSeconds: 12, silenceHoldSeconds: 0.3 }, 'POST')
+const transcriptWrite = await call('/transcript', { normalize: false, minChunkSeconds: 0.8, maxChunkSeconds: 12, silenceHoldSeconds: 0.3, maxLineChars: 40 }, 'POST')
 check('切句参数可写入并回读', transcriptWrite.status === 200
   && transcriptWrite.value.transcript.maxChunkSeconds === 12
   && transcriptWrite.value.transcript.silenceHoldSeconds === 0.3
+  && transcriptWrite.value.transcript.maxLineChars === 40
   && (await call('/transcript')).value.transcript.minChunkSeconds === 0.8)
+check('每行字数越界会被夹住', (await call('/transcript', { maxLineChars: 999 }, 'POST')).value.transcript.maxLineChars === 200)
 check('越界的切句参数被夹到合法区间', (await call('/transcript', { maxChunkSeconds: 999, silenceRms: 99 }, 'POST')).value.transcript.maxChunkSeconds <= 30)
 check('最短大于最长时自动对齐', (await call('/transcript', { minChunkSeconds: 9, maxChunkSeconds: 3 }, 'POST')).value.transcript.maxChunkSeconds >= 9)
 check('不认识的规整规则被丢弃', (await call('/transcript', { normalizeRules: ['percent', '不存在'] }, 'POST')).value.transcript.normalizeRules.length === 1)
-await call('/transcript', { normalize: true, normalizeRules: textTools.DEFAULT_RULES, minChunkSeconds: 1.2, maxChunkSeconds: 5, silenceRms: 0.012, silenceHoldSeconds: 0.5 }, 'POST')
+await call('/transcript', { normalize: true, normalizeRules: textTools.DEFAULT_RULES, minChunkSeconds: 1.2, maxChunkSeconds: 12, silenceRms: 0.012, silenceHoldSeconds: 0.7, maxLineChars: 60 }, 'POST')
 const clientForM4 = await fs.readFile(join(here, 'client.js'), 'utf8')
 check('浏览器半边的切句参数来自设置而不是写死', clientForM4.includes('applyCueSettings') && clientForM4.includes('CUES.maxSeconds'))
 check('规整结果与被识别的原文并存', (await fs.readFile(join(here, 'host-tools.js'), 'utf8')).includes('segment.normalised = normalised'))
@@ -578,12 +678,81 @@ check('meeting_revise 留下订正与对照', brief.segments[0].revised !== unde
 const recipe = tools.distillForSession({}, agent)
 check('meeting_distill 给出配方', typeof recipe === 'string' && recipe.includes('meeting_read') && recipe.includes('m-brief'))
 
+// meeting-scribe 的两块地基：会议状态工具 + 句子续接（供 5 分钟循环判断收尾）。
+const scribeMeeting = seed('m-scribe', { sessionId: 'session-scribe', title: '周例会' })
+const scribeAgent = { agent: { session: { id: 'session-scribe' } } }
+const scribeStatus = tools.meetingSession({ action: 'status' }, scribeAgent)
+check('meeting_session 报告录音状态与条数', typeof scribeStatus === 'string'
+  && scribeStatus.includes('录音：已停止') && scribeStatus.includes('m-scribe'))
+const scribeCreated = tools.meetingSession({ action: 'create', title: '十月周例会', kind: 'weekly' }, scribeAgent)
+check('meeting_session 可命名并设类型且重算周期', scribeMeeting.title === '十月周例会'
+  && scribeMeeting.kind === 'weekly' && scribeMeeting.period === tools.periodOf('weekly', scribeMeeting.startedAt)
+  && scribeCreated.includes('会议名称与类型已保存'))
+const scribeMissing = tools.meetingSession({ action: 'status' }, { agent: { session: { id: 'session-none' } } })
+check('没有会议时 meeting_session 给出可操作提示', scribeMissing.includes('还没有会议记录'))
+
+const fragmentMeeting = seed('m-merge', { segments: [
+  { id: '1', start: 0, end: 2, text: '我们下周', speaker: 'S1' },
+  { id: '2', start: 2.3, end: 4.1, text: '把方案交上来', speaker: 'S1' },
+] })
+check('未说完的句子被并成一句', tools.mergeContinuation(fragmentMeeting, 1) === true
+  && fragmentMeeting.segments.length === 1
+  && fragmentMeeting.segments[0].text === '我们下周把方案交上来'
+  && fragmentMeeting.segments[0].end === 4.1)
+const finishedMeeting = seed('m-merge-stop', { segments: [
+  { id: '1', start: 0, end: 2, text: '方案定了。', speaker: 'S1' },
+  { id: '2', start: 2.2, end: 4, text: '明天发出去', speaker: 'S1' },
+] })
+check('已收句的不会并到下一句', tools.mergeContinuation(finishedMeeting, 1) === false && finishedMeeting.segments.length === 2)
+const scribeSkill = await import(`${plugin}/skill-meeting-scribe.js`)
+check('meeting-scribe 技能说明包含 5 分钟循环与自动停止', scribeSkill.MEETING_SCRIBE_SKILL.content.includes('300')
+  && scribeSkill.MEETING_SCRIBE_SKILL.content.includes('schedule_delete')
+  && scribeSkill.MEETING_SCRIBE_SKILL.content.includes('meeting_session'))
+check('技能在插件激活时注册到 skills 服务', (await fs.readFile(join(here, 'index.js'), 'utf8')).includes('skills.register(MEETING_SCRIBE_SKILL)'))
+
+// 语速快时一个 cue 里会有好几句：按标点拆行，云端的 segment 边界优先。
+const lineTools = await import(`${plugin}/host-tools.js`)
+const pieces = lineTools.sentenceParts('第一件事是预算。第二件事是排期，第三件事是人手，都要今天定下来。', 20)
+check('长句按句号与逗号拆成不超过上限的行', pieces.length >= 3
+  && pieces.every((piece) => piece.length <= 26)
+  && pieces.some((piece) => piece.includes('预算')))
+const splitMeeting = seed('m-split', { segments: [
+  { id: '9', start: 0, end: 6, text: '第一句。第二句。第三句。', speaker: 'S1', embedding: 'vec' },
+] })
+const splitCount = lineTools.splitCueIntoSentences(splitMeeting, 0, { maxChars: 60 })
+check('一个 cue 拆成多行且保留发言人与时间范围', splitCount === 3
+  && splitMeeting.segments.length === 3
+  && splitMeeting.segments[0].id === '9.1'
+  && splitMeeting.segments[2].text === '第三句。'
+  && splitMeeting.segments.every((segment) => segment.speaker === 'S1' && segment.embedding === 'vec')
+  && splitMeeting.segments[0].start === 0 && splitMeeting.segments[2].end === 6)
+const hintMeeting = seed('m-hint', { segments: [
+  { id: 'h', start: 10, end: 16, text: '云端整段文本', speaker: 'S2' },
+] })
+check('云端 segment 时间被优先采用', lineTools.splitCueIntoSentences(hintMeeting, 0, {
+  hints: [{ start: 0, end: 2.5, text: '云端第一句。' }, { start: 2.5, end: 6, text: '云端第二句。' }],
+}) === 2 && hintMeeting.segments[0].start === 10 && hintMeeting.segments[0].end === 12.5
+  && hintMeeting.segments[1].start === 12.5 && hintMeeting.segments[1].end === 16)
+check('单句不会被拆开', lineTools.sentenceParts('短句。', 60).length === 1)
+const normMeeting = seed('m-norm', { segments: [
+  { id: 'n', start: 0, end: 4, text: '完成百分之三十。再谈预算。' },
+] })
+lineTools.splitCueIntoSentences(normMeeting, 0, { maxChars: 60, normalizeRules: textTools.DEFAULT_RULES })
+check('拆分后数字规整跟着每一行走', normMeeting.segments.length === 2
+  && normMeeting.segments[0].text === '完成百分之三十。'
+  && normMeeting.segments[0].normalised === '完成30%。')
+
 // ---------------------------------------------------------------------------
 // 9. 持久化
 // ---------------------------------------------------------------------------
-await persistence.flushMeetings(ctx)
+// A name is content: a meeting the person named must survive even without a recording,
+// while a genuinely blank one stays out of the store (FEATURES §5.5).
+seed('m-named', { title: '只命名没录' })
+const flushed = await persistence.flushMeetings(ctx)
 const files = await fs.readdir(join(tmp, 'meeting-room', 'meetings')).catch(() => [])
+check('flush 如实回报写了几个、失败几条', typeof flushed.written === 'number' && Array.isArray(flushed.failed) && flushed.failed.length === 0)
 check('有内容的会议落盘', files.includes('m-brief.json'))
+check('只命名不录也落盘', files.includes('m-named.json'))
 check('空会议不落盘', !files.includes('m-blank.json'))
 const stored = JSON.parse(await fs.readFile(join(tmp, 'meeting-room', 'meetings', 'm-brief.json'), 'utf8'))
 check('落盘保留要点、任务、笔记与订正', stored.points.length >= 1 && stored.tasks.length >= 1 && stored.notes.length >= 1 && stored.revisions.length === 1)
