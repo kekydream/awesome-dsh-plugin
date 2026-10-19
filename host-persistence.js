@@ -28,8 +28,11 @@ export function meetingStoreDirectory() {
 export function recordOf(meeting) {
   // A writer handle and an abort controller are process-local; speaker embeddings belong to
   // the recording that produced them and are rebuilt by the next one; kept PCM is only a
-  // stop-time backfill vehicle for cues the first-pass labeling missed.
-  const { audioHandle, controller, ...rest } = meeting
+  // stop-time backfill vehicle for cues the first-pass labeling missed. Voice centroids are
+  // derived from those embeddings and are deliberately NOT persisted either: the voice library
+  // (host-voices.js) is the only place a voice profile is kept, and it is written only when a
+  // person names a speaker.
+  const { audioHandle, controller, voiceCentroids, ...rest } = meeting
   const segments = rest.segments.map(({ embedding, pcm, ...segment }) => segment)
   return JSON.stringify({
     ...rest,

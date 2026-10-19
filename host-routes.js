@@ -29,6 +29,7 @@ import {
   MEETING_KINDS,
   ROLE_LABELS,
   seenText,
+  SPEAKER_THRESHOLD_PRESETS,
 } from './host-constants.js'
 
 import {
@@ -46,12 +47,22 @@ import {
   pythonExecutable,
 } from './host-helpers.js'
 
-import { speakerState, prepareSpeakers, labelCue, relabelFromRecording, noteSpeakerLabel } from './host-speaker.js'
+import { speakerState, prepareSpeakers, labelCue, relabelFromRecording, noteSpeakerLabel, retireSpeakerWorker } from './host-speaker.js'
 import { handwritingState, recognizeHandwriting, prepareHandwriting } from './host-handwriting.js'
 import { flushMeetings, meetingIsEmpty } from './host-persistence.js'
 import { packageMeeting, importPackage } from './host-package.js'
 import { modelState, installModel, importModel, activateModel, removeModel } from './host-models.js'
 import { cloudTranscribe, cloudEmbed, cloudSummary, writeCloudSettings, testCloud, redact, cloudState } from './host-providers.js'
+import {
+  readSpeakerSettings,
+  writeSpeakerSettings,
+  voiceSummary,
+  voicesFile,
+  removeVoice,
+  clearVoices,
+  suggestNames,
+  learnFromMeeting,
+} from './host-voices.js'
 
 /** Ceiling for an imported archive: a long meeting's recording travels inside one. */
 const IMPORT_BODY_BYTES = 512 * 1024 * 1024
@@ -355,6 +366,9 @@ export function createHandler(ctx) {
           people: meeting.people ?? [],
           documents: meeting.documents ?? [],
           labels: speakerLabels(meeting),
+          // "This sounds like 张三" — offered, never written. The panel shows it and a person
+          // decides; that rule is why keeping a voice library is acceptable at all.
+          suggestions: await suggestNames(meeting).catch(() => []),
           speaker: { phase: speakerState.phase, message: speakerState.message },
         })
         return
@@ -557,6 +571,52 @@ export function createHandler(ctx) {
         return
       }
 
+      if (method === 'GET' && route === '/speaker/settings') {
+        // The clustering threshold and the end-of-meeting pass: what this installation does,
+        // not what one meeting is.
+        sendJson(res, 200, {
+          speaker: await readSpeakerSettings(),
+          presets: SPEAKER_THRESHOLD_PRESETS,
+          model: speakerState.modelId,
+          library: await voiceSummary(),
+          libraryFile: voicesFile(),
+        })
+        return
+      }
+
+      if (method === 'POST' && route === '/speaker/settings') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const { speaker, thresholdChanged } = await writeSpeakerSettings(body)
+        // The threshold is handed to the worker when it starts, so a change has to retire the
+        // running one. Saying that it restarted beats pretending the new value is in force.
+        let restarted = false
+        if (thresholdChanged && speakerState.phase !== 'unprepared') {
+          restarted = retireSpeakerWorker()
+          speakerState.phase = 'unprepared'
+          speakerState.message = ''
+        }
+        sendJson(res, 200, { speaker, restarted })
+        return
+      }
+
+      if (method === 'GET' && route === '/voices') {
+        // Names and evidence only: a vector never travels over the plugin's HTTP surface.
+        sendJson(res, 200, { voices: await voiceSummary(), file: voicesFile() })
+        return
+      }
+
+      if (method === 'POST' && route === '/voices/remove') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const removed = await removeVoice(typeof body.name === 'string' ? body.name.trim() : '')
+        sendJson(res, removed ? 200 : 404, removed ? { removed: true, voices: await voiceSummary() } : { error: 'unknown voice' })
+        return
+      }
+
+      if (method === 'POST' && route === '/voices/clear') {
+        sendJson(res, 200, { removed: await clearVoices(), voices: [] })
+        return
+      }
+
       if (method === 'POST' && route === '/speaker/name') {
         const body = JSON.parse((await readBody(req)).toString('utf8'))
         const meeting = meetings.get(body.meetingId)
@@ -576,7 +636,10 @@ export function createHandler(ctx) {
         // An empty name clears the assignment and the label shows again.
         if (name === '') delete meeting.speakers[label]
         else meeting.speakers[label] = name
-        sendJson(res, 200, { speakers: meeting.speakers, segments: publicSegments(meeting) })
+        // Naming a speaker is the human confirmation the voice library waits for: only here is
+        // a voice profile written, and it is derived from this meeting's own cues.
+        const learned = name === '' ? null : await learnFromMeeting(meeting, label, name).catch(() => null)
+        sendJson(res, 200, { speakers: meeting.speakers, segments: publicSegments(meeting), learned })
         return
       }
 
@@ -995,6 +1058,8 @@ export function createHandler(ctx) {
             scores: meeting.scores ?? [],
             speakers: meeting.speakers,
             labels: speakerLabels(meeting),
+            // Offered, never written — the same rule as /state.
+            suggestions: await suggestNames(meeting).catch(() => []),
             // The rest of what the panel renders, so a reload restores it from one answer.
             role: meeting.role ?? '',
             documents: meeting.documents ?? [],

@@ -468,6 +468,66 @@ check('失败的路由请求带上 HTTP 状态（用来区分 404 与忙）', cl
 check('准备过程对终态与停滞都有出口（不会空等十分钟）', clientSource.includes('setupPrepareStalled') && clientSource.includes("s.phase === 'missing'"))
 
 // ---------------------------------------------------------------------------
+// 7g. M3：阈值可调、全量重判、跨会议声纹库（建议姓名需人确认）
+// ---------------------------------------------------------------------------
+const voices = await import(`${plugin}/host-voices.js`)
+const speakerSettings = await call('/speaker/settings')
+check('发言人设置给出默认阈值与全量重判', speakerSettings.status === 200
+  && speakerSettings.value.speaker.threshold === 0.6
+  && speakerSettings.value.speaker.fullRelabel === true
+  && Array.isArray(speakerSettings.value.presets) && speakerSettings.value.presets.length === 3)
+check('默认补标计划是全量（不再卡 60 条）', JSON.stringify(await voices.relabelPlan()) === '{"all":true}')
+const planOff = (await import(`${plugin}/host-constants.js`)).relabelPlanOf({ fullRelabel: false, backfillCap: 12 })
+check('关掉全量后按上限补标', JSON.stringify(planOff) === '{"limit":12}')
+const thresholdSet = await call('/speaker/settings', { threshold: 0.7, fullRelabel: false, backfillCap: 5 }, 'POST')
+check('阈值与补标方式可写入并回读', thresholdSet.status === 200
+  && thresholdSet.value.speaker.threshold === 0.7
+  && thresholdSet.value.speaker.fullRelabel === false
+  && (await call('/speaker/settings')).value.speaker.backfillCap === 5)
+check('越界阈值被夹到合法区间', (await call('/speaker/settings', { threshold: 5 }, 'POST')).value.speaker.threshold <= 0.95)
+await call('/speaker/settings', { threshold: 0.6, fullRelabel: true, backfillCap: 60 }, 'POST')
+
+// The library learns ONLY from a name a person gave, and suggests without ever writing.
+const encodeVector = (values) => Buffer.from(Float32Array.from(values).buffer).toString('base64')
+const voiceA = [1, 0.1, 0, 0, 0, 0, 0, 0]
+const voiceNear = [0.98, 0.12, 0.01, 0, 0, 0, 0, 0]
+const voiceFar = [0, 0, 0, 0, 0, 1, 0.1, 0]
+seed('m-voice', {
+  segments: [{ id: 'v1', start: 0, end: 2, text: '甲说话', speaker: 'S1', embedding: encodeVector(voiceA) }],
+  speakerLabels: ['S1'],
+})
+check('命名之前，库里没有东西', (await call('/voices')).value.voices.length === 0)
+const named = await call('/speaker/name', { meetingId: 'm-voice', label: 'S1', name: '张三' }, 'POST')
+check('命名会把这条声音学进库（人名来自人）', named.status === 200 && named.value.learned?.name === '张三', JSON.stringify(named.value.learned))
+const library = await call('/voices')
+check('声纹库只回姓名与次数，不回向量', library.value.voices.length === 1
+  && library.value.voices[0].name === '张三'
+  && !JSON.stringify(library.value).includes('vector'))
+const nearMeeting = seed('m-voice-near', {
+  segments: [{ id: 'v2', start: 0, end: 2, text: '又一个声音', speaker: 'S1', embedding: encodeVector(voiceNear) }],
+  speakerLabels: ['S1'],
+})
+const nearState = await call('/state?meetingId=m-voice-near')
+check('相近声音被建议为同一个人', Array.isArray(nearState.value.suggestions)
+  && nearState.value.suggestions.some((item) => item.label === 'S1' && item.name === '张三'))
+check('建议不会自动写入姓名（必须人确认）', Object.keys(nearMeeting.speakers).length === 0 && nearState.value.speakers.S1 === undefined)
+seed('m-voice-far', {
+  segments: [{ id: 'v3', start: 0, end: 2, text: '陌生声音', speaker: 'S1', embedding: encodeVector(voiceFar) }],
+  speakerLabels: ['S1'],
+})
+check('差得远的声音不会被乱猜', (await call('/state?meetingId=m-voice-far')).value.suggestions.length === 0)
+check('声纹库可以删掉一个人', (await call('/voices/remove', { name: '张三' }, 'POST')).value.voices.length === 0)
+check('删错人回报 404', (await call('/voices/remove', { name: '李四' }, 'POST')).status === 404)
+await call('/speaker/name', { meetingId: 'm-voice', label: 'S1', name: '张三' }, 'POST')
+check('清空声纹库', (await call('/voices/clear', {}, 'POST')).value.removed === 1 && (await call('/voices')).value.voices.length === 0)
+// Nothing vector-shaped may reach a package or the persisted record.
+await call('/speaker/name', { meetingId: 'm-voice', label: 'S1', name: '张三' }, 'POST')
+const voicePackage = await call('/package?meetingId=m-voice')
+const packedRecord = zipRead(voicePackage.body).find((entry) => entry.name === 'meeting.json').data.toString('utf8')
+check('会议记录不落 embedding 与质心', !packedRecord.includes('embedding') && !packedRecord.includes('voiceCentroids'))
+check('会议记录仍保留发言人姓名与标签', packedRecord.includes('张三') && packedRecord.includes('S1'))
+
+// ---------------------------------------------------------------------------
 // 8. Agent 工具
 // ---------------------------------------------------------------------------
 const agent = { agent: { session: { id: 'session-m-brief' } } }

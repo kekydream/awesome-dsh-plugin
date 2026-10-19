@@ -48,6 +48,35 @@ export const SPEAKER_MODEL_ORIGINS = [
 export const SPEAKER_THRESHOLD = 0.6
 
 /**
+ * Similarity above which a label is offered as "this sounds like …" from the voice library.
+ * Higher than the clustering threshold on purpose: suggesting the WRONG name is worse than
+ * suggesting none, because a wrong suggestion costs a correction every single time.
+ */
+export const VOICE_MATCH_THRESHOLD = 0.75
+
+/** Threshold presets the interface offers, each with the reason it exists. */
+export const SPEAKER_THRESHOLD_PRESETS = [
+  { id: 'crowd', threshold: 0.7, note: '人多：更严格，宁可多分几个声音，也不把两个人合成一个' },
+  { id: 'default', threshold: 0.6, note: '默认：通用会议' },
+  { id: 'few', threshold: 0.5, note: '人少：更宽松，同一个人语气变化大时不容易被拆开' },
+]
+
+/**
+ * How the end-of-meeting speaker pass should limit itself.
+ *
+ * Pure, so both the stop path (which already holds the settings) and the voice module can ask
+ * the same question without either importing the other.
+ * @param speakerSettings - the `speaker` section of the settings, if any.
+ * @returns `{ all: true }` for a full relabel, or `{ limit }` for a capped tail pass.
+ */
+export function relabelPlanOf(speakerSettings) {
+  const full = speakerSettings === null || typeof speakerSettings !== 'object' || speakerSettings.fullRelabel !== false
+  if (full) return { all: true }
+  const cap = Number(speakerSettings.backfillCap)
+  return { limit: Number.isFinite(cap) && cap > 0 ? Math.round(cap) : SPEAKER_BACKFILL_CAP }
+}
+
+/**
  * How many unlabeled cues the end-of-meeting pass may backfill from the finished
  * recording. The speaker worker is serial, and a first-ever meeting can outrun the
  * model download by hundreds of cues; the cap keeps "stop" instant while the rest

@@ -51,6 +51,7 @@ import {
   QUESTION_MARKERS,
   POINT_KINDS,
   TASK_PRIORITIES,
+  relabelPlanOf,
 } from './host-constants.js'
 
 import {
@@ -70,6 +71,7 @@ import { flushMeetings } from './host-persistence.js'
 import { meetingForSession } from './host-sessions.js'
 
 import { relabelFromRecording, knownSpeakerLabels } from './host-speaker.js'
+import { centroidsOf } from './host-voices.js'
 
 // Re-export regex constants and seenText so consumers can import from this module.
 export {
@@ -1118,11 +1120,13 @@ export async function finalizeRecording(ctx, meeting) {
   }
   // Cues captured before the speaker model finished downloading carry no label, and a
   // worker that died mid-meeting leaves the rest blank too. The finished recording
-  // still holds every cue's audio, so judge the unlabeled ones from it now; capped so
-  // a long first meeting never stalls the stop button.
+  // still holds every cue's audio, so judge the unlabeled ones from it now. By default this
+  // covers EVERY cue: the old 60-cue cap was the main reason labels broke apart in a long
+  // meeting. `fullRelabel: false` in the speaker settings restores a capped tail pass.
+  const plan = relabelPlanOf((await readSettings()).speaker)
   let backfilled = 0
   try {
-    backfilled = await relabelFromRecording(ctx, meeting, { limit: SPEAKER_BACKFILL_CAP })
+    backfilled = await relabelFromRecording(ctx, meeting, plan)
   } catch (error) {
     ctx?.logger?.warn('dsh-meeting-room: speaker backfill failed: %s', error instanceof Error ? error.message : String(error))
   }
@@ -1130,6 +1134,10 @@ export async function finalizeRecording(ctx, meeting) {
   // The recording is finished, so the cues can be re-clustered as a whole: the online
   // gallery cannot split or merge what it has already labelled.
   const voices = relabelSpeakers(meeting)
+  // Keep one centroid per voice before the per-cue vectors go: the voice library is written
+  // when a person NAMES a speaker, which happens after the meeting, and a centroid is all it
+  // needs. Centroids are never persisted (see recordOf) and never leave this machine.
+  meeting.voiceCentroids = centroidsOf(meeting)
   // The embeddings have done their job once the voices are settled, so a long meeting
   // does not keep every cue's vector in memory for the rest of the session.
   for (const segment of meeting.segments) delete segment.embedding
@@ -1272,6 +1280,8 @@ export async function readSettings() {
     // The cloud section belongs to whoever reads it (host-providers), which validates its own
     // fields; passing it through untouched is what keeps a saved key from vanishing on read.
     if (parsed.cloud !== null && typeof parsed.cloud === 'object') empty.cloud = parsed.cloud
+    // Same for the speaker section (the speaker settings routes and the voice library read it).
+    if (parsed.speaker !== null && typeof parsed.speaker === 'object') empty.speaker = parsed.speaker
   } catch {
     // Absent or unreadable: nothing is configured yet, which is not an error.
   }

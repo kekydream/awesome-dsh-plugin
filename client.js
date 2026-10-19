@@ -348,6 +348,17 @@ registerProcessor('meeting-capture', MeetingCapture)
       cloudFailed: '未连通',
       cloudFallback: '已回退到本机识别',
       cloudUsed: '这一段由云端识别',
+      speakerTitle: '发言人识别',
+      speakerThreshold: '聚类的严格程度',
+      speakerFullRelabel: '结束录音时全量重判所有实录（推荐）',
+      speakerSettingsHint: '人多时把阈值调高（更严格：宁可多分几个声音，也不把两个人合成一个）；人少、或同一个人语气变化大时调低。全量重判替换了旧的「只补最后 60 条」，长会议的标签不容易断裂。改了阈值需要重新准备一次语音识别（识别进程会自动重启）。',
+      speakerRestarted: '已保存；识别进程已重启，新阈值在下次准备时生效',
+      speakerSave: '保存发言人设置',
+      voiceLibrary: '声纹库（只存向量，不存音频）',
+      voiceLibraryEmpty: '声纹库还是空的：在「发言人姓名」里给某个声音填上真实姓名，它就会被记下来；之后同一场或别的会议再听到这个人，会给出建议。',
+      voiceLibraryFile: '声纹库文件',
+      voiceForget: '忘记',
+      voiceClear: '清空声纹库',
       hubTabTerms: '会议术语',
       hubTabSettings: '机器人设置',
       hubTabPeople: '人员管理',
@@ -378,6 +389,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       priorityNormal: '普通',
       priorityLow: '低',
       speakerNames: '发言人姓名',
+      voiceSuggestions: '声纹库认出的名字（要你确认才写入）',
+      voiceSoundsLike: '听起来像',
+      voiceAccept: '采用这个名字',
       openNames: '填写姓名',
       speakerNameHint: '给识别到的发言人填上真实姓名；标签不变，会终重聚类后姓名会跟着声音走。留空则显示 S1、S2。',
       speakerNamePlaceholder: '姓名',
@@ -403,7 +417,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: '会议术语',
       notesToggle: '手写笔记',
       helpToggle: '使用说明',
-      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听三个按钮，或在右侧「其他角色」里自己写）、选会议类型（通用／晨会／复盘会／例会／总结会）。选类型会**自动把标题填成「类型 · 今天日期」**，也可以自己改；不想命名就点「暂不命名并开始记录」。\n· 一个会话对应一场会议；分支出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟会提醒一次（不会自动停止）。\n· 状态行显示已录时长与当前发言人；所有按钮都在面板最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你往上滚就自动取消跟随，并出现「回到最新」可以一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx；两者都会弹出浏览器的下载保存对话框，纪要同时留在会议里可随时打开。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。负责人与发言人姓名都从「会议管理 → 人员」的名册（含从钉钉同步过来的人）里取候选。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n· 工作安排页签的「一键同步到钉钉/企业微信」按「会议管理 → 设置」里选的推送方式（群机器人／工作通知／两者）把**已确认**的任务发出去；没有配置目标时会告诉你原因；每条工作安排右侧还有「发送这条」，可以只发其中一条。\n\n【发言人】\n· 每个声纹标签直接填姓名：可以自己输入，也可以从名册下拉里选（输入即过滤）。\n· 「重新识别发言人」会从录音重新判断，用于识别当时模型还没就绪、或长会议只补标了后段的情况。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时内容只读（历史内容不会被改动），可「打开原会话」或「返回本会话」；其中工作安排的「已确认」勾选是允许的 —— 那是发送它的前提，且只会写入该场会议。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【保存为文件 · 导入 · 关于】\n· 「更多 → 保存为文件」把这场会议打成**一个 zip 工程包**：会议记录、录音、以及纪要/图片等产出都在里面；右下角会显示进度提示（打包中 → 百分比 → 已保存到文件）。\n· 「会议管理 → 记录 → 导入会议」选择这样的 zip，就能把它导入本机（导入为新会议，不覆盖已有记录、不挂在任何会话上，重名文件自动改名），因此可以把一场会议带到另一台 DSH 上打开。\n· 「更多 → 关于」显示本机实际安装的**版本号**、作者与邮箱；发现 bug 或想提改进意见，点「发邮件」直接写给我，附上版本号与操作步骤即可。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要；「刷新」重新读取，「导入会议」导入工程包；点名称可在下方回看实录与播放。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式 —— 工作安排的「一键同步」就按这里的选择发送。\n· 人员：共享名单（姓名／手机／用户 ID），可手工维护，也可从钉钉通讯录同步部门；这份名单同时是任务负责人与发言人姓名的候选来源。\n· 术语：与「更多 → 会议术语」同一份内容。\n· 模型：识别用哪个模型在这里选 —— 内置的声纹与手写模型、以及从本地文件导入的更强模型；装好并通过大小与 sha256 校验才能启用，启用后只影响之后的识别。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
+      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听三个按钮，或在右侧「其他角色」里自己写）、选会议类型（通用／晨会／复盘会／例会／总结会）。选类型会**自动把标题填成「类型 · 今天日期」**，也可以自己改；不想命名就点「暂不命名并开始记录」。\n· 一个会话对应一场会议；分支出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟会提醒一次（不会自动停止）。\n· 状态行显示已录时长与当前发言人；所有按钮都在面板最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你往上滚就自动取消跟随，并出现「回到最新」可以一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx；两者都会弹出浏览器的下载保存对话框，纪要同时留在会议里可随时打开。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。负责人与发言人姓名都从「会议管理 → 人员」的名册（含从钉钉同步过来的人）里取候选。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n· 工作安排页签的「一键同步到钉钉/企业微信」按「会议管理 → 设置」里选的推送方式（群机器人／工作通知／两者）把**已确认**的任务发出去；没有配置目标时会告诉你原因；每条工作安排右侧还有「发送这条」，可以只发其中一条。\n\n【发言人】\n· 每个声纹标签直接填姓名：可以自己输入，也可以从名册下拉里选（输入即过滤）。\n· 「重新识别发言人」会从录音重新判断，用于识别当时模型还没就绪、或长会议只补标了后段的情况；结束录音时的补标默认已覆盖整场实录（可在「会议管理 → 设置」里改回按上限补）。\n· 给某个声音填上真实姓名，它会被记进声纹库（只存向量、不存音频）；别的会议再听到这个人，会给出「听起来像 X」的建议，**要你点「采用」才会写入**。阈值（人多/默认/人少）与声纹库的忘记/清空也在「设置」页。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时内容只读（历史内容不会被改动），可「打开原会话」或「返回本会话」；其中工作安排的「已确认」勾选是允许的 —— 那是发送它的前提，且只会写入该场会议。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【保存为文件 · 导入 · 关于】\n· 「更多 → 保存为文件」把这场会议打成**一个 zip 工程包**：会议记录、录音、以及纪要/图片等产出都在里面；右下角会显示进度提示（打包中 → 百分比 → 已保存到文件）。\n· 「会议管理 → 记录 → 导入会议」选择这样的 zip，就能把它导入本机（导入为新会议，不覆盖已有记录、不挂在任何会话上，重名文件自动改名），因此可以把一场会议带到另一台 DSH 上打开。\n· 「更多 → 关于」显示本机实际安装的**版本号**、作者与邮箱；发现 bug 或想提改进意见，点「发邮件」直接写给我，附上版本号与操作步骤即可。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要；「刷新」重新读取，「导入会议」导入工程包；点名称可在下方回看实录与播放。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式 —— 工作安排的「一键同步」就按这里的选择发送。\n· 人员：共享名单（姓名／手机／用户 ID），可手工维护，也可从钉钉通讯录同步部门；这份名单同时是任务负责人与发言人姓名的候选来源。\n· 术语：与「更多 → 会议术语」同一份内容。\n· 模型：识别用哪个模型在这里选 —— 内置的声纹与手写模型、以及从本地文件导入的更强模型；装好并通过大小与 sha256 校验才能启用，启用后只影响之后的识别。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
       inkNote: '笔记文字',
       documents: '会议文档',
       openDocument: '查看',
@@ -670,6 +684,17 @@ registerProcessor('meeting-capture', MeetingCapture)
       cloudFailed: 'Not reachable',
       cloudFallback: 'Fell back to on-machine recognition',
       cloudUsed: 'This cue came from the cloud',
+      speakerTitle: 'Speaker recognition',
+      speakerThreshold: 'How strictly voices are separated',
+      speakerFullRelabel: 'Re-judge every cue when the recording stops (recommended)',
+      speakerSettingsHint: 'Raise the threshold for a crowded room (stricter: rather split one voice than merge two people); lower it for a small meeting, or a voice that varies a lot. The full pass replaces the old rule of backfilling only the last 60 cues, which is what used to break labels apart in a long meeting. Changing the threshold needs a fresh prepare — the recogniser restarts itself.',
+      speakerRestarted: 'Saved; the recogniser restarted, so the new threshold applies on the next prepare',
+      speakerSave: 'Save speaker settings',
+      voiceLibrary: 'Voice library (vectors only, never audio)',
+      voiceLibraryEmpty: 'The library is empty: give a voice a real name under Speaker names and it is remembered, so a later meeting suggests it when that person speaks again.',
+      voiceLibraryFile: 'Voice library file',
+      voiceForget: 'Forget',
+      voiceClear: 'Clear the library',
       hubTabTerms: 'Terms',
       hubTabSettings: 'Robot settings',
       hubTabPeople: 'People',
@@ -701,6 +726,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       priorityLow: 'Low',
       more: 'More',
       speakerNames: 'Speaker names',
+      voiceSuggestions: 'Names the voice library recognises (yours to confirm)',
+      voiceSoundsLike: 'sounds like',
+      voiceAccept: 'Use this name',
       openNames: 'Name them',
       speakerNameHint: 'Give each recognized voice a real name. The label stays the same, and names follow the voice through the end-of-meeting re-clustering; empty shows S1, S2.',
       speakerNamePlaceholder: 'Name',
@@ -726,7 +754,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: 'Terms',
       notesToggle: 'Handwritten note',
       helpToggle: 'Help',
-      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer buttons, or your own words under Other role) and the type (general / briefing / review / weekly / monthly). Choosing a type fills the title as "type · today" and you can still edit it; "Skip naming and start recording" begins without one.\n· One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with one reminder after 10 minutes (never an automatic stop).\n· The status line shows elapsed time and who is speaking. Every control lives in the top row of the panel.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority. Owners and speaker names are suggested from the roster on Meeting management → People, including the people synced from DingTalk.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n· "Send to DingTalk / WeCom" in the tasks tab sends the CONFIRMED assignments the way Meeting management → Settings chose (group robot, work notification, or both), and says why when nothing is configured. Each row also has "Send this one" for a single assignment.\n\n[Speakers]\n· Each voice label takes a name: type it, or pick from the roster dropdown (typing filters it).\n· "Identify speakers again" re-reads the recording — for a meeting whose model was not ready, or a long one the stop-time backfill only partly covered.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session"; ticking "confirmed" on an assignment is allowed there — it is the step sending needs, and it is written to that meeting.\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Save as file · Import · About]\n· More → Save as file packs this meeting into ONE zip project: the record, the recording, and the artifacts (minutes, images). A notice in the bottom-right corner tracks it (packaging → percentage → saved to file).\n· Meeting management → Records → Import meeting takes such a zip back in (as a NEW meeting: nothing is overwritten, it belongs to no conversation, and clashing file names are renamed), which is how a meeting travels to another DSH.\n· More → About shows the version actually installed here, the author and the address; use "Email" to report a problem or an idea, with the version and what you did.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview; "Refresh" re-reads the list and "Import meeting" brings in a package; click a name to review its transcript and recording below.\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed — the tasks tab\'s one-click send follows this choice.\n· People: the shared roster (name / phone / user id), maintained by hand or synced from DingTalk departments; it is also where task owners and speaker names are suggested from.\n· Terms: the same list as More → Meeting terms.\n· Models: which model recognition runs on — the built-in speaker and handwriting models, plus any stronger model imported from a local file; a model must be installed and verified (size and sha256) before it can be chosen, and switching only affects later recognition.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
+      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer buttons, or your own words under Other role) and the type (general / briefing / review / weekly / monthly). Choosing a type fills the title as "type · today" and you can still edit it; "Skip naming and start recording" begins without one.\n· One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with one reminder after 10 minutes (never an automatic stop).\n· The status line shows elapsed time and who is speaking. Every control lives in the top row of the panel.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority. Owners and speaker names are suggested from the roster on Meeting management → People, including the people synced from DingTalk.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n· "Send to DingTalk / WeCom" in the tasks tab sends the CONFIRMED assignments the way Meeting management → Settings chose (group robot, work notification, or both), and says why when nothing is configured. Each row also has "Send this one" for a single assignment.\n\n[Speakers]\n· Each voice label takes a name: type it, or pick from the roster dropdown (typing filters it).\n· "Identify speakers again" re-reads the recording — for a meeting whose model was not ready, or a long one the stop-time backfill only partly covered; the stop-time pass now covers every cue by default (changeable under Meeting management → Settings).\n· Naming a voice remembers it in the voice library (vectors only, never audio); another meeting suggests "sounds like X" for that person, and nothing is written until you press Use this name. The threshold presets and the library (forget / clear) live in Settings too.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session"; ticking "confirmed" on an assignment is allowed there — it is the step sending needs, and it is written to that meeting.\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Save as file · Import · About]\n· More → Save as file packs this meeting into ONE zip project: the record, the recording, and the artifacts (minutes, images). A notice in the bottom-right corner tracks it (packaging → percentage → saved to file).\n· Meeting management → Records → Import meeting takes such a zip back in (as a NEW meeting: nothing is overwritten, it belongs to no conversation, and clashing file names are renamed), which is how a meeting travels to another DSH.\n· More → About shows the version actually installed here, the author and the address; use "Email" to report a problem or an idea, with the version and what you did.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview; "Refresh" re-reads the list and "Import meeting" brings in a package; click a name to review its transcript and recording below.\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed — the tasks tab\'s one-click send follows this choice.\n· People: the shared roster (name / phone / user id), maintained by hand or synced from DingTalk departments; it is also where task owners and speaker names are suggested from.\n· Terms: the same list as More → Meeting terms.\n· Models: which model recognition runs on — the built-in speaker and handwriting models, plus any stronger model imported from a local file; a model must be installed and verified (size and sha256) before it can be chosen, and switching only affects later recognition.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
       inkNote: 'Note text',
       documents: 'Meeting documents',
       openDocument: 'Open',
@@ -2051,6 +2079,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       /** Voice labels found in this meeting and the real names assigned to them. */
       const [labels, setLabels] = React.useState([])
       const [speakers, setSpeakers] = React.useState({})
+      /** Names the voice library recognises but has NOT written: a person accepts them or not. */
+      const [suggestions, setSuggestions] = React.useState([])
       /** The monthly review's score table (FEATURES.md §5.1). */
       const [scores, setScores] = React.useState([])
       /** The person being added to that table by hand. */
@@ -2185,6 +2215,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           // had never identified a speaker: the labels were in the answer, unread.
           if (Array.isArray(value.meeting.notes)) setNotes(value.meeting.notes)
           if (Array.isArray(value.meeting.labels)) setLabels(value.meeting.labels)
+          setSuggestions(Array.isArray(value.meeting.suggestions) ? value.meeting.suggestions : [])
           if (value.meeting.speakers !== null && typeof value.meeting.speakers === 'object') setSpeakers(value.meeting.speakers)
           if (typeof value.meeting.role === 'string') setRole(value.meeting.role)
           if (Array.isArray(value.meeting.documents)) setDocuments(value.meeting.documents)
@@ -2437,6 +2468,8 @@ registerProcessor('meeting-capture', MeetingCapture)
           const reply = await post('/speaker/name', { meetingId: id, label, name })
           if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
           if (Array.isArray(reply.segments)) setSegments(reply.segments)
+          // An accepted name retires its own suggestion; the host has learned the voice by now.
+          setSuggestions((current) => current.filter((item) => !(item.label === label && item.name === name)))
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
         }
@@ -2989,6 +3022,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           setDocuments(Array.isArray(value.documents) ? value.documents : [])
           setScores(Array.isArray(value.scores) ? value.scores : [])
           setLabels(Array.isArray(value.labels) ? value.labels : [])
+          setSuggestions(Array.isArray(value.suggestions) ? value.suggestions : [])
           setSpeakers(value.speakers !== null && typeof value.speakers === 'object' ? value.speakers : {})
           setMeta({
             kind: typeof value.kind === 'string' ? value.kind : '',
@@ -3951,6 +3985,21 @@ registerProcessor('meeting-capture', MeetingCapture)
             // and the relabel button is the repair path when the online pass left it blank.
             ? h('span', { key: 'empty', style: styles.hint }, t('speakerNamesEmpty'))
             : h('div', { key: 'body', style: styles.list }, [
+              // The voice library offers names it recognises; nothing is written until a person
+              // accepts one. A wrong guess that applied itself would cost a correction each time.
+              suggestions.length === 0 ? null : h('div', { key: 'suggestions', style: styles.list }, [
+                h('span', { key: 'label', style: styles.label }, t('voiceSuggestions')),
+                ...suggestions.map((item) => h('div', { key: `${item.label}-${item.name}`, style: styles.row }, [
+                  h('span', { key: 'text', style: styles.status }, `${item.label} ${t('voiceSoundsLike')} ${item.name}（${item.score}）`),
+                  h(Btn, {
+                    key: 'accept',
+                    type: 'button',
+                    style: styles.smallButton,
+                    disabled: viewed !== null,
+                    onClick: () => { void nameSpeaker(item.label, item.name) },
+                  }, t('voiceAccept')),
+                ])),
+              ]),
             h('span', { key: 'hint', style: styles.hint }, t('speakerNameHint')),
             ...labels.map((label) => h('div', { key: label, style: styles.row }, [
             h('span', { key: 'label', style: styles.chip }, label),
@@ -5232,6 +5281,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [cloudDraft, setCloudDraft] = React.useState({ consent: false, provider: 'off', baseUrl: '', model: '', language: '', apiKey: '' })
       const [cloudNote, setCloudNote] = React.useState('')
       const [cloudBusy, setCloudBusy] = React.useState(false)
+      /**
+       * Speaker recognition: the clustering threshold, whether the end-of-meeting pass covers
+       * every cue, and the voice library (names and evidence only — vectors never arrive here).
+       */
+      const [speakerSettings, setSpeakerSettings] = React.useState({ threshold: 0.6, fullRelabel: true, backfillCap: 60, presets: [], library: [], libraryFile: '' })
+      const [speakerDraft, setSpeakerDraft] = React.useState({ threshold: 0.6, fullRelabel: true, backfillCap: 60 })
+      const [voiceNote, setVoiceNote] = React.useState('')
 
       /** Load settings, the roster and any cached department tree when either tab opens. */
       React.useEffect(() => {
@@ -5382,6 +5438,55 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [])
 
+      /** Read the speaker settings and the voice library. */
+      const loadSpeakerSettings = React.useCallback(async () => {
+        try {
+          const value = await get('/speaker/settings')
+          const speaker = value.speaker ?? {}
+          setSpeakerSettings({
+            threshold: speaker.threshold ?? 0.6,
+            fullRelabel: speaker.fullRelabel !== false,
+            backfillCap: speaker.backfillCap ?? 60,
+            presets: Array.isArray(value.presets) ? value.presets : [],
+            library: Array.isArray(value.library) ? value.library : [],
+            libraryFile: typeof value.libraryFile === 'string' ? value.libraryFile : '',
+          })
+          setSpeakerDraft({
+            threshold: speaker.threshold ?? 0.6,
+            fullRelabel: speaker.fullRelabel !== false,
+            backfillCap: speaker.backfillCap ?? 60,
+          })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /** Store the speaker settings; the host retires the recogniser when the threshold changes. */
+      const saveSpeakerSettings = React.useCallback(async () => {
+        setError('')
+        setVoiceNote('')
+        try {
+          const reply = await post('/speaker/settings', speakerDraft)
+          setVoiceNote(reply.restarted === true ? t('speakerRestarted') : t('cloudSaved'))
+          await loadSpeakerSettings()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [loadSpeakerSettings, speakerDraft, t])
+
+      /** Forget one voice, or everyone. */
+      const forgetVoice = React.useCallback(async (name) => {
+        setError('')
+        setVoiceNote('')
+        try {
+          if (name === '') await post('/voices/clear', {})
+          else await post('/voices/remove', { name })
+          await loadSpeakerSettings()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [loadSpeakerSettings])
+
       /** Store the cloud settings. An empty key field leaves the stored key untouched. */
       const saveCloud = React.useCallback(async () => {
         setError('')
@@ -5423,8 +5528,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [loadCloud, t])
 
       React.useEffect(() => {
-        if (hubTab === 'settings') void loadCloud()
-      }, [hubTab, loadCloud])
+        if (hubTab !== 'settings') return
+        void loadCloud()
+        void loadSpeakerSettings()
+      }, [hubTab, loadCloud, loadSpeakerSettings])
 
       /** Read the model catalog and what is on disk. */
       const loadModels = React.useCallback(async () => {
@@ -5911,6 +6018,67 @@ registerProcessor('meeting-capture', MeetingCapture)
               h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveCloud() } }, t('cloudSave')),
               h(Btn, { key: 'test', type: 'button', style: styles.button, disabled: cloudBusy, onClick: () => { void runCloudTest() } }, t('cloudTest')),
               cloudNote === '' ? null : h('span', { key: 'note', style: styles.status }, cloudNote),
+            ]),
+            // Speaker recognition: how voices are told apart, and the library that remembers them.
+            h('span', { key: 'speakertitle', style: styles.label }, t('speakerTitle')),
+            h('div', { key: 'presets', style: styles.row }, [
+              h('span', { key: 'label', style: styles.status }, t('speakerThreshold')),
+              ...speakerSettings.presets.map((preset) => h(Btn, {
+                key: preset.id,
+                type: 'button',
+                style: speakerDraft.threshold === preset.threshold ? styles.buttonActive : styles.button,
+                title: preset.note,
+                onClick: () => setSpeakerDraft((draft) => ({ ...draft, threshold: preset.threshold })),
+              }, `${preset.threshold}`)),
+              h(Field, {
+                key: 'threshold',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(speakerDraft.threshold),
+                onChange: (event) => setSpeakerDraft((draft) => ({ ...draft, threshold: Number(event.target.value) })),
+              }),
+            ]),
+            h('div', { key: 'full', style: styles.row }, [
+              h(Field, {
+                key: 'fullrelabel',
+                type: 'checkbox',
+                checked: speakerDraft.fullRelabel,
+                onChange: (event) => setSpeakerDraft((draft) => ({ ...draft, fullRelabel: event.target.checked })),
+              }),
+              h('span', { key: 'label', style: styles.status }, t('speakerFullRelabel')),
+              speakerDraft.fullRelabel ? null : h(Field, {
+                key: 'cap',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(speakerDraft.backfillCap),
+                onChange: (event) => setSpeakerDraft((draft) => ({ ...draft, backfillCap: Number(event.target.value) })),
+              }),
+            ]),
+            h('span', { key: 'speakerhint', style: styles.hint }, t('speakerSettingsHint')),
+            h('div', { key: 'voicelist', style: styles.list }, speakerSettings.library.length === 0
+              ? [h('span', { key: 'none', style: styles.hint }, t('voiceLibraryEmpty'))]
+              : [
+                h('span', { key: 'label', style: styles.label }, `${t('voiceLibrary')} (${speakerSettings.library.length})`),
+                ...speakerSettings.library.map((voice) => h('div', { key: voice.name, style: styles.row }, [
+                  h('span', { key: 'name', style: styles.status }, `${voice.name} · ${voice.count}`),
+                  h(Btn, {
+                    key: 'forget',
+                    type: 'button',
+                    style: styles.smallButton,
+                    onClick: () => { void forgetVoice(voice.name) },
+                  }, t('voiceForget')),
+                ])),
+                h(Btn, {
+                  key: 'clear',
+                  type: 'button',
+                  style: styles.smallButton,
+                  onClick: () => { void forgetVoice('') },
+                }, t('voiceClear')),
+              ]),
+            h('span', { key: 'voicefile', style: styles.hint }, `${t('voiceLibraryFile')}：${speakerSettings.libraryFile}`),
+            h('div', { key: 'speakeractions', style: styles.row }, [
+              h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSpeakerSettings() } }, t('speakerSave')),
+              voiceNote === '' ? null : h('span', { key: 'note', style: styles.status }, voiceNote),
             ]),
           ]),
         ]) : null,
