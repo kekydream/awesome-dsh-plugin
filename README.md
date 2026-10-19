@@ -214,4 +214,15 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
 
 ## 许可
 
-MIT
+**MIT**，全文见 [LICENSE](LICENSE)：
+
+```
+Copyright (c) 2026 博尔塔拉融媒体中心媒体传播与认知重点实验室（杨道泉）
+```
+
+也就是说：可以自由使用、修改、再分发（含商用与机构内部部署），只需保留版权与许可声明；
+软件按"现状"提供，不含担保。
+
+本插件调用的第三方组件与**运行时下载的模型**（onnxruntime-node、pinyin-pro、sherpa-onnx-node、
+3D-Speaker CAM++ 声纹模型、DAMO 手写模型等）各自适用其作者的条款，来源与校验值见
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

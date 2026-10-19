@@ -14,14 +14,20 @@
   },
   "files": [
     "index.js",
+    "host-package.js",
     "speaker-worker.js",
     "handwriting-worker.js",
     "minutes-docx.py",
+    "scores-xlsx.py",
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "README.md",
+    "TESTING.md",
+    "smoke.mjs"
   ],
   "license": "MIT",
   "dependencies": {
