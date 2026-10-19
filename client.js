@@ -146,6 +146,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       pushNowHint: '按「会议管理 → 设置」里选择的推送方式，发送已确认的工作安排',
       pushed: '已推送',
       packageSaving: '正在打包这场会议',
+      packageSaved: '已保存到文件',
+      packageFailed: '打包失败',
       hubImport: '导入会议',
       hubImportHint: '选择之前导出的会议压缩包（.zip），把它导入本机',
       hubImported: '已导入会议',
@@ -416,6 +418,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       pushNowHint: 'Sends the confirmed assignments the way the management page\'s settings chose',
       pushed: 'Sent',
       packageSaving: 'Packaging this meeting',
+      packageSaved: 'Saved to file',
+      packageFailed: 'Packaging failed',
       hubImport: 'Import meeting',
       hubImportHint: 'Choose a meeting archive (.zip) exported earlier and bring it into this machine',
       hubImported: 'Imported meeting',
@@ -769,6 +773,9 @@ registerProcessor('meeting-capture', MeetingCapture)
         // Belt and braces: if the frame hands this page an indefinite height, the tab body
         // still gets a ceiling of its own instead of running off the bottom.
         maxHeight: 'calc(100vh - 200px)' },
+      /** Floating notices: bottom-right, above panel chrome, below dialogs. */
+      toasts: { position: 'fixed', right: '16px', bottom: '16px', zIndex: 4000, display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: 'min(420px, 80vw)' },
+      toastCard: { padding: '8px 12px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' },
       hubTitle: { margin: 0, fontSize: '18px', fontWeight: 600 },
       /** One meeting in the management page: fixed columns, so the rows line up. */
       hubRecord: { display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
@@ -1010,6 +1017,10 @@ registerProcessor('meeting-capture', MeetingCapture)
     const HostModal = typeof primitives.Modal === 'function' || (typeof primitives.Modal === 'object' && primitives.Modal !== null)
       ? primitives.Modal
       : null
+    /** The host's own toast, for work that takes long enough to be worth watching. */
+    const HostToast = typeof primitives.Toast === 'function' || (typeof primitives.Toast === 'object' && primitives.Toast !== null)
+      ? primitives.Toast
+      : null
 
     /**
      * ReactDOM, used only for portals. A dropdown has to be rendered outside the panel:
@@ -1097,6 +1108,41 @@ registerProcessor('meeting-capture', MeetingCapture)
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
+    }
+
+    /**
+     * Read the file name a route asked for out of its Content-Disposition header, preferring
+     * the UTF-8 form so a Chinese meeting name survives.
+     * @param header - the header value, possibly null.
+     * @returns the file name, or null when the header names nothing.
+     */
+    function fileNameFrom(header) {
+      if (typeof header !== 'string') return null
+      const encoded = /filename\*=UTF-8''([^;]+)/iu.exec(header)
+      if (encoded !== null) {
+        try { return decodeURIComponent(encoded[1].trim()) } catch { /* fall through */ }
+      }
+      const plain = /filename="([^"]+)"/iu.exec(header)
+      return plain === null ? null : plain[1]
+    }
+
+    /**
+     * Hand a blob to the browser as a download, which is what opens the save dialog.
+     * @param blob - the bytes to save.
+     * @param name - the file name offered.
+     */
+    function saveBlob(blob, name) {
+      if (typeof document === 'undefined' || typeof URL?.createObjectURL !== 'function') return
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = name
+      link.rel = 'noopener'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      // Revoked late: revoking while the browser is still writing the file cancels it.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
     }
 
     /**
@@ -1886,6 +1932,28 @@ registerProcessor('meeting-capture', MeetingCapture)
       viewedRef.current = viewed
       /** Whether the transcript keeps the newest cue in view (§5.7). */
       const [follow, setFollow] = React.useState(true)
+      /**
+       * Toasts: short-lived notices for work that takes long enough to be worth watching —
+       * packaging a meeting, for instance. The host's own Toast renders them when this host
+       * has one; otherwise a plain card does.
+       */
+      const [toasts, setToasts] = React.useState([])
+      const toastSeq = React.useRef(0)
+      const toast = React.useCallback((text) => {
+        toastSeq.current += 1
+        const id = toastSeq.current
+        setToasts((current) => [...current, { id, text }])
+        // The host Toast calls onDone when it fades; this covers the fallback and a host that
+        // never does.
+        setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 8000)
+        return id
+      }, [])
+      const updateToast = React.useCallback((id, text) => {
+        setToasts((current) => current.map((item) => (item.id === id ? { ...item, text } : item)))
+      }, [])
+      const dismissToast = React.useCallback((id) => {
+        setToasts((current) => current.filter((item) => item.id !== id))
+      }, [])
       const followRef = React.useRef(true)
       /** Cues ticked for merging into one assignment, and the box that holds them. */
       const [selectedCueIds, setSelectedCueIds] = React.useState(() => new Set())
@@ -2241,11 +2309,38 @@ registerProcessor('meeting-capture', MeetingCapture)
           setError(t('needSession'))
           return
         }
-        // The route answers with the archive itself and names the file, so the browser asks
-        // where to save it: the meeting travels as one project rather than as loose files.
-        setNote(`${t('packageSaving')} …`)
-        downloadUrl(`${PREFIX}/package?meetingId=${encodeURIComponent(id)}`)
-      }, [ensureMeeting, t])
+        const toastId = toast(`${t('packageSaving')} …`)
+        try {
+          // Fetched rather than navigated to: the archive can take a while to build and to
+          // travel, and this way the panel can say when it is done — or that it failed.
+          const response = await fetch(`${PREFIX}/package?meetingId=${encodeURIComponent(id)}`)
+          if (!response.ok) throw new Error(`${response.status}`)
+          const total = Number(response.headers.get('Content-Length') ?? 0)
+          const reader = response.body?.getReader?.()
+          let blob
+          if (reader === undefined) {
+            blob = await response.blob()
+          } else {
+            const chunks = []
+            let received = 0
+            for (;;) {
+              const { done, value } = await reader.read()
+              if (done === true) break
+              chunks.push(value)
+              received += value.length
+              if (total > 0) updateToast(toastId, `${t('packageSaving')} ${Math.min(99, Math.floor(received * 100 / total))}%`)
+            }
+            blob = new Blob(chunks, { type: 'application/zip' })
+          }
+          const name = fileNameFrom(response.headers.get('Content-Disposition')) ?? `${meta.title === '' ? id : meta.title}.zip`
+          saveBlob(blob, name)
+          updateToast(toastId, `${t('packageSaved')}: ${name}`)
+        } catch (failure) {
+          const message = failure instanceof Error ? failure.message : String(failure)
+          setError(message)
+          updateToast(toastId, `${t('packageFailed')}: ${message}`)
+        }
+      }, [ensureMeeting, meta.title, t, toast, updateToast])
 
       /**
        * Send the confirmed assignments out. The host reads the management page's robot
@@ -4013,6 +4108,18 @@ registerProcessor('meeting-capture', MeetingCapture)
             onClick: () => setTermsOpen(false),
           }, t('hubClose'))],
         }) : null,
+        // Notices float at the document root so nothing in the panel can cover them, and sit
+        // below dialogs in the layering (4000 against 5000).
+        toasts.length === 0 ? null : float(h('div', { key: 'toasts', style: styles.toasts }, toasts.map((item) => (
+          HostToast === null
+            ? h('div', {
+              key: item.id,
+              className: 'mr-card',
+              style: styles.toastCard,
+              onClick: () => dismissToast(item.id),
+            }, item.text)
+            : h(HostToast, { key: item.id, text: item.text, onDone: () => dismissToast(item.id) })
+        )))),
         // The tutorial is a dialog, not a block inside the panel: it is read once, and it
         // should not push the meeting's own content down while it is open.
         helpOpen ? h(Dialog, {
