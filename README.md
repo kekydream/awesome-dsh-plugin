@@ -14,7 +14,7 @@ DeepSeek Harness 的会议插件：**本机转写、发言人分离、要点与�
 ## 反馈
 
 预览版就是要挑毛病的：**发现任何问题、或想到任何改进意见，都请直接发邮件** ——
-杨道泉　[kekydream@qq.com](mailto:kekydream@qq.com?subject=dsh-meeting-room%20%E5%8F%8D%E9%A6%88)
+杨道泉　[yangdaoquan@qq.com](mailto:yangdaoquan@qq.com?subject=dsh-meeting-room%20%E5%8F%8D%E9%A6%88)
 
 信中麻烦附上：插件版本（面板「更多 → 关于」里可查）、DSH 版本、操作步骤、
 以及面板上显示的错误文字或 `$DSH_HOME/meeting-room/boot.log`。有截图更好。
@@ -210,7 +210,7 @@ dsh --profile <你的profile名> --dump-config   # 应出现一层 "# == dsh-mee
 本插件由**博尔塔拉融媒体中心媒体传播与认知重点实验室**制作。
 
 - 制作人：杨道泉
-- 邮箱：kekydream@qq.com
+- 邮箱：yangdaoquan@qq.com
 
 ## 许可
 

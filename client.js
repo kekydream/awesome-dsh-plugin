@@ -2,7 +2,7 @@
  * Browser half of the meeting-room plugin.
  *
  * 本插件由博尔塔拉融媒体中心媒体传播与认知重点实验室制作。
- * 制作人：杨道泉　邮箱：kekydream@qq.com
+ * 制作人：杨道泉　邮箱：yangdaoquan@qq.com
  * Copyright (c) 博尔塔拉融媒体中心媒体传播与认知重点实验室
  *
  * Loaded through the client module table, so it must be a lazy CommonJS factory and
@@ -47,7 +47,7 @@ window.__ModuleLoader__.load({
     const PREFIX = '/meeting-room'
 
     /** Who to write to about a problem or an idea; the About dialog offers the address. */
-    const ABOUT_EMAIL = 'kekydream@qq.com'
+    const ABOUT_EMAIL = 'yangdaoquan@qq.com'
     const ABOUT_AUTHOR = '杨道泉'
 
     /**

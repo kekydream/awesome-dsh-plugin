@@ -1,8 +1,8 @@
-/**
+﻿/**
  * End-to-end check of handwriting-worker.js against a real drawing.
  *
  * 本插件由博尔塔拉融媒体中心媒体传播与认知重点实验室制作。
- * 制作人：杨道泉　邮箱：kekydream@qq.com
+ * 制作人：杨道泉　邮箱：yangdaoquan@qq.com
  * Copyright (c) 博尔塔拉融媒体中心媒体传播与认知重点实验室
  *
  * Decodes a PNG with Node's own zlib (no image dependency), fits it to the graph's

@@ -2,7 +2,7 @@
  * Speaker-embedding worker for the meeting-room plugin.
  *
  * 本插件由博尔塔拉融媒体中心媒体传播与认知重点实验室制作。
- * 制作人：杨道泉　邮箱：kekydream@qq.com
+ * 制作人：杨道泉　邮箱：yangdaoquan@qq.com
  * Copyright (c) 博尔塔拉融媒体中心媒体传播与认知重点实验室
  *
  * Runs as a child process for two reasons: the sherpa-onnx addon is native, so a fault

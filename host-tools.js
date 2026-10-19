@@ -6,7 +6,7 @@
  * and tool implementations.
  *
  * 本插件由博尔塔拉融媒体中心媒体传播与认知重点实验室制作。
- * 制作人：杨道泉 邮箱：kekydream@qq.com
+ * 制作人：杨道泉 邮箱：yangdaoquan@qq.com
  * Copyright (c) 博尔塔拉融媒体中心媒体传播与认知重点实验室
  */
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
