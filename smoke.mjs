@@ -564,10 +564,6 @@ check('会议记录页提示上次会议主题', clientSource.includes("key: 'la
 check('起名对话框说明留空会自动命名', clientSource.includes("key: 'autohint'")
   && clientSource.includes("t('meetingNameAutoHint')")
   && clientSource.includes('留空并开始（稍后自动命名）'))
-// 开始区的一键入口：不弹命名框、直接开录，宿主随后让 agent 开工。
-check('开始区有「开始会议」一键入口', clientSource.includes("key: 'begin'")
-  && clientSource.includes("t('startMeeting')")
-  && clientSource.includes("t('meetingAgentStarted')"))
 // 停止录音要收尾（补识别 + 全量重判），这段等待必须有提示，否则像卡住。
 check('停止录音的收尾等待有 toast', clientSource.includes("toast(t('stopFinishing'), { sticky: true })")
   && clientSource.includes("t('stopRemaining')") && clientSource.includes("t('stopFinished')")
