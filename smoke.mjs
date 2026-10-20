@@ -572,7 +572,10 @@ check('开始页引导有「开始会议」卡片', clientSource.includes("guide
   && clientSource.includes('ctx.uiWorkspace.startSession(workspaceId)')
   && clientSource.includes('guideBegin.pending = true')
   && clientSource.includes('guideBegin.opened = true')
-  && clientSource.includes("if (guideBegin.pending !== true) return"))
+  && clientSource.includes('ctx.uiWorkspace.connectWorkspace(workspaceId)')
+  && clientSource.includes('ctx.uiWorkspace.openSession(guideBegin.target)')
+  && clientSource.includes('guideBegin.target !== \'\' && sessionId !== guideBegin.target')
+  && clientSource.includes('if (guideBegin.pending !== true) return'))
 // 停止录音要收尾（补识别 + 全量重判），这段等待必须有提示，否则像卡住。
 check('停止录音的收尾等待有 toast', clientSource.includes("toast(t('stopFinishing'), { sticky: true })")
   && clientSource.includes("t('stopRemaining')") && clientSource.includes("t('stopFinished')")

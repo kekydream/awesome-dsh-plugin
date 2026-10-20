@@ -2222,7 +2222,7 @@ function periodBucketOf(startedAt, unit) {
      * mounts. A module-level flag plus a window event covers both orders: a panel already
      * open hears the event, a panel that mounts afterwards consumes the flag.
      */
-    const guideBegin = { pending: false, opened: false, deadline: 0 }
+    const guideBegin = { pending: false, opened: false, deadline: 0, target: '' }
 
     /**
      * Read the shared recorder inside a component, re-rendering on every change.
@@ -3904,6 +3904,13 @@ function periodBucketOf(startedAt, unit) {
           setStartedAt(created.startedAt ?? Date.now())
           setAudioName(typeof created.audioName === 'string' ? created.audioName : '')
           setPhase('recording')
+          // Recording has begun: make sure the person is looking at the meeting record,
+          // not at whatever tab was in front when the microphone opened.
+          try {
+            if (typeof props.focusMeetingPanel === 'function') props.focusMeetingPanel()
+          } catch (failure) {
+            console.warn('meeting-room: could not bring the meeting tab forward', failure)
+          }
         } catch (failure) {
           await release()
           setPhase('idle')
@@ -3954,13 +3961,17 @@ function periodBucketOf(startedAt, unit) {
       React.useEffect(() => {
         const begin = () => {
           if (guideBegin.pending !== true) return
-          if (Date.now() > guideBegin.deadline) { guideBegin.pending = false; return }
+          if (Date.now() > guideBegin.deadline) { guideBegin.pending = false; guideBegin.target = ''; return }
+          // Only the conversation the card asked for may start the meeting: the column can
+          // briefly still hold the previous session's panel, which must not grab the request.
+          if (guideBegin.target !== '' && sessionId !== guideBegin.target) return
           // Without a session the panel has nothing to attach a meeting to; the pending
           // request survives until a panel with a real session mounts.
           if (sessionId === '') return
           if (phase !== 'idle' || recorder.active !== null || viewed !== null) return
           guideBegin.pending = false
           guideBegin.opened = false
+          guideBegin.target = ''
           void start()
         }
         begin()
@@ -7656,15 +7667,41 @@ function periodBucketOf(startedAt, unit) {
               // stay in one session instead of mixing with whatever was open before.
               guideBegin.pending = true
               guideBegin.opened = false
-              // The header button of the new conversation opens the panel; without this
-              // window a request that never reached a session would fire much later.
+              // Without this window a request that never reached a session would fire later.
               guideBegin.deadline = Date.now() + 15_000
-              try {
-                ctx.uiWorkspace.startSession(workspaceId)
-              } catch (failure) {
-                console.warn('meeting-room: the guide could not start a session', failure)
-                guideBegin.pending = false
-              }
+              void (async () => {
+                let created = ''
+                try {
+                  if (typeof workspaceId === 'string' && workspaceId !== '') {
+                    created = await ctx.uiWorkspace.connectWorkspace(workspaceId)
+                  }
+                } catch (failure) {
+                  console.warn('meeting-room: the guide could not create a session', failure)
+                }
+                try {
+                  // `openSession` swaps the main surface synchronously; knowing the id is
+                  // what makes the next step land in the *new* session rather than the old.
+                  guideBegin.target = typeof created === 'string' ? created : ''
+                  if (guideBegin.target !== '') ctx.uiWorkspace.openSession(guideBegin.target)
+                  else ctx.uiWorkspace.startSession(workspaceId)
+                } catch (failure) {
+                  console.warn('meeting-room: the guide could not open the new session', failure)
+                  guideBegin.pending = false
+                  return
+                }
+                // The meeting tab belongs to a session, so it can only be opened after the
+                // switch. Retry briefly: the column rebuilds after the main surface changes.
+                for (const delay of [60, 250, 800]) {
+                  window.setTimeout(() => {
+                    if (guideBegin.pending !== true) return
+                    try {
+                      ctx.sidebarRight.openTab(TAB_KIND)
+                    } catch (failure) {
+                      console.warn('meeting-room: the guide could not open the meeting tab', failure)
+                    }
+                  }, delay)
+                }
+              })()
             },
           }),
         }, GuideStartCard))
