@@ -561,8 +561,9 @@ check('设置页按功能分成六个 tab', clientSource.includes('settingsTab, 
   && ['settingsTabPush', 'settingsTabCloud', 'settingsTabTranscript', 'settingsTabSpeaker', 'settingsTabWeights', 'settingsTabTemplates'].every((key) => clientSource.includes(`'${key}'`)))
 check('会议记录页提示上次会议主题', clientSource.includes("key: 'lasttopic'") && clientSource.includes("t('hubLastTopic')"))
 // 停止录音要收尾（补识别 + 全量重判），这段等待必须有提示，否则像卡住。
-check('停止录音的收尾等待有 toast', clientSource.includes("const waiting = toast(t('stopFinishing'))")
-  && clientSource.includes("t('stopRemaining')") && clientSource.includes("t('stopFinished')"))
+check('停止录音的收尾等待有 toast', clientSource.includes("toast(t('stopFinishing'), { sticky: true })")
+  && clientSource.includes("t('stopRemaining')") && clientSource.includes("t('stopFinished')")
+  && clientSource.includes("item.sticky === true") && clientSource.includes('clearInterval(ticker)'))
 
 // ---------------------------------------------------------------------------
 // 7g. M3：阈值可调、全量重判、跨会议声纹库（建议姓名需人确认）

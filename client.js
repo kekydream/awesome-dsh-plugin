@@ -446,6 +446,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubTabTerms: '会议术语',
       stopFinishing: '正在收尾：等待最后几段识别完成…',
       stopRemaining: '剩余',
+      stopElapsed: '已等待',
       stopFinished: '收尾完成，会议已保存',
       hubLastTopic: '上次会议',
       hubTabSettings: '设置',
@@ -844,6 +845,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubTabTerms: 'Terms',
       stopFinishing: 'Finishing up: waiting for the last cues…',
       stopRemaining: 'left',
+      stopElapsed: 'waited',
       stopFinished: 'Finished — the meeting is saved',
       hubLastTopic: 'Last meeting',
       hubTabSettings: 'Settings',
@@ -2399,13 +2401,16 @@ function periodBucketOf(startedAt, unit) {
        */
       const [toasts, setToasts] = React.useState([])
       const toastSeq = React.useRef(0)
-      const toast = React.useCallback((text) => {
+      const toast = React.useCallback((text, options = {}) => {
         toastSeq.current += 1
         const id = toastSeq.current
-        setToasts((current) => [...current, { id, text }])
+        setToasts((current) => [...current, { id, text, sticky: options.sticky === true }])
         // The host Toast calls onDone when it fades; this covers the fallback and a host that
-        // never does.
-        setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 8000)
+        // never does. A sticky toast has no timer: work whose end is unknown (stopping a long
+        // recording) must keep saying what it is doing, not vanish after eight seconds.
+        if (options.sticky !== true) {
+          setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 8000)
+        }
         return id
       }, [])
       const updateToast = React.useCallback((id, text) => {
@@ -3902,27 +3907,36 @@ function periodBucketOf(startedAt, unit) {
         pausedAt.current = 0
         setPhase('transcribing')
         // Draining the last cues and re-labelling the whole recording takes a while on a
-        // long meeting. Say so, and keep saying how much is left, so the pause after
-        // pressing Stop does not look like a hang.
-        const waiting = toast(t('stopFinishing'))
+        // long meeting — minutes on a two-hour one. The notice is sticky (no auto-fade)
+        // and counts elapsed time, so it lasts exactly as long as the work does.
+        const startedAt = Date.now()
+        const waited = () => `${Math.round((Date.now() - startedAt) / 1000)}s`
+        const waiting = toast(t('stopFinishing'), { sticky: true })
+        // A ticking clock proves the page is alive even while `/stop` re-labels the whole
+        // recording and sends no progress back.
+        const ticker = setInterval(() => {
+          updateToast(waiting, `${t('stopFinishing')} ${t('stopElapsed')} ${waited()}`)
+        }, 1000)
         try {
           for (let attempt = 0; attempt < 120 && (active.inflight || active.pending.length > 0); attempt++) {
             if (active.inflight) {
-              updateToast(waiting, `${t('stopFinishing')} ${t('stopRemaining')} ${active.pending.length + 1}`)
+              updateToast(waiting, `${t('stopFinishing')} ${t('stopRemaining')} ${active.pending.length + 1} · ${waited()}`)
               await new Promise((resolve) => setTimeout(resolve, 200))
             } else {
-              updateToast(waiting, `${t('stopFinishing')} ${t('stopRemaining')} ${active.pending.length}`)
+              updateToast(waiting, `${t('stopFinishing')} ${t('stopRemaining')} ${active.pending.length} · ${waited()}`)
               await flush(active)
             }
           }
           await release()
           const reply = await post('/stop', { meetingId: active.meetingId })
+          clearInterval(ticker)
           setSegments(reply.segments)
           setSeconds(reply.seconds)
           if (typeof reply.audioName === 'string') setAudioName(reply.audioName)
-          updateToast(waiting, t('stopFinished'))
-          setTimeout(() => dismissToast(waiting), 2000)
+          updateToast(waiting, `${t('stopFinished')} ${waited()}`)
+          setTimeout(() => dismissToast(waiting), 2500)
         } catch (failure) {
+          clearInterval(ticker)
           dismissToast(waiting)
           setError(failure instanceof Error ? failure.message : String(failure))
         }
@@ -4972,9 +4986,11 @@ function periodBucketOf(startedAt, unit) {
           }, t('hubClose'))],
         }) : null,
         // Notices float at the document root so nothing in the panel can cover them, and sit
-        // below dialogs in the layering (4000 against 5000).
+        // below dialogs in the layering (4000 against 5000). A sticky notice uses this
+        // plugin's own card, because the host Toast fades on its own schedule — the one
+        // thing a stop-in-progress notice must not do.
         toasts.length === 0 ? null : float(h('div', { key: 'toasts', style: styles.toasts, role: 'status', 'aria-live': 'polite' }, toasts.map((item) => (
-          HostToast === null
+          HostToast === null || item.sticky === true
             ? h('div', {
               key: item.id,
               className: 'mr-card',
