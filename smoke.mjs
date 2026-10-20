@@ -50,7 +50,7 @@ const ctx = { logger: { info: () => {}, warn: () => {}, error: () => {} }, get: 
 const handler = createHandler(ctx)
 
 /** Run one route and parse its JSON answer. */
-async function call(route, body, method = 'GET') {
+async function call(route, body, method = 'GET', activeHandler = handler) {
   // A Buffer or a string is the body itself; anything else is JSON. Without this, a binary
   // route would receive `{"type":"Buffer","data":[…]}` and quietly fail every check.
   const payload = body === undefined
@@ -67,7 +67,7 @@ async function call(route, body, method = 'GET') {
     writeHead(status, headers) { this.status = status; this.headers = headers ?? {} },
     end(payload) { if (payload !== undefined) chunks.push(Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload))) },
   }
-  await handler(req, res)
+  await activeHandler(req, res)
   const text = Buffer.concat(chunks).toString('utf8')
   let value = {}
   try { value = text === '' ? {} : JSON.parse(text) } catch { value = { raw: text } }
@@ -706,6 +706,19 @@ check('面板可读到开始录音请求', recordRoute.status === 200 && recordR
   && recordRoute.value.meetingId === autoMeeting.id)
 const clearedRoute = await call('/record', { sessionId: 'session-scribe-new' }, 'POST')
 check('面板领取后请求被清除', clearedRoute.value.cleared === true && autoMeeting.recordRequestedAt === undefined)
+
+// 人点「开始记录」时，录音之外还要让 agent 自己开工：/start 向该会话投一条普通 prompt。
+const prompted = []
+const nudgeCtx = {
+  logger: ctx.logger,
+  get: (name) => (name === 'sessionController' ? { prompt: async (request) => { prompted.push(request) } } : undefined),
+}
+const nudgeHandler = createHandler(nudgeCtx)
+const manualStart = await call('/start', { sessionId: 'session-nudge' }, 'POST', nudgeHandler)
+check('面板点开始会让 agent 开始工作', manualStart.status === 200 && prompted.length === 1
+  && prompted[0].sessionId === 'session-nudge' && prompted[0].content[0].text.includes('meeting-scribe'))
+const autoStart = await call('/start', { sessionId: 'session-nudge-auto', auto: true }, 'POST', nudgeHandler)
+check('agent 自己请求的开录不重复通知', autoStart.status === 200 && prompted.length === 1)
 
 const fragmentMeeting = seed('m-merge', { segments: [
   { id: '1', start: 0, end: 2, text: '我们下周', speaker: 'S1' },

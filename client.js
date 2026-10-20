@@ -2196,6 +2196,8 @@ function periodBucketOf(startedAt, unit) {
       startedAt: 0,
       seconds: 0,
       segments: [],
+      /** True while this start came from the agent's /record request, not a person's click. */
+      autoStart: false,
       listeners: new Set(),
       /** Notify every subscribed panel that recorder state moved. */
       emit() { for (const listener of this.listeners) listener() },
@@ -3816,7 +3818,12 @@ function periodBucketOf(startedAt, unit) {
         }
         setPhase('starting')
         try {
-          const created = await post('/start', { sessionId, terms: termsText })
+          // Read here, not at the top: a start that first waits for the model keeps the flag for
+      // the run that actually reaches the host. `auto` stops the host from prompting the
+      // agent again when the agent is the one that asked for this start.
+      const auto = recorder.autoStart === true
+      recorder.autoStart = false
+      const created = await post('/start', { sessionId, terms: termsText, auto })
           let audio
           try {
             audio = new AudioContext({ sampleRate: TARGET_RATE })
@@ -3916,6 +3923,7 @@ function periodBucketOf(startedAt, unit) {
               // An old request (a panel that was closed for a while) must not start a
               // meeting after the fact: it expires quietly.
               if (Date.now() - request > 120_000) return
+              recorder.autoStart = true
               await start()
               if (recorder.active !== null) setNote(t('autoRecordStarted'))
             } catch {

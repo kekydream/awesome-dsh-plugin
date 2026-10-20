@@ -152,6 +152,37 @@ import {
 } from './host-tools.js'
 
 /**
+ * Ask the session's own Agent to take up the scribe loop when a person presses Start.
+ *
+ * The panel owns the microphone, but "recording is on" is only half of what the person
+ * meant: they want the meeting worked on. This admits one ordinary user prompt into the
+ * session, so the Agent starts a turn by itself — the same admission the chat box uses,
+ * just triggered by the panel. An Agent-initiated start (`auto`) is skipped: that turn is
+ * already running and would otherwise be prompted twice.
+ *
+ * @param ctx - Host context, for the optional sessionController service.
+ * @param sessionId - owning session.
+ * @param meeting - meeting just started, for its name in the prompt.
+ * @param auto - true when the agent itself asked for the start.
+ * @returns after the prompt is admitted, or undefined when no controller is present.
+ */
+async function nudgeScribe(ctx, sessionId, meeting, auto) {
+  if (auto === true || sessionId === '') return
+  const controller = typeof ctx?.get === 'function' ? ctx.get('sessionController') : undefined
+  if (controller === null || controller === undefined || typeof controller.prompt !== 'function') return
+  const name = typeof meeting?.title === 'string' && meeting.title !== '' ? meeting.title : '未命名会议'
+  const text = `（会议面板：录音已开始，「${name}」）请按 meeting-scribe 的流程开始工作：`
+    + '每 5 分钟读一次新增实录，把要点与工作安排写进这场会议；'
+    + '第一轮按前 5 分钟内容补一个会议名称；我停止录音后收尾，并删除「会议要点整理」提醒。'
+  await controller.prompt({
+    requestId: `meeting-start-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    sessionId,
+    mode: 'queue',
+    content: [{ type: 'text', text }],
+  }, AbortSignal.timeout(10_000)).catch(() => undefined)
+}
+
+/**
  * Create the HTTP handler for all /meeting-room routes.
  *
  * Note: this factory itself is synchronous — it only returns the (async) handler closure.
@@ -205,11 +236,12 @@ export function createHandler(ctx) {
           pending.audioPath = audioPath
           pending.audioHandle = audioHandle
           pending.audioBytes = 0
+          await nudgeScribe(ctx, sessionId, pending, body.auto === true)
           sendJson(res, 200, { meetingId: pending.id, sampleRate: SAMPLE_RATE, startedAt, audioName })
           return
         }
         const id = newMeetingId()
-        meetings.set(id, {
+        const created = {
           id,
           startedAt,
           seconds: 0,
@@ -229,7 +261,9 @@ export function createHandler(ctx) {
           audioPath,
           audioHandle,
           audioBytes: 0,
-        })
+        }
+        meetings.set(id, created)
+        await nudgeScribe(ctx, created.sessionId, created, body.auto === true)
         sendJson(res, 200, { meetingId: id, sampleRate: SAMPLE_RATE, startedAt, audioName })
         return
       }
