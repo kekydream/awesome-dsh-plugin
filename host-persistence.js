@@ -32,7 +32,7 @@ export function recordOf(meeting) {
   // derived from those embeddings and are deliberately NOT persisted either: the voice library
   // (host-voices.js) is the only place a voice profile is kept, and it is written only when a
   // person names a speaker.
-  const { audioHandle, controller, voiceCentroids, recentPcm, ...rest } = meeting
+  const { audioHandle, controller, voiceCentroids, recentPcm, recordRequestedAt, ...rest } = meeting
   // Defensive on purpose: one malformed record (an import, a hand-edited file) must not
   // throw here, because this runs inside the 5-second flush loop and would take every
   // later meeting's write down with it.

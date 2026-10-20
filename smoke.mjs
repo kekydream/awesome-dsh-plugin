@@ -692,6 +692,21 @@ check('meeting_session 可命名并设类型且重算周期', scribeMeeting.titl
 const scribeMissing = tools.meetingSession({ action: 'status' }, { agent: { session: { id: 'session-none' } } })
 check('没有会议时 meeting_session 给出可操作提示', scribeMissing.includes('还没有会议记录'))
 
+// 不带参数直接开始：create 自己建会，record 只留请求给面板（麦克风仍在浏览器里）。
+const freshScribe = { agent: { session: { id: 'session-scribe-new' } } }
+const autoCreated = tools.meetingSession({ action: 'create' }, freshScribe)
+const sessionsModule = await import(`${plugin}/host-sessions.js`)
+const autoMeeting = sessionsModule.meetingForSession('session-scribe-new')
+check('meeting_session 不带参数也能建会', autoMeeting !== undefined && autoCreated.includes('会议：'))
+const autoRecord = tools.meetingSession({ action: 'record' }, freshScribe)
+check('record 只留请求，不假装已开麦', autoRecord.includes('已请求开始录音')
+  && typeof autoMeeting.recordRequestedAt === 'number' && autoMeeting.audioHandle === undefined)
+const recordRoute = await call('/record?sessionId=session-scribe-new')
+check('面板可读到开始录音请求', recordRoute.status === 200 && recordRoute.value.request > 0
+  && recordRoute.value.meetingId === autoMeeting.id)
+const clearedRoute = await call('/record', { sessionId: 'session-scribe-new' }, 'POST')
+check('面板领取后请求被清除', clearedRoute.value.cleared === true && autoMeeting.recordRequestedAt === undefined)
+
 const fragmentMeeting = seed('m-merge', { segments: [
   { id: '1', start: 0, end: 2, text: '我们下周', speaker: 'S1' },
   { id: '2', start: 2.3, end: 4.1, text: '把方案交上来', speaker: 'S1' },
@@ -710,6 +725,9 @@ check('meeting-scribe 技能说明包含 5 分钟循环与自动停止', scribeS
   && scribeSkill.MEETING_SCRIBE_SKILL.content.includes('schedule_delete')
   && scribeSkill.MEETING_SCRIBE_SKILL.content.includes('meeting_session'))
 check('技能在插件激活时注册到 skills 服务', (await fs.readFile(join(here, 'index.js'), 'utf8')).includes('skills.register(MEETING_SCRIBE_SKILL)'))
+check('技能写明可无参数开始并按前 5 分钟命名', scribeSkill.MEETING_SCRIBE_SKILL.content.includes('不带任何参数')
+  && scribeSkill.MEETING_SCRIBE_SKILL.content.includes('action:"record"')
+  && scribeSkill.MEETING_SCRIBE_SKILL.content.includes('第一轮') && scribeSkill.MEETING_SCRIBE_SKILL.content.includes('6–16 字'))
 
 // 语速快时一个 cue 里会有好几句：按标点拆行，云端的 segment 边界优先。
 const lineTools = await import(`${plugin}/host-tools.js`)

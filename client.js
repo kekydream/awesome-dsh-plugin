@@ -444,6 +444,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       voiceForget: '忘记',
       voiceClear: '清空声纹库',
       hubTabTerms: '会议术语',
+      autoRecordStarted: '已收到开始记录请求：录音已开启',
       stopFinishing: '正在收尾：等待最后几段识别完成…',
       stopRemaining: '剩余',
       stopElapsed: '已等待',
@@ -843,6 +844,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       voiceForget: 'Forget',
       voiceClear: 'Clear the library',
       hubTabTerms: 'Terms',
+      autoRecordStarted: 'Start request received — recording is on',
       stopFinishing: 'Finishing up: waiting for the last cues…',
       stopRemaining: 'left',
       stopElapsed: 'waited',
@@ -3895,6 +3897,34 @@ function periodBucketOf(startedAt, unit) {
           void start()
         }
       }, [pendingStart, speech.ready, phase, start])
+
+      // The agent can ask the panel to start recording (meeting-scribe: "开始记录" with no
+      // naming step). The microphone belongs to the browser, so the panel carries it out
+      // here with the same start() the button uses — permission prompt, model preparation
+      // and every error message stay in one place. The request is cleared before starting,
+      // so a reload cannot start a second meeting from a stale flag.
+      React.useEffect(() => {
+        if (viewed !== null) return undefined
+        const timer = setInterval(() => {
+          void (async () => {
+            if (phase !== 'idle' || recorder.active !== null) return
+            try {
+              const value = await get(`/record?sessionId=${encodeURIComponent(sessionId)}`)
+              const request = typeof value.request === 'number' ? value.request : 0
+              if (request <= 0) return
+              await post('/record', { sessionId })
+              // An old request (a panel that was closed for a while) must not start a
+              // meeting after the fact: it expires quietly.
+              if (Date.now() - request > 120_000) return
+              await start()
+              if (recorder.active !== null) setNote(t('autoRecordStarted'))
+            } catch {
+              // No meeting yet, or the host is restarting: the next tick tries again.
+            }
+          })()
+        }, 3000)
+        return () => clearInterval(timer)
+      }, [phase, sessionId, start, t, viewed])
 
       /** Stop capture, drain the remaining audio, then finalize the meeting. */
       const stop = React.useCallback(async () => {

@@ -71,7 +71,7 @@ import {
 
 import { flushMeetings } from './host-persistence.js'
 
-import { meetingForSession } from './host-sessions.js'
+import { ensureMeetingForSession, meetingForSession } from './host-sessions.js'
 
 import { relabelFromRecording, knownSpeakerLabels } from './host-speaker.js'
 import { centroidsOf } from './host-voices.js'
@@ -1884,9 +1884,11 @@ export async function readTranscript(args, exec) {
 /**
  * Create/configure the calling session's meeting, or report its live state.
  *
- * The definition deliberately has no "start recording" action: the microphone belongs to
- * the browser panel, and a tool that pretended to open it would be a lie. What the
- * five-minute scribe loop needs is the other half — set the name/type up front, and know
+ * The microphone belongs to the browser panel, so `record` does not open it: it leaves a
+ * request the panel picks up within a few seconds and acts on with the same code path as
+ * its own Start button. That is the honest version of "start recording from the chat" —
+ * if the browser blocks the microphone, the panel says so instead of pretending.
+ * The five-minute scribe loop needs the rest: set the name/type up front, and know
  * whether the recording has stopped (so the loop can finish and delete itself).
  * @param args - Model arguments, validated here because a raw definition is not.
  * @param exec - Tool run context carrying the calling session.
@@ -1896,11 +1898,17 @@ export function meetingSession(args, exec) {
   const request = args !== null && typeof args === 'object' ? args : {}
   const sessionId = exec?.agent?.session?.id
   const meetingId = typeof request.meetingId === 'string' ? request.meetingId : ''
-  const meeting = meetingForSession(typeof sessionId === 'string' ? sessionId : '', meetingId)
+  let meeting = meetingForSession(typeof sessionId === 'string' ? sessionId : '', meetingId)
+  const action = typeof request.action === 'string' ? request.action : 'status'
+  // `create` may be the very first call of a meeting ("开始记录", nothing named yet), so it
+  // is allowed to create the session's meeting instead of refusing: the same lazy creation
+  // the panel's Start button uses, just triggered from the chat.
+  if (meeting === undefined && action === 'create' && typeof sessionId === 'string') {
+    meeting = ensureMeetingForSession(undefined, exec?.agent?.session)
+  }
   if (meeting === undefined) {
     return '这个会话还没有会议记录。请先在右侧会议面板点「开始记录」创建会议，再调用 meeting_session。'
   }
-  const action = typeof request.action === 'string' ? request.action : 'status'
   if (action === 'create') {
     if (typeof request.title === 'string' && request.title.trim() !== '') {
       meeting.title = request.title.trim().slice(0, 120)
@@ -1914,8 +1922,16 @@ export function meetingSession(args, exec) {
     if (typeof request.summary === 'string' && request.summary.trim() !== '') {
       meeting.summary = request.summary.trim().slice(0, 400)
     }
+  } else if (action === 'record') {
+    if (meeting.audioHandle !== undefined) {
+      return '录音已经在进行中，无需重复开始。可以直接开始每 5 分钟的整理。'
+    }
+    // A request, not a capture: the panel polls for it and calls its own start().
+    meeting.recordRequestedAt = Date.now()
+    return '已请求开始录音：会议面板会在几秒内自动开始（浏览器第一次会询问麦克风权限）。'
+      + '若十几秒后仍未开始，请在面板点「开始记录」。'
   } else if (action !== 'status') {
-    return `未知的 action：${action}。可用 create 或 status。`
+    return `未知的 action：${action}。可用 create、record 或 status。`
   }
   const recording = meeting.audioHandle !== undefined
   const last = meeting.segments.length === 0 ? undefined : meeting.segments[meeting.segments.length - 1]
@@ -1930,7 +1946,8 @@ export function meetingSession(args, exec) {
   if (action === 'create') {
     lines.push('', recording
       ? '会议名称与类型已保存。录音已在面板中进行，按计划开始每 5 分钟的整理即可。'
-      : '会议名称与类型已保存。请提示用户在会议面板点「开始记录」以开始录音。')
+      : '会议名称与类型已保存。可以调用 action=record 请求面板自动开始录音；'
+        + '若不成功，再请在会议面板点「开始记录」。')
   } else if (!recording) {
     lines.push('', '录音已停止：可以读全文收尾，并删除「会议要点整理」提醒。')
   }

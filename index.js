@@ -150,7 +150,7 @@ export function apply(ctx) {
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['create', 'status'], description: 'create configures the meeting; status (default) reports recording state and counts.' },
+        action: { type: 'string', enum: ['create', 'record', 'status'], description: 'create configures the meeting (and creates it when absent, no arguments needed); record asks the meeting panel to start recording — the panel owns the microphone; status (default) reports recording state and counts.' },
         meetingId: { type: 'string', description: 'Exact meeting id; omit for this session\'s meeting.' },
         title: { type: 'string', description: 'Meeting name to store (create only).' },
         kind: { type: 'string', enum: ['', 'briefing', 'review', 'weekly', 'monthly'], description: 'Meeting type (create only); empty string is an ad-hoc meeting.' },

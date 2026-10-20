@@ -52,6 +52,7 @@ import {
 } from './host-helpers.js'
 
 import { speakerState, prepareSpeakers, labelCue, relabelFromRecording, noteSpeakerLabel, retireSpeakerWorker } from './host-speaker.js'
+import { meetingForSession } from './host-sessions.js'
 import { handwritingState, recognizeHandwriting, prepareHandwriting } from './host-handwriting.js'
 import { flushMeetings, meetingIsEmpty } from './host-persistence.js'
 import { packageMeeting, importPackage } from './host-package.js'
@@ -558,6 +559,34 @@ export function createHandler(ctx) {
         await mkdir(directory, { recursive: true })
         await writeFile(join(directory, name), content, 'utf8')
         sendJson(res, 200, { name, content })
+        return
+      }
+
+      // A start-recording request from the agent. The microphone is the browser's, so this is a
+// hand-off, not a capture: the panel polls it and runs its own start(), which keeps the
+// permission prompt, the model preparation and the error messages in one place.
+      if (method === 'GET' && route === '/record') {
+        const meeting = meetingForSession(url.searchParams.get('sessionId') ?? '', url.searchParams.get('meetingId') ?? '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        sendJson(res, 200, {
+          meetingId: meeting.id,
+          request: typeof meeting.recordRequestedAt === 'number' ? meeting.recordRequestedAt : 0,
+          recording: meeting.audioHandle !== undefined,
+        })
+        return
+      }
+
+      if (method === 'POST' && route === '/record') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const meeting = meetingForSession(
+          typeof body.sessionId === 'string' ? body.sessionId : '',
+          typeof body.meetingId === 'string' ? body.meetingId : '',
+        )
+        if (meeting !== undefined) delete meeting.recordRequestedAt
+        sendJson(res, 200, { cleared: meeting !== undefined })
         return
       }
 
