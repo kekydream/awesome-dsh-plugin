@@ -560,6 +560,10 @@ check('设置页按功能分成六个 tab', clientSource.includes('settingsTab, 
   && ['push', 'cloud', 'transcript', 'speaker', 'weights', 'templates'].every((id) => clientSource.includes(`settingsTab !== '${id}' ? null`))
   && ['settingsTabPush', 'settingsTabCloud', 'settingsTabTranscript', 'settingsTabSpeaker', 'settingsTabWeights', 'settingsTabTemplates'].every((key) => clientSource.includes(`'${key}'`)))
 check('会议记录页提示上次会议主题', clientSource.includes("key: 'lasttopic'") && clientSource.includes("t('hubLastTopic')"))
+// 起名对话框要说明「可以留空」：留空后前 5 分钟会自动补标题。
+check('起名对话框说明留空会自动命名', clientSource.includes("key: 'autohint'")
+  && clientSource.includes("t('meetingNameAutoHint')")
+  && clientSource.includes('留空并开始（稍后自动命名）'))
 // 停止录音要收尾（补识别 + 全量重判），这段等待必须有提示，否则像卡住。
 check('停止录音的收尾等待有 toast', clientSource.includes("toast(t('stopFinishing'), { sticky: true })")
   && clientSource.includes("t('stopRemaining')") && clientSource.includes("t('stopFinished')")
