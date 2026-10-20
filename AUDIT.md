@@ -386,7 +386,8 @@ Set-Location <repo>
 - 位置：右下引导页（Guide）里与「工作区文件」「新终端」「浏览器」并列的第一张卡片。
 - 处理：会议面板的 tab 类型声明 `guide` 入口（`order:5`，标题「开始会议」，描述
   「立即录音，会议助手自动整理」），并在 `sidebar.right.tab.guide.entry` 上按 provider id
-  注册自己的卡片；点击时置 `guideBegin.pending`、展开右栏、`openTab` 打开面板，再派发
+  注册自己的卡片（尺寸/配色照抄内置卡片：380×56、0.5px 边框、xl 圆角、26px 图标、
+  14/11px 文字、悬停底色）；点击时置 `guideBegin.pending`、展开右栏、`openTab` 打开面板，再派发
   `meeting-room:begin` 事件。面板既可能在点击前已挂载（听到事件），也可能随后才挂载
   （消费 pending 标记），两条路径都走同一个 `start()`：建会、开麦克风、`/start` 通知
   Agent 开工，行为与面板里的按钮完全一致。

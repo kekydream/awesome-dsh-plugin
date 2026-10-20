@@ -5282,24 +5282,42 @@ function periodBucketOf(startedAt, unit) {
     function GuideStartCard(props) {
       const t = props.t
       const [busy, setBusy] = React.useState(false)
+      const [hover, setHover] = React.useState(false)
       const title = typeof props.title === 'string' && props.title !== '' ? props.title : t('guideTitle')
       const description = typeof props.description === 'string' && props.description !== ''
         ? props.description
         : t('guideDescription')
+      // The shell's own guide card, in the shell's own numbers (GuideBody.module.css):
+      // 380px-wide cell, 56px minimum, 0.5px border, xl radius, 26px glyph, 14/11px text.
+      // Inline styles are the only handle a client plugin has on those hashed classes.
+      const baseBackground = 'var(--dsw-alias-bg-layer-1, rgba(127,127,127,0.06))'
       return h('button', {
         type: 'button',
-        className: 'mr-guide-card',
         'aria-label': title,
+        'aria-busy': busy ? 'true' : undefined,
         title: description,
         disabled: busy,
         style: {
-          display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
-          width: '100%', padding: '10px 12px', borderRadius: 20, border: '1px solid transparent',
-          background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left',
-          cursor: busy ? 'progress' : 'pointer', opacity: busy ? 0.7 : 1,
+          boxSizing: 'border-box',
+          width: '100%',
+          maxWidth: '100%',
+          minHeight: 56,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 14,
+          padding: '14px 20px',
+          textAlign: 'left',
+          font: 'inherit',
+          color: 'var(--dsw-alias-label-primary, inherit)',
+          background: hover && !busy ? 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.12))' : baseBackground,
+          border: '0.5px solid var(--dsw-alias-border-l3, rgba(127,127,127,0.24))',
+          borderRadius: 'var(--dsw-radius-xl, 20px)',
+          cursor: busy ? 'progress' : 'pointer',
+          opacity: busy ? 0.7 : 1,
+          transition: 'background 120ms ease',
         },
-        onMouseEnter: (event) => { event.currentTarget.style.background = 'var(--dsh-fill-hover, rgba(128,128,128,0.12))' },
-        onMouseLeave: (event) => { event.currentTarget.style.background = 'transparent' },
+        onMouseEnter: () => setHover(true),
+        onMouseLeave: () => setHover(false),
         onClick: () => {
           if (busy) return
           setBusy(true)
@@ -5316,9 +5334,33 @@ function periodBucketOf(startedAt, unit) {
           setTimeout(() => setBusy(false), 2000)
         },
       }, [
-        h('span', { key: 'title', style: { fontSize: 13, fontWeight: 600 } }, title),
-        h('span', { key: 'description', style: { fontSize: 12, opacity: 0.7 } }, description),
-        busy ? h('span', { key: 'opening', style: { fontSize: 12, opacity: 0.7 } }, t('guideOpening')) : null,
+        h('span', {
+          key: 'icon',
+          style: {
+            width: 26, height: 26, flex: 'none', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            color: 'var(--dsw-alias-label-secondary, currentColor)',
+          },
+        }, h(MeetingPanelIcon, { size: 26 })),
+        h('span', {
+          key: 'text',
+          style: { display: 'flex', flexDirection: 'column', flex: 1, gap: 3, minWidth: 0 },
+        }, [
+          h('span', {
+            key: 'title',
+            style: {
+              fontSize: 14, lineHeight: 1.4, whiteSpace: 'nowrap',
+              overflow: 'hidden', textOverflow: 'ellipsis',
+            },
+          }, title),
+          h('span', {
+            key: 'description',
+            style: {
+              fontSize: 11, lineHeight: 1.4, color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,0.9))',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            },
+          }, busy ? t('guideOpening') : description),
+        ]),
       ])
     }
 
