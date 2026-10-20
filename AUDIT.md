@@ -388,14 +388,16 @@ Set-Location <repo>
   「立即录音，会议助手自动整理」），并在 `sidebar.right.tab.guide.entry` 上按 provider id
   注册自己的卡片（尺寸/配色照抄内置卡片：380×56、0.5px 边框、xl 圆角、26px 图标、
   14/11px 文字、悬停底色）；点击时置 `guideBegin.pending`（15 秒有效）。
-- 新会话：`connectWorkspace(workspaceId)` 拿到新会话 id 后 `openSession(id)` 同步切主区，
-  **不再依赖头部按钮**（上一版仅置 pending 让头部打开，空白会话里头部不一定挂载，表现就是
-  “还得点一下新会话按钮才出现右栏”）。
+- 新会话：`openWorkspace(workspaceId, beforeOpen)` —— 与侧栏“新建会话”同一个入口：
+  建 blank Session、在 `beforeOpen` 里把 id 记进 `guideBegin.target`、并把对话 reveal 到主区。
+  上一版只置 pending 交给会话头部按钮打开，空白会话里头部不一定挂载，表现就是
+  “还得再点一下新会话按钮”。
 - 打开面板：右栏 tab 属于会话，切换前 `openTab` 只会开在旧会话上；因此切完再按
-  60/250/800ms 重试 `openTab`。`guideBegin.target` 记住新会话 id，面板只在
-  `sessionId === target` 时消费请求，旧会话残留的面板不会抢走这次开录。
-- 接着走同一个 `start()`：建会、开麦克风、`/start` 通知 Agent 开工；录音状态一置为
-  `recording`，面板再 `focusMeetingPanel()` 把右栏切到会议记录页，确保看到的是实录。
+  60/250/800/1600/3000ms 重试 `openTab`。面板只在 `sessionId === target` 时消费请求，
+  旧会话残留的面板不会抢走这次开录。
+- 会话可见：`start()` 成功、状态置为 `recording` 后立刻 `revealConversation(sessionId)`
+  （`openSession` + `selectPanel(null)`）——主区一定停在这场会议所属的会话上，Agent 的工作
+  就在眼前；随后 `focusMeetingPanel()` 把右栏切到会议记录页。
 - 说明：已在录音时再点卡片只把面板切到前台；卡片不替用户点停止，权限被拒由面板报错。
-- 验证：`smoke` 静态守卫（guide 入口、卡片组件、connectWorkspace/openSession、target 守卫、
+- 验证：`smoke` 静态守卫（guide 入口、卡片组件、openWorkspace+target、revealConversation、
   pending/opened、面板消费）；手工 28。

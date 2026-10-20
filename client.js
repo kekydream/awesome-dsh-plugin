@@ -3904,8 +3904,13 @@ function periodBucketOf(startedAt, unit) {
           setStartedAt(created.startedAt ?? Date.now())
           setAudioName(typeof created.audioName === 'string' ? created.audioName : '')
           setPhase('recording')
-          // Recording has begun: make sure the person is looking at the meeting record,
-          // not at whatever tab was in front when the microphone opened.
+          // Recording belongs to this Session: show that conversation in the main panel and
+          // this meeting's record in the right column, whatever was in front before.
+          try {
+            if (typeof props.revealConversation === 'function') props.revealConversation(sessionId)
+          } catch (failure) {
+            console.warn('meeting-room: could not reveal the meeting conversation', failure)
+          }
           try {
             if (typeof props.focusMeetingPanel === 'function') props.focusMeetingPanel()
           } catch (failure) {
@@ -7642,6 +7647,21 @@ function periodBucketOf(startedAt, unit) {
               }
             },
             openVoiceInputBundle: () => { if (readRailCollapsed() === true) ctx.layout.toggleSidebar(); const nav = ctx.get('pluginNavigation'); if (nav) nav.openBundle('@deepseek-ai/dsh-experimental-voice-input-bundle'); else ctx.layout.selectPanel('plugins') },
+            /**
+             * Put a Session's conversation in the main panel. Recording belongs to that
+             * Session, so the person must be able to see the Agent working in it; the right
+             * column keeps the meeting record beside it.
+             * @param id - the Session that owns this meeting.
+             */
+            revealConversation: (id) => {
+              if (typeof id !== 'string' || id === '') return
+              try {
+                ctx.uiWorkspace.openSession(id)
+                ctx.layout.selectPanel(null)
+              } catch (failure) {
+                console.warn('meeting-room: could not reveal the meeting conversation', failure)
+              }
+            },
           }),
         }, MeetingPanel))
         ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
@@ -7670,28 +7690,25 @@ function periodBucketOf(startedAt, unit) {
               // Without this window a request that never reached a session would fire later.
               guideBegin.deadline = Date.now() + 15_000
               void (async () => {
-                let created = ''
                 try {
                   if (typeof workspaceId === 'string' && workspaceId !== '') {
-                    created = await ctx.uiWorkspace.connectWorkspace(workspaceId)
+                    // The shell's own "new conversation in this workspace" path: it creates
+                    // the blank Session, hands us its id, and reveals it in the main panel —
+                    // the same call the sidebar's new-session button makes.
+                    await ctx.uiWorkspace.openWorkspace(workspaceId, (created) => {
+                      guideBegin.target = typeof created === 'string' ? created : ''
+                    })
+                  } else {
+                    ctx.uiWorkspace.startSession()
                   }
                 } catch (failure) {
-                  console.warn('meeting-room: the guide could not create a session', failure)
-                }
-                try {
-                  // `openSession` swaps the main surface synchronously; knowing the id is
-                  // what makes the next step land in the *new* session rather than the old.
-                  guideBegin.target = typeof created === 'string' ? created : ''
-                  if (guideBegin.target !== '') ctx.uiWorkspace.openSession(guideBegin.target)
-                  else ctx.uiWorkspace.startSession(workspaceId)
-                } catch (failure) {
-                  console.warn('meeting-room: the guide could not open the new session', failure)
+                  console.warn('meeting-room: the guide could not open a new conversation', failure)
                   guideBegin.pending = false
                   return
                 }
                 // The meeting tab belongs to a session, so it can only be opened after the
                 // switch. Retry briefly: the column rebuilds after the main surface changes.
-                for (const delay of [60, 250, 800]) {
+                for (const delay of [60, 250, 800, 1600, 3000]) {
                   window.setTimeout(() => {
                     if (guideBegin.pending !== true) return
                     try {
