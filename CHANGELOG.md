@@ -5,6 +5,9 @@
 
 ## 0.1.0-preview.6
 
+> 已发布：npm `dsh-meeting-room@0.1.0-preview.6`（2026-10-21，`latest` 与 `preview` 两个 tag 均指向它），
+> 标签 `v0.1.0-preview.6`。详见 `PUBLISHING.md` 的「已发布状态」。
+
 识别质量与「边开会边整理」：
 
 - **断句更像人话**：默认切句改为 0.7 秒停顿、最长 12 秒；停顿切出的碎片在判出发言人后
