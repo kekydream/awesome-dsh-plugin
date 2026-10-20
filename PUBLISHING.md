@@ -1,7 +1,7 @@
 # 发布清单（npm 与社区目录）
 
 本文件是**发布前照着做**的清单：先把包装到 npm，再把条目提交到社区插件目录。
-当前包版本见 `package.json`（`0.1.0-preview.3`）。
+当前包版本见 `package.json`（`0.1.0-preview.6`，已发布）。
 
 ## 一、发布到 npm
 
@@ -31,11 +31,27 @@ npm publish --tag preview
 
 发布后：
 
-- `npm view dsh-meeting-room dist-tags` 应显示 `preview: 0.1.0-preview.3`；
+- `npm view dsh-meeting-room dist-tags` 应显示 `preview: 0.1.0-preview.6`；
 - 国内镜像（npmmirror）会自动同步，用户安装会自动走镜像；
 - 想升级正式版：`npm dist-tag add dsh-meeting-room@<version> latest`。
 
-### 已发布状态（2026-10-19 实测）
+> 本机默认 registry 是 npmmirror（只读镜像，发不上去）。发布必须显式指定：
+> `npm publish --registry=https://registry.npmjs.org --tag preview`，
+> 否则会报权限/404 之类的误导性错误。
+
+### 已发布状态（2026-10-21 实测：0.1.0-preview.6）
+
+| 项 | 结果 |
+| --- | --- |
+| 包 | `dsh-meeting-room@0.1.0-preview.6`（维护者 `kekydream`），`npm publish --registry=https://registry.npmjs.org --tag preview` 一次成功 |
+| dist-tags | `preview` 与 `latest` **都**指向 `0.1.0-preview.6`（`dist-tag add … latest` 同步升级） |
+| 包体积 | 36 个文件 / 294.7 kB 打包 / 993.9 kB 解包；`shasum 78d913e2344436ed2e660180a9ce23eafadb2a63` |
+| 暂存延迟 | 发布命令 0 退出并打印 `+ dsh-meeting-room@0.1.0-preview.6`，但版本 URL 约 **100 秒**内仍 404，之后转 200；dist-tag 约 20 秒生效 |
+| npmmirror | 已自动同步（`registry.npmmirror.com/dsh-meeting-room/latest` = 0.1.0-preview.6），未手工触发 |
+| 安装副本 | 临时目录 `npm install dsh-meeting-room@0.1.0-preview.6` 通过：**14 个 `host-*.js` + `client.js` + `index.js` + 两个 locale** 齐全 |
+| 历史 | `0.1.0-preview.3`（2026-10-19）、`0.1.0-preview.4`（同日）已发布，现均被 preview.6 覆盖在 tag 上 |
+
+### 已发布状态（2026-10-19，历史：0.1.0-preview.3）
 
 | 项 | 结果 |
 | --- | --- |
@@ -67,14 +83,17 @@ npm publish --tag preview
 
 ### 发布包里有什么
 
-`npm pack --dry-run` 的实际输出（31 个文件，约 213 KB）：
+`npm pack --dry-run` 的实际输出（36 个文件，约 295 KB）：
 
 ```
-index.js  client.js  host-*.js（11 个）  speaker-worker.js  handwriting-worker.js
-minutes-docx.py  scores-xlsx.py  cordis.patch.yml  locale/{zh,en}.json  icon.svg
+index.js  client.js  host-*.js（14 个）  speaker-worker.js  handwriting-worker.js
+skill-meeting-scribe.js  minutes-docx.py  scores-xlsx.py  cordis.patch.yml
+locale/{zh,en}.json  icon.svg  package.json
 LICENSE  README.md  CHANGELOG.md  DESIGN.md  FEATURES.md  MODELS.md
-TESTING.md  THIRD-PARTY-NOTICES.md  smoke.mjs  package.json
+TESTING.md  THIRD-PARTY-NOTICES.md  PUBLISHING.md  smoke.mjs
 ```
+
+`__pycache__/` 与 `tools/`（开发用脚本）被 `files` 白名单挡在包外，属预期。
 
 模型**不在**包内（首次使用时按需下载并校验 sha256，见 `THIRD-PARTY-NOTICES.md`）。
 
