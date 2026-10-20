@@ -5,6 +5,7 @@
  * the same values without circular imports.
  */
 import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 /** Route prefix owned by this plugin. */
@@ -48,6 +49,35 @@ export const SPEAKER_MODEL_ORIGINS = [
 export const SPEAKER_THRESHOLD = 0.6
 
 /**
+ * Similarity above which a label is offered as "this sounds like …" from the voice library.
+ * Higher than the clustering threshold on purpose: suggesting the WRONG name is worse than
+ * suggesting none, because a wrong suggestion costs a correction every single time.
+ */
+export const VOICE_MATCH_THRESHOLD = 0.75
+
+/** Threshold presets the interface offers, each with the reason it exists. */
+export const SPEAKER_THRESHOLD_PRESETS = [
+  { id: 'crowd', threshold: 0.7, note: '人多：更严格，宁可多分几个声音，也不把两个人合成一个' },
+  { id: 'default', threshold: 0.6, note: '默认：通用会议' },
+  { id: 'few', threshold: 0.5, note: '人少：更宽松，同一个人语气变化大时不容易被拆开' },
+]
+
+/**
+ * How the end-of-meeting speaker pass should limit itself.
+ *
+ * Pure, so both the stop path (which already holds the settings) and the voice module can ask
+ * the same question without either importing the other.
+ * @param speakerSettings - the `speaker` section of the settings, if any.
+ * @returns `{ all: true }` for a full relabel, or `{ limit }` for a capped tail pass.
+ */
+export function relabelPlanOf(speakerSettings) {
+  const full = speakerSettings === null || typeof speakerSettings !== 'object' || speakerSettings.fullRelabel !== false
+  if (full) return { all: true }
+  const cap = Number(speakerSettings.backfillCap)
+  return { limit: Number.isFinite(cap) && cap > 0 ? Math.round(cap) : SPEAKER_BACKFILL_CAP }
+}
+
+/**
  * How many unlabeled cues the end-of-meeting pass may backfill from the finished
  * recording. The speaker worker is serial, and a first-ever meeting can outrun the
  * model download by hundreds of cues; the cap keeps "stop" instant while the rest
@@ -82,6 +112,33 @@ export const MAX_QUERY_LIMIT = 100
  */
 export const SCORE_WEIGHTS = { quality: 0.4, completion: 0.4, learn: 0.2 }
 
+/**
+ * The weights actually in force (FEATURES §2.4, P4): the stored setting when one exists,
+ * the defaults otherwise. Kept as module state so `scoreTotal` — a pure function used by
+ * the tools and the routes alike — computes the same total everywhere.
+ */
+export const scoreWeights = { ...SCORE_WEIGHTS }
+
+/** The keys a stored weight may carry, in the order the panel shows them. */
+export const SCORE_WEIGHT_KEYS = ['quality', 'completion', 'learn']
+
+/**
+ * Replace the weights in force. Values are normalised to sum to 1, so a caller that stores
+ * percentages (40 / 40 / 20) and one that stores fractions (0.4 / 0.4 / 0.2) agree; a
+ * value set that is not three finite, non-negative numbers leaves the current weights
+ * untouched rather than silently scoring everyone zero.
+ * @param next - the candidate weights, keyed quality / completion / learn.
+ * @returns the weights now in force.
+ */
+export function setScoreWeights(next) {
+  const values = SCORE_WEIGHT_KEYS.map((key) => (next !== null && typeof next === 'object' ? Number(next[key]) : Number.NaN))
+  if (!values.every((value) => Number.isFinite(value) && value >= 0)) return { ...scoreWeights }
+  const sum = values.reduce((total, value) => total + value, 0)
+  if (!(sum > 0)) return { ...scoreWeights }
+  SCORE_WEIGHT_KEYS.forEach((key, index) => { scoreWeights[key] = values[index] / sum })
+  return { ...scoreWeights }
+}
+
 /** Point kinds the model may use; anything else is stored as a plain point. */
 export const POINT_KINDS = ['decision', 'point', 'risk', 'question']
 
@@ -100,8 +157,15 @@ export const MAX_CUE_LIMIT = 4000
 /** In-memory meetings, keyed by meeting id. */
 export const meetings = new Map()
 
-/** Serialized text last written per meeting, so a flush skips unchanged records. */
-export const persisted = new Map()
+/**
+ * A meeting id that cannot collide. A bare millisecond timestamp did: the boot sweep can
+ * create several meetings inside one tick, and two records with the same id overwrite each
+ * other in memory and on disk (DESIGN §2.1 requires a unique id).
+ * @returns a unique id of the form meeting-<timestamp36>-<random>.
+ */
+export function newMeetingId() {
+  return `meeting-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`
+}
 
 /**
  * Speaker support as this process sees it: the model must be present and verified, and

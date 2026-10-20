@@ -29,6 +29,11 @@ import {
   MEETING_KINDS,
   ROLE_LABELS,
   seenText,
+  SPEAKER_THRESHOLD_PRESETS,
+  SCORE_WEIGHT_KEYS,
+  scoreWeights,
+  setScoreWeights,
+  newMeetingId,
 } from './host-constants.js'
 
 import {
@@ -46,13 +51,64 @@ import {
   pythonExecutable,
 } from './host-helpers.js'
 
-import { speakerState, prepareSpeakers, labelCue, relabelFromRecording, noteSpeakerLabel } from './host-speaker.js'
+import { speakerState, prepareSpeakers, labelCue, relabelFromRecording, noteSpeakerLabel, retireSpeakerWorker } from './host-speaker.js'
+import { meetingForSession } from './host-sessions.js'
 import { handwritingState, recognizeHandwriting, prepareHandwriting } from './host-handwriting.js'
 import { flushMeetings, meetingIsEmpty } from './host-persistence.js'
 import { packageMeeting, importPackage } from './host-package.js'
+import { modelState, installModel, importModel, activateModel, removeModel } from './host-models.js'
+import { cloudTranscribe, cloudEmbed, cloudSummary, writeCloudSettings, testCloud, redact, cloudState } from './host-providers.js'
+import {
+  readSpeakerSettings,
+  writeSpeakerSettings,
+  voiceSummary,
+  voicesFile,
+  removeVoice,
+  clearVoices,
+  suggestNames,
+  learnFromMeeting,
+} from './host-voices.js'
+import { readTranscriptSettings, writeTranscriptSettings } from './host-transcript.js'
+import { DEFAULT_RULES } from './host-text.js'
 
 /** Ceiling for an imported archive: a long meeting's recording travels inside one. */
 const IMPORT_BODY_BYTES = 512 * 1024 * 1024
+
+/**
+ * Whether this installation can recognise speech on the machine at all.
+ *
+ * It decides whether the panel offers the local path or the cloud one — a question the
+ * transcript settings page has to answer honestly rather than showing a switch that cannot work.
+ * @param ctx - Host context.
+ * @returns true when the speech capability is present.
+ */
+function localAsrAvailable(ctx) {
+  try {
+    return ctx.get('speechToText') !== undefined
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The vocabulary to send with a cue when cloud recognition is on: the meeting's own terminology,
+ * because names and jargon are exactly what a general model gets wrong.
+ * @param meeting - Meeting record.
+ * @returns a short prompt, or '' when the meeting has no terms.
+ */
+function hotwordsFor(meeting) {
+  const terms = typeof meeting.terms === 'string' ? meeting.terms : ''
+  if (terms.trim() === '') return ''
+  return terms
+    .split('\n')
+    .map((line) => {
+      const [wrong, right] = line.split('=')
+      return (right === undefined ? wrong : right).trim()
+    })
+    .filter((word) => word !== '')
+    .join(' ')
+    .slice(0, 800)
+}
 
 import {
   appendChunk,
@@ -75,6 +131,8 @@ import {
   pushTasks,
   relabelSpeakers,
   publicSegments,
+  mergeContinuation,
+  splitCueIntoSentences,
   speakerLabels,
   displaySpeaker,
   writeDocx,
@@ -92,6 +150,37 @@ import {
   readSpeechState,
   prepareSpeech,
 } from './host-tools.js'
+
+/**
+ * Ask the session's own Agent to take up the scribe loop when a person presses Start.
+ *
+ * The panel owns the microphone, but "recording is on" is only half of what the person
+ * meant: they want the meeting worked on. This admits one ordinary user prompt into the
+ * session, so the Agent starts a turn by itself — the same admission the chat box uses,
+ * just triggered by the panel. An Agent-initiated start (`auto`) is skipped: that turn is
+ * already running and would otherwise be prompted twice.
+ *
+ * @param ctx - Host context, for the optional sessionController service.
+ * @param sessionId - owning session.
+ * @param meeting - meeting just started, for its name in the prompt.
+ * @param auto - true when the agent itself asked for the start.
+ * @returns after the prompt is admitted, or undefined when no controller is present.
+ */
+async function nudgeScribe(ctx, sessionId, meeting, auto) {
+  if (auto === true || sessionId === '') return
+  const controller = typeof ctx?.get === 'function' ? ctx.get('sessionController') : undefined
+  if (controller === null || controller === undefined || typeof controller.prompt !== 'function') return
+  const name = typeof meeting?.title === 'string' && meeting.title !== '' ? meeting.title : '未命名会议'
+  const text = `（会议面板：录音已开始，「${name}」）请按 meeting-scribe 的流程开始工作：`
+    + '每 5 分钟读一次新增实录，把要点与工作安排写进这场会议；'
+    + '第一轮按前 5 分钟内容补一个会议名称；我停止录音后收尾，并删除「会议要点整理」提醒。'
+  await controller.prompt({
+    requestId: `meeting-start-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    sessionId,
+    mode: 'queue',
+    content: [{ type: 'text', text }],
+  }, AbortSignal.timeout(10_000)).catch(() => undefined)
+}
 
 /**
  * Create the HTTP handler for all /meeting-room routes.
@@ -137,17 +226,22 @@ export function createHandler(ctx) {
         )
         if (pending !== undefined) {
           pending.startedAt = startedAt
+          // The period is derived from the start time, so moving the start must move the
+          // bucket too — otherwise a meeting resumed after midnight stays in yesterday's
+          // day bucket and the cross-meeting queries miss it (§2.2).
+          pending.period = periodOf(pending.kind ?? '', startedAt)
           if (typeof body.terms === 'string') pending.terms = body.terms
           pending.controller = new AbortController()
           pending.audioName = audioName
           pending.audioPath = audioPath
           pending.audioHandle = audioHandle
           pending.audioBytes = 0
+          await nudgeScribe(ctx, sessionId, pending, body.auto === true)
           sendJson(res, 200, { meetingId: pending.id, sampleRate: SAMPLE_RATE, startedAt, audioName })
           return
         }
-        const id = `meeting-${Date.now().toString(36)}`
-        meetings.set(id, {
+        const id = newMeetingId()
+        const created = {
           id,
           startedAt,
           seconds: 0,
@@ -167,7 +261,9 @@ export function createHandler(ctx) {
           audioPath,
           audioHandle,
           audioBytes: 0,
-        })
+        }
+        meetings.set(id, created)
+        await nudgeScribe(ctx, created.sessionId, created, body.auto === true)
         sendJson(res, 200, { meetingId: id, sampleRate: SAMPLE_RATE, startedAt, audioName })
         return
       }
@@ -186,7 +282,7 @@ export function createHandler(ctx) {
         }
         // Notes and tasks belong to a meeting even when nothing was recorded, so the first
         // write creates the container; a later recording joins it.
-        const id = `meeting-${Date.now().toString(36)}`
+        const id = newMeetingId()
         meetings.set(id, {
           id,
           startedAt: Date.now(),
@@ -232,6 +328,11 @@ export function createHandler(ctx) {
           return
         }
         const pcm = Buffer.from(body.pcm, 'base64')
+        // The last few seconds of audio before this cue: a very short cue is matched
+        // against this window, so a two-word reply keeps the previous speaker instead of
+        // enrolling a voice of its own.
+        const contextPcm = meeting.recentPcm
+        meeting.recentPcm = Buffer.concat([contextPcm ?? Buffer.alloc(0), pcm]).subarray(-SAMPLE_RATE * 2 * 3)
         // Persist the audio before recognition, so a transcription failure never costs
         // the recording itself.
         if (meeting.audioHandle !== undefined) {
@@ -240,22 +341,81 @@ export function createHandler(ctx) {
         }
         const before = meeting.segments.length
         const text = await appendChunk(ctx, meeting, pcm, meeting.seconds)
+        // Cloud recognition, when the person has turned it on. It never runs without consent
+        // (the gate returns `skipped` before any request) and never costs the local text: a
+        // failure keeps what the on-machine recogniser produced and says what happened.
+        let cloud = { used: false, skipped: true, message: '' }
+        // Real sentence boundaries from the cloud recognizer, when it reports them.
+        let cloudHints = []
+        if (meeting.segments.length > before) {
+          const cue = meeting.segments[before]
+          try {
+            const answer = await cloudTranscribe({
+              pcm: Buffer.from(cue.pcm ?? pcm),
+              sampleRate: SAMPLE_RATE,
+              language: meeting.language ?? '',
+              hotwords: await hotwordsFor(meeting),
+            })
+            if (answer.skipped === true) {
+              cloud = { used: false, skipped: true, message: '' }
+            } else {
+              // The on-machine result stays beside the cloud one: turning on a cloud model
+              // must never erase what this machine heard (DESIGN §3.2).
+              if (typeof cue.localText !== 'string') cue.localText = cue.text
+              cue.text = answer.text
+              cue.asrModel = answer.model
+              meeting.asrModel = answer.model
+              cloudHints = Array.isArray(answer.segments) ? answer.segments : []
+              cloud = { used: true, skipped: false, message: '', model: answer.model }
+            }
+          } catch (failure) {
+            cloud = {
+              used: false,
+              skipped: false,
+              message: redact(failure instanceof Error ? failure.message : String(failure)),
+              // In `prefer-cloud` a run of failures turns into a fallback; in `cloud-only` the
+              // panel must say the cloud failed instead of presenting local text as cloud text.
+              fallback: cloudState.fallback,
+              strict: cloudState.mode === 'cloud-only',
+            }
+          }
+        }
         // Label the cue that was just appended. One cue can span a speaker change; that
         // case keeps the dominant voice and is a documented limitation.
         if (meeting.segments.length > before) {
-          const judged = await labelCue(ctx, pcm)
+          const judged = await labelCue(ctx, pcm, contextPcm)
           if (judged.speaker !== '') {
             meeting.segments[before].speaker = judged.speaker
             // Noted on the meeting as well: a reopened record must still know this voice
             // existed, even when a later cue's label could not be produced.
             noteSpeakerLabel(meeting, judged.speaker)
+            // Which model produced these labels, so a later "why do the labels look like
+            // this?" has an answer. Recorded once, on the first labelled cue.
+            if (meeting.speakerModel === undefined || meeting.speakerModel === '') {
+              meeting.speakerModel = speakerState.modelId
+            }
           }
           // The embedding is kept for the end-of-meeting pass, which merges voices the online
           // gallery could not; it never leaves this process.
           if (judged.embedding !== '') meeting.segments[before].embedding = judged.embedding
+          // Fast speech puts several sentences in one cue. Split it at the recognizer's
+          // punctuation (or its own cloud segments) before merging, so a line is a
+          // sentence, not ten seconds of speech.
+          const transcriptSettings = await readTranscriptSettings().catch(() => null)
+          const pieces = splitCueIntoSentences(meeting, before, {
+            maxChars: transcriptSettings?.maxLineChars ?? 60,
+            hints: cloudHints,
+            normalizeRules: transcriptSettings?.normalize === true ? transcriptSettings.normalizeRules : null,
+          })
+          if (pieces <= 1) {
+            // A sentence cut by the endpointing pause is folded back into one readable
+            // line once the speaker is known (text-only; times still span the audio).
+            mergeContinuation(meeting, before)
+          }
         }
         sendJson(res, 200, {
           text,
+          cloud,
           seconds: meeting.seconds,
           segments: publicSegments(meeting),
           audioName: meeting.audioName,
@@ -297,6 +457,9 @@ export function createHandler(ctx) {
           people: meeting.people ?? [],
           documents: meeting.documents ?? [],
           labels: speakerLabels(meeting),
+          // "This sounds like 张三" — offered, never written. The panel shows it and a person
+          // decides; that rule is why keeping a voice library is acceptable at all.
+          suggestions: await suggestNames(meeting).catch(() => []),
           speaker: { phase: speakerState.phase, message: speakerState.message },
         })
         return
@@ -360,7 +523,7 @@ export function createHandler(ctx) {
               meeting.scores.push(row)
             } else if (existing.status !== 'confirmed') {
               existing.completion = stat.completion
-              existing.total = scoreTotal(existing)
+              if (existing.totalOverride !== true) existing.total = scoreTotal(existing)
             }
           }
           sendJson(res, 200, { scores: meeting.scores, filled: stats.length })
@@ -379,6 +542,16 @@ export function createHandler(ctx) {
         }
         const row = meeting.scores[index]
         const patch = body.patch !== null && typeof body.patch === 'object' ? body.patch : {}
+        // Evidence is part of the row, not decoration: a human may edit it here (the agent
+        // supplies it when drafting), and a row without any cannot be confirmed (§2.4).
+        const nextBasis = Array.isArray(patch.basis)
+          ? patch.basis.filter((entry) => typeof entry === 'string' && entry.trim() !== '').map((entry) => entry.trim())
+          : (row.basis ?? [])
+        if (patch.status === 'confirmed' && nextBasis.length === 0) {
+          sendJson(res, 400, { error: '这条评分还没有依据：请先填一条实录原文或任务 id，再确认' })
+          return
+        }
+        if (Array.isArray(patch.basis)) row.basis = nextBasis
         // Only a human may confirm; the agent's drafts always arrive as drafts.
         if (patch.status === 'draft' || patch.status === 'confirmed') row.status = patch.status
         for (const [field, max] of [['hours', 10000], ['completion', 100], ['quality', 10], ['learn', 10]]) {
@@ -387,7 +560,15 @@ export function createHandler(ctx) {
         }
         if (typeof patch.highlight === 'string') row.highlight = patch.highlight.trim()
         if (typeof patch.improve === 'string') row.improve = patch.improve.trim()
-        row.total = scoreTotal(row)
+        // The weighted total is a default a person may override; clearing the field goes
+        // back to the computed value (§2.4).
+        if (patch.total === null || patch.total === '') {
+          delete row.totalOverride
+        } else if (Number.isFinite(Number(patch.total))) {
+          row.total = Math.min(Math.max(Math.round(Number(patch.total)), 0), 100)
+          row.totalOverride = true
+        }
+        if (row.totalOverride !== true) row.total = scoreTotal(row)
         sendJson(res, 200, { scores: meeting.scores })
         return
       }
@@ -415,6 +596,34 @@ export function createHandler(ctx) {
         await mkdir(directory, { recursive: true })
         await writeFile(join(directory, name), content, 'utf8')
         sendJson(res, 200, { name, content })
+        return
+      }
+
+      // A start-recording request from the agent. The microphone is the browser's, so this is a
+// hand-off, not a capture: the panel polls it and runs its own start(), which keeps the
+// permission prompt, the model preparation and the error messages in one place.
+      if (method === 'GET' && route === '/record') {
+        const meeting = meetingForSession(url.searchParams.get('sessionId') ?? '', url.searchParams.get('meetingId') ?? '')
+        if (meeting === undefined) {
+          sendJson(res, 404, { error: 'unknown meeting' })
+          return
+        }
+        sendJson(res, 200, {
+          meetingId: meeting.id,
+          request: typeof meeting.recordRequestedAt === 'number' ? meeting.recordRequestedAt : 0,
+          recording: meeting.audioHandle !== undefined,
+        })
+        return
+      }
+
+      if (method === 'POST' && route === '/record') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const meeting = meetingForSession(
+          typeof body.sessionId === 'string' ? body.sessionId : '',
+          typeof body.meetingId === 'string' ? body.meetingId : '',
+        )
+        if (meeting !== undefined) delete meeting.recordRequestedAt
+        sendJson(res, 200, { cleared: meeting !== undefined })
         return
       }
 
@@ -452,6 +661,10 @@ export function createHandler(ctx) {
         const offset = Number.isFinite(askedOffset) && askedOffset > 0 ? Math.floor(askedOffset) : 0
         const rows = []
         for (const meeting of meetings.values()) {
+          // Only meetings that actually hold something belong in the history: every live
+          // conversation owns an eager (often still empty) meeting, and listing those would
+          // bury the real records (DESIGN §4).
+          if (meetingIsEmpty(meeting)) continue
           const points = meeting.points ?? []
           const tasks = meeting.tasks ?? []
           const segments = meeting.segments ?? []
@@ -478,6 +691,8 @@ export function createHandler(ctx) {
               segments: segments.length,
               points: points.length,
               tasks: tasks.length,
+              // The management page reports how much of the work is checked off (§5.2).
+              done: tasks.filter((task) => task.done === true).length,
               notes: (meeting.notes ?? []).length,
               documents: (meeting.documents ?? []).length,
               scores: (meeting.scores ?? []).length,
@@ -494,8 +709,78 @@ export function createHandler(ctx) {
       if (method === 'POST' && route === '/flush') {
         // The picker's "auto-save": the periodic flush covers it within seconds, but the
         // panel must be able to say "saved" honestly before it switches away.
-        await flushMeetings(ctx)
-        sendJson(res, 200, { saved: true })
+        const result = await flushMeetings(ctx)
+        // "Saved" has to mean saved: a failed write is reported, not hidden, because the
+        // panel switches away on this answer (§5.4).
+        sendJson(res, result.failed.length === 0 ? 200 : 500, {
+          saved: result.failed.length === 0,
+          written: result.written,
+          failed: result.failed,
+        })
+        return
+      }
+
+      if (method === 'GET' && route === '/transcript') {
+        // How the transcript is written back, and where the browser half cuts a cue. The panel
+        // needs the cue limits with its own state, so they travel here instead of being
+        // duplicated as constants on both sides.
+        sendJson(res, 200, {
+          transcript: await readTranscriptSettings(),
+          rules: DEFAULT_RULES,
+          local: await localAsrAvailable(ctx),
+        })
+        return
+      }
+
+      if (method === 'POST' && route === '/transcript') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        sendJson(res, 200, { transcript: await writeTranscriptSettings(body) })
+        return
+      }
+
+      if (method === 'GET' && route === '/speaker/settings') {
+        // The clustering threshold and the end-of-meeting pass: what this installation does,
+        // not what one meeting is.
+        sendJson(res, 200, {
+          speaker: await readSpeakerSettings(),
+          presets: SPEAKER_THRESHOLD_PRESETS,
+          model: speakerState.modelId,
+          library: await voiceSummary(),
+          libraryFile: voicesFile(),
+        })
+        return
+      }
+
+      if (method === 'POST' && route === '/speaker/settings') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const { speaker, thresholdChanged } = await writeSpeakerSettings(body)
+        // The threshold is handed to the worker when it starts, so a change has to retire the
+        // running one. Saying that it restarted beats pretending the new value is in force.
+        let restarted = false
+        if (thresholdChanged && speakerState.phase !== 'unprepared') {
+          restarted = retireSpeakerWorker()
+          speakerState.phase = 'unprepared'
+          speakerState.message = ''
+        }
+        sendJson(res, 200, { speaker, restarted })
+        return
+      }
+
+      if (method === 'GET' && route === '/voices') {
+        // Names and evidence only: a vector never travels over the plugin's HTTP surface.
+        sendJson(res, 200, { voices: await voiceSummary(), file: voicesFile() })
+        return
+      }
+
+      if (method === 'POST' && route === '/voices/remove') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const removed = await removeVoice(typeof body.name === 'string' ? body.name.trim() : '')
+        sendJson(res, removed ? 200 : 404, removed ? { removed: true, voices: await voiceSummary() } : { error: 'unknown voice' })
+        return
+      }
+
+      if (method === 'POST' && route === '/voices/clear') {
+        sendJson(res, 200, { removed: await clearVoices(), voices: [] })
         return
       }
 
@@ -518,7 +803,10 @@ export function createHandler(ctx) {
         // An empty name clears the assignment and the label shows again.
         if (name === '') delete meeting.speakers[label]
         else meeting.speakers[label] = name
-        sendJson(res, 200, { speakers: meeting.speakers, segments: publicSegments(meeting) })
+        // Naming a speaker is the human confirmation the voice library waits for: only here is
+        // a voice profile written, and it is derived from this meeting's own cues.
+        const learned = name === '' ? null : await learnFromMeeting(meeting, label, name).catch(() => null)
+        sendJson(res, 200, { speakers: meeting.speakers, segments: publicSegments(meeting), learned })
         return
       }
 
@@ -568,6 +856,10 @@ export function createHandler(ctx) {
           hasSecret: settings.appSecret !== '',
           mode: settings.mode,
           configured: WEBHOOK_KINDS.filter((kind) => settings[kind] !== ''),
+          // The score weights, as fractions; the panel shows them as percentages (§2.4).
+          scoreWeights: settings.scoreWeights,
+          // Custom distillation wording per type; an empty entry uses the built-in text.
+          templates: settings.templates ?? {},
         })
         return
       }
@@ -591,10 +883,36 @@ export function createHandler(ctx) {
           if (typeof value === 'string') next[key] = value.trim()
         }
         if (PUSH_MODES.includes(body.mode)) next.mode = body.mode
-        const directory = dirname(webhookFile())
+        // Score weights arrive as percentages, because that is what a person types; they are
+        // stored normalised, so the three always add up (§2.4, P4). A set that does not add
+        // up to 100% is refused with the reason rather than silently reweighted.
+        if (body.scoreWeights !== null && typeof body.scoreWeights === 'object') {
+          const values = SCORE_WEIGHT_KEYS.map((key) => Number(body.scoreWeights[key]))
+          const sum = values.reduce((total, value) => total + value, 0)
+          if (!values.every((value) => Number.isFinite(value) && value >= 0) || Math.abs(sum - 100) > 0.5) {
+            sendJson(res, 400, { error: '评分权重三项必须是非负数，且加起来为 100%' })
+            return
+          }
+          next.scoreWeights = setScoreWeights(Object.fromEntries(SCORE_WEIGHT_KEYS.map((key, index) => [key, values[index] / 100])))
+        }
+        // Custom distill wording: only the four known types, trimmed, bounded. An empty string
+    // restores the built-in text instead of storing an unusable template.
+    if (body.templates !== null && typeof body.templates === 'object') {
+      const kept = {}
+      for (const kind of ['briefing', 'review', 'weekly', 'monthly']) {
+        if (typeof body.templates[kind] === 'string') kept[kind] = body.templates[kind].slice(0, 4000)
+      }
+      next.templates = kept
+    }
+    const directory = dirname(webhookFile())
         await mkdir(directory, { recursive: true })
         await writeFile(webhookFile(), JSON.stringify(next, null, 2), 'utf8')
-        sendJson(res, 200, { mode: next.mode, configured: WEBHOOK_KINDS.filter((kind) => next[kind] !== '') })
+        sendJson(res, 200, {
+          mode: next.mode,
+          configured: WEBHOOK_KINDS.filter((kind) => next[kind] !== ''),
+          scoreWeights: { ...scoreWeights },
+          templates: next.templates ?? {},
+        })
         return
       }
 
@@ -724,6 +1042,68 @@ export function createHandler(ctx) {
         }
         const outcome = await pushTasks(meeting, asked.length === 0 ? WEBHOOK_KINDS : asked, only)
         sendJson(res, outcome.error === '' ? 200 : 400, outcome)
+        return
+      }
+
+      if (method === 'GET' && route === '/cloud') {
+        // Consent, configured hosts, whether a key is set — never the key itself.
+        sendJson(res, 200, await cloudSummary())
+        return
+      }
+
+      if (method === 'POST' && route === '/cloud') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const stored = await writeCloudSettings(body)
+        sendJson(res, 200, await cloudSummary())
+        // The write is reported through the summary, which cannot echo a key back.
+        void stored
+        return
+      }
+
+      if (method === 'POST' && route === '/cloud/test') {
+        sendJson(res, 200, await testCloud())
+        return
+      }
+
+      if (method === 'GET' && route === '/models') {
+        // The catalog, what is on disk, which one each capability runs, and how a download in
+        // flight is going — one answer, because the page shows all of it together.
+        sendJson(res, 200, await modelState())
+        return
+      }
+
+      if (method === 'POST' && route === '/models/install') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const outcome = await installModel(typeof body.id === 'string' ? body.id : '')
+        sendJson(res, outcome.error === undefined ? 200 : 400, outcome)
+        return
+      }
+
+      if (method === 'POST' && route === '/models/import') {
+        // The bytes ARE the body: a model file can be large, and JSON would only inflate it.
+        const id = url.searchParams.get('id') ?? ''
+        const name = url.searchParams.get('name') ?? ''
+        try {
+          const bytes = await readBody(req, IMPORT_BODY_BYTES)
+          const outcome = await importModel(id, name, bytes)
+          sendJson(res, outcome.error === undefined ? 200 : 400, outcome)
+        } catch (failure) {
+          sendJson(res, 400, { error: failure instanceof Error ? failure.message : String(failure) })
+        }
+        return
+      }
+
+      if (method === 'POST' && route === '/models/activate') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const outcome = await activateModel(typeof body.kind === 'string' ? body.kind : '', typeof body.id === 'string' ? body.id : '')
+        sendJson(res, outcome.error === undefined ? 200 : 400, outcome)
+        return
+      }
+
+      if (method === 'POST' && route === '/models/remove') {
+        const body = JSON.parse((await readBody(req)).toString('utf8'))
+        const outcome = await removeModel(typeof body.id === 'string' ? body.id : '')
+        sendJson(res, outcome.error === undefined ? 200 : 400, outcome)
         return
       }
 
@@ -875,6 +1255,8 @@ export function createHandler(ctx) {
             scores: meeting.scores ?? [],
             speakers: meeting.speakers,
             labels: speakerLabels(meeting),
+            // Offered, never written — the same rule as /state.
+            suggestions: await suggestNames(meeting).catch(() => []),
             // The rest of what the panel renders, so a reload restores it from one answer.
             role: meeting.role ?? '',
             documents: meeting.documents ?? [],

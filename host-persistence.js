@@ -28,12 +28,23 @@ export function meetingStoreDirectory() {
 export function recordOf(meeting) {
   // A writer handle and an abort controller are process-local; speaker embeddings belong to
   // the recording that produced them and are rebuilt by the next one; kept PCM is only a
-  // stop-time backfill vehicle for cues the first-pass labeling missed.
-  const { audioHandle, controller, ...rest } = meeting
-  const segments = rest.segments.map(({ embedding, pcm, ...segment }) => segment)
+  // stop-time backfill vehicle for cues the first-pass labeling missed. Voice centroids are
+  // derived from those embeddings and are deliberately NOT persisted either: the voice library
+  // (host-voices.js) is the only place a voice profile is kept, and it is written only when a
+  // person names a speaker.
+  const { audioHandle, controller, voiceCentroids, recentPcm, recordRequestedAt, ...rest } = meeting
+  // Defensive on purpose: one malformed record (an import, a hand-edited file) must not
+  // throw here, because this runs inside the 5-second flush loop and would take every
+  // later meeting's write down with it.
+  const segments = (Array.isArray(rest.segments) ? rest.segments : []).map(({ embedding, pcm, ...segment }) => segment)
   return JSON.stringify({
     ...rest,
     segments,
+    points: Array.isArray(rest.points) ? rest.points : [],
+    tasks: Array.isArray(rest.tasks) ? rest.tasks : [],
+    notes: Array.isArray(rest.notes) ? rest.notes : [],
+    documents: Array.isArray(rest.documents) ? rest.documents : [],
+    scores: Array.isArray(rest.scores) ? rest.scores : [],
     role: meeting.role ?? '',
     revisions: meeting.revisions ?? [],
     speakers: meeting.speakers ?? {},
@@ -55,6 +66,10 @@ export function meetingIsEmpty(meeting) {
   for (const key of ['segments', 'points', 'tasks', 'notes', 'documents', 'revisions', 'people', 'scores']) {
     if (Array.isArray(meeting[key]) && meeting[key].length > 0) return false
   }
+  // A name or a type is a deliberate act: a meeting the person named must survive even
+  // when nothing was recorded or written yet (§5.5). The period is derived from the type.
+  if (typeof meeting.title === 'string' && meeting.title !== '') return false
+  if (typeof meeting.kind === 'string' && meeting.kind !== '') return false
   if (typeof meeting.audioName === 'string' && meeting.audioName !== '') return false
   if (typeof meeting.role === 'string' && meeting.role !== '') return false
   if (typeof meeting.summary === 'string' && meeting.summary !== '') return false
@@ -70,10 +85,37 @@ export function meetingIsEmpty(meeting) {
  * @param ctx - Host context, used to log a write failure.
  * @returns after every pending write settles.
  */
-export async function flushMeetings(ctx) {
+export function flushMeetings(ctx) {
+  // One flush at a time: the 5-second timer and the panel's "save now" can otherwise write
+  // the same record concurrently, and the slower write could land last.
+  const run = pendingFlush.then(() => flushOnce(ctx), () => flushOnce(ctx))
+  pendingFlush = run.then(() => undefined, () => undefined)
+  return run
+}
+
+/** The flush currently queued or running; resolved before the next one starts. */
+let pendingFlush = Promise.resolve()
+
+/**
+ * Write every changed meeting, one at a time. Never throws: a failure is reported in the
+ * result so the caller (and the panel) can tell the truth about whether it saved.
+ */
+async function flushOnce(ctx) {
   const directory = meetingStoreDirectory()
+  const failed = []
+  let written = 0
   for (const meeting of meetings.values()) {
-    const text = recordOf(meeting)
+    let text
+    try {
+      text = recordOf(meeting)
+    } catch (error) {
+      // One unreadable record must not abort the loop: every meeting after it would stay
+      // unwritten, which is silent data loss. Report it and keep going.
+      const message = error instanceof Error ? error.message : String(error)
+      failed.push({ id: meeting.id, error: message })
+      ctx.logger.warn('meeting-room: could not serialize %s: %s', meeting.id, message)
+      continue
+    }
     if (persisted.get(meeting.id) === text) continue
     // A meeting created eagerly for a new session writes nothing to disk until it
     // carries actual meeting content; the store holds only real records.
@@ -82,10 +124,14 @@ export async function flushMeetings(ctx) {
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, `${meeting.id}.json`), text, 'utf8')
       persisted.set(meeting.id, text)
+      written += 1
     } catch (error) {
-      ctx.logger.warn('meeting-room: could not persist %s: %s', meeting.id, error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      failed.push({ id: meeting.id, error: message })
+      ctx.logger.warn('meeting-room: could not persist %s: %s', meeting.id, message)
     }
   }
+  return { written, failed }
 }
 
 /**
@@ -106,7 +152,8 @@ export async function restoreMeetings(ctx) {
   for (const name of names) {
     if (!name.endsWith('.json')) continue
     try {
-      const record = JSON.parse(await readFile(join(directory, name), 'utf8'))
+      const raw = await readFile(join(directory, name), 'utf8')
+      const record = JSON.parse(raw)
       if (typeof record.id !== 'string' || record.id === '') continue
       // One session owns at most one meeting. A live meeting for the same session can
       // already exist when `session/created` or the boot sweep ran before this file was
@@ -127,8 +174,9 @@ export async function restoreMeetings(ctx) {
         }
       }
       // A restored record is history: it gets no writer handle, and its controller only
-      // guards future work.
-      meetings.set(record.id, {
+      // guards future work. Array fields are normalised because a damaged or older file
+      // must not make every later flush throw.
+      const restoredRecord = {
         seconds: 0,
         segments: [],
         points: [],
@@ -146,7 +194,16 @@ export async function restoreMeetings(ctx) {
         scores: [],
         ...record,
         controller: new AbortController(),
-      })
+      }
+      for (const key of ['segments', 'points', 'tasks', 'notes', 'documents', 'revisions', 'scores', 'speakerLabels', 'people']) {
+        if (!Array.isArray(restoredRecord[key])) restoredRecord[key] = []
+      }
+      if (restoredRecord.speakers === null || typeof restoredRecord.speakers !== 'object' || Array.isArray(restoredRecord.speakers)) restoredRecord.speakers = {}
+      meetings.set(record.id, restoredRecord)
+      // Remember the file's own text: without this every restored meeting looks "never
+      // persisted" to the empty-meeting rule and to session disposal, and the first flush
+      // rewrites the whole store.
+      persisted.set(record.id, raw)
       restored += 1
     } catch (error) {
       ctx.logger.warn('meeting-room: could not restore %s: %s', name, error instanceof Error ? error.message : String(error))
