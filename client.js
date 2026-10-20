@@ -141,6 +141,9 @@ registerProcessor('meeting-capture', MeetingCapture)
 
     const zh = {
       title: '会议记录',
+      guideTitle: '开始会议',
+      guideDescription: '立即录音，会议助手自动整理',
+      guideOpening: '正在打开会议…',
       open: '会议记录',
       start: '开始记录',
       stop: '停止记录',
@@ -543,6 +546,9 @@ registerProcessor('meeting-capture', MeetingCapture)
 
     const en = {
       title: 'Meeting notes',
+      guideTitle: 'Start a meeting',
+      guideDescription: 'Record now and let the meeting agent organise',
+      guideOpening: 'Opening the meeting…',
       open: 'Meeting notes',
       start: 'Start',
       stop: 'Stop',
@@ -2210,6 +2216,13 @@ function periodBucketOf(startedAt, unit) {
        */
       subscribe(listener) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } },
     }
+
+    /**
+     * The start page's "开始会议" card hands the panel a begin request before the tab
+     * mounts. A module-level flag plus a window event covers both orders: a panel already
+     * open hears the event, a panel that mounts afterwards consumes the flag.
+     */
+    const guideBegin = { pending: false }
 
     /**
      * Read the shared recorder inside a component, re-rendering on every change.
@@ -3936,6 +3949,23 @@ function periodBucketOf(startedAt, unit) {
         return () => clearInterval(timer)
       }, [phase, sessionId, start, t, viewed])
 
+      // The start page's "开始会议" card: consume its request here (the same start() the
+      // buttons use, so the microphone prompt and the host hand-off stay in one place).
+      React.useEffect(() => {
+        const begin = () => {
+          if (guideBegin.pending !== true) return
+          // Without a session the panel has nothing to attach a meeting to; the pending
+          // request survives until a panel with a real session mounts.
+          if (sessionId === '') return
+          if (phase !== 'idle' || recorder.active !== null || viewed !== null) return
+          guideBegin.pending = false
+          void start()
+        }
+        begin()
+        window.addEventListener('meeting-room:begin', begin)
+        return () => window.removeEventListener('meeting-room:begin', begin)
+      }, [phase, sessionId, start, viewed])
+
       /** Stop capture, drain the remaining audio, then finalize the meeting. */
       const stop = React.useCallback(async () => {
         const active = recorder.active
@@ -5240,6 +5270,56 @@ function periodBucketOf(startedAt, unit) {
     function MeetingTabTitle(props) {
       const tab = props.useTabInfo()
       return h(React.Fragment, null, tab.tab.title)
+    }
+
+    /**
+     * The start page's guide card for this panel. A single click arms the begin request
+     * and opens the meeting tab; the panel then runs its normal start path, so the
+     * microphone prompt, the meeting creation and the agent hand-off stay unchanged.
+     * @param props - Framework copy plus the injected opener.
+     * @returns one full-width card, matching the guide's own cards.
+     */
+    function GuideStartCard(props) {
+      const t = props.t
+      const [busy, setBusy] = React.useState(false)
+      const title = typeof props.title === 'string' && props.title !== '' ? props.title : t('guideTitle')
+      const description = typeof props.description === 'string' && props.description !== ''
+        ? props.description
+        : t('guideDescription')
+      return h('button', {
+        type: 'button',
+        className: 'mr-guide-card',
+        'aria-label': title,
+        title: description,
+        disabled: busy,
+        style: {
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
+          width: '100%', padding: '10px 12px', borderRadius: 20, border: '1px solid transparent',
+          background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left',
+          cursor: busy ? 'progress' : 'pointer', opacity: busy ? 0.7 : 1,
+        },
+        onMouseEnter: (event) => { event.currentTarget.style.background = 'var(--dsh-fill-hover, rgba(128,128,128,0.12))' },
+        onMouseLeave: (event) => { event.currentTarget.style.background = 'transparent' },
+        onClick: () => {
+          if (busy) return
+          setBusy(true)
+          const hasSession = typeof props.sessionId === 'string' && props.sessionId !== ''
+          try {
+            props.begin(hasSession)
+          } catch (failure) {
+            console.warn('meeting-room: the guide card could not begin the meeting', failure)
+            setBusy(false)
+            return
+          }
+          // The card stays in the guide list, so it must become clickable again even when
+          // the microphone prompt is declined — the panel reports that failure itself.
+          setTimeout(() => setBusy(false), 2000)
+        },
+      }, [
+        h('span', { key: 'title', style: { fontSize: 13, fontWeight: 600 } }, title),
+        h('span', { key: 'description', style: { fontSize: 12, opacity: 0.7 } }, description),
+        busy ? h('span', { key: 'opening', style: { fontSize: 12, opacity: 0.7 } }, t('guideOpening')) : null,
+      ])
     }
 
     /**
@@ -7302,7 +7382,7 @@ function periodBucketOf(startedAt, unit) {
       ])])
     }
     return {
-      inject: ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'layout', 'sessions'],
+      inject: ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'layout', 'sessions', 'uiWorkspace'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'meeting-room: dictionaries')
         const t = ctx.locale.bind(NS)
@@ -7450,6 +7530,15 @@ function periodBucketOf(startedAt, unit) {
           id: TAB_ID,
           kind: TAB_KIND,
           title: () => t('title'),
+          // The start page's guide: one card, first in the list, that opens this panel and
+          // starts recording (see GuideStartCard). Clicking a guide card opens its kind, so
+          // the card itself only has to arm the begin request.
+          guide: [{
+            id: 'start',
+            order: 5,
+            title: () => t('guideTitle'),
+            description: () => t('guideDescription'),
+          }],
         }), 'meeting-room: tab type')
 
         ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
@@ -7478,6 +7567,32 @@ function periodBucketOf(startedAt, unit) {
         ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab.title', key: TAB_ID,
         }, MeetingTabTitle))
+        // One card, not the standard icon button: the whole point is that a single click
+        // begins the meeting, so the click arms the panel and opens its tab.
+        ctx.slots.inject('sidebar.right.tab.guide.entry', () => ctx.slots.register({
+          name: 'sidebar.right.tab.guide.entry', key: TAB_ID, locale: NS,
+          inject: () => ({
+            begin: (hasSession) => {
+              guideBegin.pending = true
+              // The start page may have no conversation yet; a meeting needs one, so open a
+              // fresh agent conversation first and let the panel that mounts there start.
+              if (hasSession !== true) {
+                try {
+                  ctx.uiWorkspace?.startSession?.()
+                } catch (failure) {
+                  console.warn('meeting-room: the guide could not start a session', failure)
+                }
+              }
+              if (readRailCollapsed() === true) ctx.layout.toggleSidebar()
+              try {
+                ctx.sidebarRight.openTab(TAB_KIND, { replaceTab: true })
+              } catch (failure) {
+                console.warn('meeting-room: the guide could not open the meeting tab', failure)
+              }
+              window.dispatchEvent(new Event('meeting-room:begin'))
+            },
+          }),
+        }, GuideStartCard))
         ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
           name: 'conversation.session.header.actions',
           id: 'meeting-room.open',

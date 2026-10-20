@@ -564,6 +564,14 @@ check('会议记录页提示上次会议主题', clientSource.includes("key: 'la
 check('起名对话框说明留空会自动命名', clientSource.includes("key: 'autohint'")
   && clientSource.includes("t('meetingNameAutoHint')")
   && clientSource.includes('留空并开始（稍后自动命名）'))
+// 开始页的引导列表要出现「开始会议」：一个 guide 入口 + 自己的卡片，一点即开录。
+check('开始页引导有「开始会议」卡片', clientSource.includes("guideTitle: '开始会议'")
+  && clientSource.includes('guide: [{')
+  && clientSource.includes('function GuideStartCard')
+  && clientSource.includes("name: 'sidebar.right.tab.guide.entry'")
+  && clientSource.includes("window.dispatchEvent(new Event('meeting-room:begin'))")
+  && clientSource.includes('guideBegin.pending = true')
+  && clientSource.includes("if (guideBegin.pending !== true) return"))
 // 停止录音要收尾（补识别 + 全量重判），这段等待必须有提示，否则像卡住。
 check('停止录音的收尾等待有 toast', clientSource.includes("toast(t('stopFinishing'), { sticky: true })")
   && clientSource.includes("t('stopRemaining')") && clientSource.includes("t('stopFinished')")
