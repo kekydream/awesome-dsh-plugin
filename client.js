@@ -367,7 +367,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       robotSettings: '设置',
       settingsTabs: '设置分类',
       settingsTabPush: '推送与机器人',
-      settingsTabCloud: '云端识别',
       settingsTabTranscript: '实录与切句',
       settingsTabSpeaker: '发言人识别',
       settingsTabWeights: '评分权重',
@@ -390,6 +389,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubTabRecords: '会议记录',
       hubTabModels: '模型',
       modelsHint: '这里决定识别用哪些模型：装好、校验通过（大小与 sha256 都对）才能启用。默认不出本机；换模型只影响之后的识别，不改动已有会议的文字。',
+      modelsLocalTitle: '本地模型',
+      modelsLocalHint: '在这台机器上运行，录音不出本机。按用途分组：语音识别、发言人声纹、手写识别。',
+      modelsCloudTitle: '云端模型（默认关闭）',
+      modelsCloudHint: '只有勾选下面的同意项后，录音片段才会发到这里的地址做识别；不打开则一律在本机识别，插件不会对外发起任何请求。发送时只带当前这一段音频（不是整场录音），并在请求里声明不保留；失败会自动回到本地模型，不会静默丢字。密钥只存在本机设置里：不显示、不进日志，也不进会议工程包。',
+      modelKindAsr: '语音识别',
+      modelKindSpeaker: '发言人声纹',
+      modelKindHandwriting: '手写识别',
+      modelKindVad: '端点检测',
+      modelKindDiarization: '说话人分离',
+      modelKindOther: '其它',
       modelInstall: '下载并安装',
       modelRetry: '重新下载',
       modelInstalled: '已安装',
@@ -408,8 +417,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       modelStateBad: '校验不通过',
       modelByDsh: '由 DSH 提供',
       modelInUse: '正在使用',
-      cloudTitle: '云端识别（默认关闭）',
-      cloudHint: '打开后，录音会发给下面这个地址做识别；不打开则一律在本机识别，插件不会对外发起任何请求。发送时只带当前这一段音频（不是整场录音），并在请求里声明不保留。密钥只存在本机设置里：不显示、不进日志，也不进会议工程包。',
       cloudConsent: '我同意把音频发到下面这个地址做识别',
       cloudProvider: '服务类型',
       cloudOff: '关闭',
@@ -772,7 +779,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       robotSettings: 'Settings',
       settingsTabs: 'Settings groups',
       settingsTabPush: 'Push & robots',
-      settingsTabCloud: 'Cloud recognition',
       settingsTabTranscript: 'Transcript & cues',
       settingsTabSpeaker: 'Speaker recognition',
       settingsTabWeights: 'Score weights',
@@ -794,6 +800,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubTabRecords: 'Records',
       hubTabModels: 'Models',
       modelsHint: 'Which models recognition runs on. A model must be installed and verified (size and sha256) before it can be chosen. Nothing leaves this machine by default, and switching only affects later recognition — text already recorded is untouched.',
+      modelsLocalTitle: 'Local models',
+      modelsLocalHint: 'These run on this machine and the recording never leaves it. Grouped by purpose: speech, speaker voices, handwriting.',
+      modelsCloudTitle: 'Cloud models (off by default)',
+      modelsCloudHint: 'Only after you tick the consent box below is audio sent to this address; with it off everything is recognised on this machine and the plugin makes no outgoing request at all. Only the current cue travels (never the whole recording) and the request declares that it may not be retained; on failure recognition falls back to the local model instead of silently losing words. The key lives in this machine\'s settings only: never displayed, never logged, never inside a meeting package.',
+      modelKindAsr: 'Speech recognition',
+      modelKindSpeaker: 'Speaker voices',
+      modelKindHandwriting: 'Handwriting',
+      modelKindVad: 'Endpointing',
+      modelKindDiarization: 'Speaker separation',
+      modelKindOther: 'Other',
       modelInstall: 'Download and install',
       modelRetry: 'Download again',
       modelInstalled: 'Installed',
@@ -812,8 +828,6 @@ registerProcessor('meeting-capture', MeetingCapture)
       modelStateBad: 'Verification failed',
       modelByDsh: 'Provided by DSH',
       modelInUse: 'In use',
-      cloudTitle: 'Cloud recognition (off by default)',
-      cloudHint: 'With this on, audio is sent to the address below for recognition; with it off everything is recognised on this machine and the plugin makes no outgoing request at all. Only the current cue travels (never the whole recording), and the request declares that it may not be retained. The key lives in this machine\'s settings only: never displayed, never logged, never inside a meeting package.',
       cloudConsent: 'I agree to send audio to the address below for recognition',
       cloudProvider: 'Service type',
       cloudOff: 'Off',
@@ -2094,14 +2108,23 @@ function periodBucketOf(startedAt, unit) {
     const CLOUD_PROVIDER_KEYS = { off: 'cloudOff', 'openai-compatible': 'cloudOpenAi', custom: 'cloudCustom' }
 
     /** Settings groups, in the order a person configures them: what leaves the machine
-     *  first (push, cloud), then how this installation scores and writes, then voices. */
+     *  first (push), then how this installation cuts and scores, then voices. Model choice,
+     *  local or cloud, lives on the 模型 page so every recognition decision sits together. */
     const SETTINGS_TABS = [
       ['push', 'settingsTabPush'],
-      ['cloud', 'settingsTabCloud'],
       ['transcript', 'settingsTabTranscript'],
       ['speaker', 'settingsTabSpeaker'],
       ['weights', 'settingsTabWeights'],
       ['templates', 'settingsTabTemplates'],
+    ]
+
+    /** Local model kinds, in the order the 模型 page lists them. */
+    const MODEL_KIND_ORDER = [
+      ['asr', 'modelKindAsr'],
+      ['speaker', 'modelKindSpeaker'],
+      ['handwriting', 'modelKindHandwriting'],
+      ['vad', 'modelKindVad'],
+      ['diarization', 'modelKindDiarization'],
     ]
 
     /** Hub sections, in the order a user meets them. */
@@ -5393,6 +5416,69 @@ function periodBucketOf(startedAt, unit) {
     }
 
     /**
+     * One local-model row on the 模型 page: what it is, whether it is usable, and the one
+     * action that applies to that state. Kept in its own component so adding a model kind
+     * only adds a heading on the page, never new markup.
+     * @param props - catalog entry, state flags and the page's callbacks.
+     * @returns the row element.
+     */
+    function ModelRow(props) {
+      const { model, t } = props
+      const state = model.locked === true
+        ? t('modelByDsh')
+        : model.verified === true ? t('modelStateReady') : model.installed === true ? t('modelStateBad') : t('modelStateMissing')
+      const size = model.totalBytes === 0 ? '—' : `${(model.totalBytes / 1048576).toFixed(1)} MB`
+      const actions = []
+      if (model.locked !== true) {
+        if (model.verified === true) {
+          actions.push(h(Btn, {
+            key: 'activate',
+            type: 'button',
+            style: styles.button,
+            disabled: props.used || props.busy,
+            onClick: () => props.onActivate(model.id, model.kind),
+          }, props.used ? t('modelInUse') : t('modelActivate')))
+        } else {
+          actions.push(h(Btn, {
+            key: 'install',
+            type: 'button',
+            style: styles.button,
+            disabled: props.busy || props.downloading,
+            onClick: () => props.onInstall(model.id),
+          }, props.retry ? t('modelRetry') : t('modelInstall')))
+        }
+        actions.push(h(Btn, {
+          key: 'import',
+          type: 'button',
+          style: styles.button,
+          disabled: props.busy,
+          title: t('modelImportHint'),
+          onClick: () => props.onImport(model),
+        }, t('modelImportFile')))
+        if (model.builtin !== true) {
+          actions.push(h(Btn, {
+            key: 'remove',
+            type: 'button',
+            style: styles.button,
+            disabled: props.busy,
+            onClick: () => props.onRemove(model.id),
+          }, t('modelRemove')))
+        }
+      }
+      return h('div', { style: styles.list }, [
+        h('div', { key: 'row', style: styles.row }, [
+          h('span', { key: 'name', style: styles.label }, `${model.name}${props.used ? ` · ${t('modelInUse')}` : ''}`),
+          h('span', { key: 'state', style: styles.stamp }, state),
+        ]),
+        // The kind is the group heading above the row, so the meta line carries only size.
+        h('span', { key: 'meta', style: styles.hint }, `${size} · ${model.sizeClass}${model.languages.length === 0 ? '' : ` · ${model.languages.join('/')}`}`),
+        model.note === '' ? null : h('span', { key: 'note', style: styles.hint }, model.note),
+        model.licence === '' ? null : h('span', { key: 'licence', style: styles.hint }, `${t('modelLicence')}：${model.licence}`),
+        h('div', { key: 'actions', style: styles.row }, actions),
+      ])
+    }
+
+    /**
      * Open the meeting panel from the session header.
      * @param props - Localized copy plus the injected opener.
      * @returns the header button.
@@ -6450,8 +6536,10 @@ function periodBucketOf(startedAt, unit) {
       }, [loadCloud, t])
 
       React.useEffect(() => {
+        // Cloud recognition lives on 模型 now, but its saved state is shared: read it
+        // whenever either page opens so both show the same answer.
+        if (hubTab === 'settings' || hubTab === 'models') void loadCloud()
         if (hubTab !== 'settings') return
-        void loadCloud()
         void loadSpeakerSettings()
         void loadTranscript()
       }, [hubTab, loadCloud, loadSpeakerSettings, loadTranscript])
@@ -6571,6 +6659,34 @@ function periodBucketOf(startedAt, unit) {
           await loadModels()
         }
       }, [loadModels, t])
+
+      /**
+       * One row on the 模型 page. The row owns its state text and actions; the page owns
+       * the network calls, so a download's progress stays in one place.
+       * @param model - catalog entry from `/models`.
+       * @returns the row element.
+       */
+      const renderModelRow = (model) => h(ModelRow, {
+        key: model.id,
+        model,
+        used: models.active[model.kind] === model.id,
+        busy: modelBusy === model.id,
+        downloading: models.install?.phase === 'downloading',
+        retry: models.install?.phase === 'failed' && models.install.id === model.id,
+        t,
+        onActivate: (modelId, modelKind) => { void activateModelNow(modelKind, modelId) },
+        onInstall: (modelId) => { void installModelNow(modelId) },
+        onImport: (entry) => {
+          // The file name decides which file of the model this is, so the person is told
+          // what to pick; the host refuses anything that does not match.
+          modelTarget.current = { id: entry.id, name: entry.files[0]?.name ?? '' }
+          modelField.current?.click()
+        },
+        onRemove: (modelId) => { void removeModelNow(modelId) },
+      })
+
+      /** Kinds this page has no heading for still get listed, under 其它. */
+      const otherModels = models.models.filter((model) => !MODEL_KIND_ORDER.some(([kind]) => kind === model.kind))
 
       /**
        * Bring one exported archive in as a meeting of this machine. The bytes go up as they
@@ -6792,60 +6908,94 @@ function periodBucketOf(startedAt, unit) {
           models.install?.phase === 'downloading'
             ? h('p', { key: 'progress', style: styles.note }, `${t('modelDownloading')} ${models.install.file} · ${models.install.total > 0 ? Math.min(100, Math.floor(models.install.received * 100 / models.install.total)) : 0}%`)
             : null,
-          h('div', { key: 'list', style: styles.list }, models.models.map((model) => {
-            const used = models.active[model.kind] === model.id
-            const state = model.locked === true
-              ? t('modelByDsh')
-              : model.verified === true ? t('modelStateReady') : model.installed === true ? t('modelStateBad') : t('modelStateMissing')
-            const size = model.totalBytes === 0 ? '—' : `${(model.totalBytes / 1048576).toFixed(1)} MB`
-            return h('div', { key: model.id, style: styles.list }, [
-              h('div', { key: 'row', style: styles.row }, [
-                h('span', { key: 'name', style: styles.label }, `${model.name}${used ? ` · ${t('modelInUse')}` : ''}`),
-                h('span', { key: 'state', style: styles.stamp }, state),
-              ]),
-              h('span', { key: 'meta', style: styles.hint }, `${model.kind} · ${size} · ${model.sizeClass}${model.languages.length === 0 ? '' : ` · ${model.languages.join('/')}`}`),
-              model.note === '' ? null : h('span', { key: 'note', style: styles.hint }, model.note),
-              model.licence === '' ? null : h('span', { key: 'licence', style: styles.hint }, `${t('modelLicence')}：${model.licence}`),
-              h('div', { key: 'actions', style: styles.row }, model.locked === true ? [] : [
-                model.verified === true
-                  ? h(Btn, {
-                    key: 'activate',
-                    type: 'button',
-                    style: styles.button,
-                    disabled: used || modelBusy === model.id,
-                    onClick: () => { void activateModelNow(model.kind, model.id) },
-                  }, used ? t('modelInUse') : t('modelActivate'))
-                  : h(Btn, {
-                    key: 'install',
-                    type: 'button',
-                    style: styles.button,
-                    disabled: modelBusy === model.id || models.install?.phase === 'downloading',
-                    onClick: () => { void installModelNow(model.id) },
-                  }, models.install?.phase === 'failed' && models.install.id === model.id ? t('modelRetry') : t('modelInstall')),
-                h(Btn, {
-                  key: 'import',
-                  type: 'button',
-                  style: styles.button,
-                  disabled: modelBusy === model.id,
-                  title: t('modelImportHint'),
-                  onClick: () => {
-                    // The file name decides which file of the model this is, so the person is
-                    // told what to pick; the host refuses anything that does not match.
-                    modelTarget.current = { id: model.id, name: model.files[0]?.name ?? '' }
-                    modelField.current?.click()
-                  },
-                }, t('modelImportFile')),
-                model.builtin === true ? null : h(Btn, {
-                  key: 'remove',
-                  type: 'button',
-                  style: styles.button,
-                  disabled: modelBusy === model.id,
-                  onClick: () => { void removeModelNow(model.id) },
-                }, t('modelRemove')),
-              ]),
-            ])
-          })),
+          // Local models first: they are the default, and the recording never leaves the
+          // machine. Grouping by purpose keeps "which speech model" and "which voice model"
+          // from reading as one flat list of downloads.
+          h('span', { key: 'localhead', style: styles.label }, t('modelsLocalTitle')),
+          h('span', { key: 'localhint', style: styles.hint }, t('modelsLocalHint')),
+          h('div', { key: 'list', style: styles.list }, [
+            ...MODEL_KIND_ORDER.flatMap(([kind, labelKey]) => {
+              const rows = models.models.filter((model) => model.kind === kind)
+              if (rows.length === 0) return []
+              return [
+                h('span', { key: `kind-${kind}`, style: styles.stamp }, t(labelKey)),
+                ...rows.map(renderModelRow),
+              ]
+            }),
+            ...(otherModels.length === 0 ? [] : [
+              h('span', { key: 'kind-other', style: styles.stamp }, t('modelKindOther')),
+              ...otherModels.map(renderModelRow),
+            ]),
+          ]),
           h('span', { key: 'dir', style: styles.hint }, `${t('modelDirectory')}：${models.directory}`),
+          // Cloud sits on the same page: choosing a recognition model is one decision, and
+          // the local/cloud split is the first thing to make visible about it.
+          h('span', { key: 'cloudhead', style: styles.label }, t('modelsCloudTitle')),
+          h('span', { key: 'cloudhint', style: styles.hint }, t('modelsCloudHint')),
+          h('div', { key: 'cloudconsent', style: styles.row }, [
+            h(Field, {
+              key: 'consent',
+              type: 'checkbox',
+              checked: cloudDraft.consent,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, consent: event.target.checked })),
+            }),
+            h('span', { key: 'label', style: styles.status }, t('cloudConsent')),
+          ]),
+          h('div', { key: 'cloudprovider', style: styles.row }, [
+            h('span', { key: 'label', style: styles.status }, t('cloudProvider')),
+            h(Picker, {
+              key: 'select',
+              style: styles.inlineInput,
+              value: cloudDraft.provider,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, provider: event.target.value })),
+            }, CLOUD_PROVIDER_VALUES.map((value) => h('option', { key: value, value }, t(CLOUD_PROVIDER_KEYS[value])))),
+          ]),
+          h(Field, {
+            key: 'cloudbase',
+            style: styles.textarea,
+            placeholder: 'https://api.example.com/v1',
+            value: cloudDraft.baseUrl,
+            spellCheck: false,
+            onChange: (event) => setCloudDraft((draft) => ({ ...draft, baseUrl: event.target.value })),
+          }),
+          h(Field, {
+            key: 'cloudmodel',
+            style: styles.textarea,
+            placeholder: 'model（如 whisper-1）',
+            value: cloudDraft.model,
+            spellCheck: false,
+            onChange: (event) => setCloudDraft((draft) => ({ ...draft, model: event.target.value })),
+          }),
+          h(Field, {
+            key: 'cloudlanguage',
+            style: styles.textarea,
+            placeholder: 'language（如 zh，可留空）',
+            value: cloudDraft.language,
+            spellCheck: false,
+            onChange: (event) => setCloudDraft((draft) => ({ ...draft, language: event.target.value })),
+          }),
+          h(Field, {
+            key: 'cloudkey',
+            type: 'password',
+            style: styles.textarea,
+            placeholder: cloud.asr?.keySet === true ? t('secretKept') : 'API Key',
+            value: cloudDraft.apiKey,
+            spellCheck: false,
+            onChange: (event) => setCloudDraft((draft) => ({ ...draft, apiKey: event.target.value })),
+          }),
+          // Saying exactly where the audio would go is the point of asking: "cloud" on its
+          // own is not something a person can judge.
+          h('span', { key: 'cloudwhere', style: styles.hint }, cloud.asr?.host === undefined || cloud.asr.host === ''
+            ? t('cloudNowhere')
+            : `${t('cloudWhere')}：${cloud.asr.host} · ${t('cloudRetention')}`),
+          cloud.state?.fallback === true
+            ? h('span', { key: 'cloudfallback', style: styles.error }, `${t('cloudFallback')}：${cloud.state.message}`)
+            : null,
+          h('div', { key: 'cloudactions', style: styles.row }, [
+            h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveCloud() } }, t('cloudSave')),
+            h(Btn, { key: 'test', type: 'button', style: styles.button, disabled: cloudBusy, onClick: () => { void runCloudTest() } }, t('cloudTest')),
+            cloudNote === '' ? null : h('span', { key: 'note', style: styles.status }, cloudNote),
+          ]),
           h('input', {
             key: 'modelfile',
             type: 'file',
@@ -6994,76 +7144,6 @@ function periodBucketOf(startedAt, unit) {
             h('div', { key: 'templateactions', style: styles.row }, [
               h(Btn, { key: 'savetemplates', type: 'button', style: styles.button, onClick: () => { void saveTemplates() } }, t('templateSave')),
               templatesNote === '' ? null : h('span', { key: 'note', style: styles.status }, templatesNote),
-            ]),
-            ]),
-            settingsTab !== 'cloud' ? null : h('div', { key: 'settings-cloud', style: styles.list }, [
-            // Cloud recognition sits with the robots because it is the same kind of decision:
-            // something leaves this machine, and only when a person says so.
-            h('span', { key: 'cloudtitle', style: styles.label }, t('cloudTitle')),
-            h('span', { key: 'cloudhint', style: styles.hint }, t('cloudHint')),
-            h('div', { key: 'cloudconsent', style: styles.row }, [
-              h(Field, {
-                key: 'consent',
-                type: 'checkbox',
-                checked: cloudDraft.consent,
-                onChange: (event) => setCloudDraft((draft) => ({ ...draft, consent: event.target.checked })),
-              }),
-              h('span', { key: 'label', style: styles.status }, t('cloudConsent')),
-            ]),
-            h('div', { key: 'cloudprovider', style: styles.row }, [
-              h('span', { key: 'label', style: styles.status }, t('cloudProvider')),
-              h(Picker, {
-                key: 'select',
-                style: styles.inlineInput,
-                value: cloudDraft.provider,
-                onChange: (event) => setCloudDraft((draft) => ({ ...draft, provider: event.target.value })),
-              }, CLOUD_PROVIDER_VALUES.map((value) => h('option', { key: value, value }, t(CLOUD_PROVIDER_KEYS[value])))),
-            ]),
-            h(Field, {
-              key: 'cloudbase',
-              style: styles.textarea,
-              placeholder: 'https://api.example.com/v1',
-              value: cloudDraft.baseUrl,
-              spellCheck: false,
-              onChange: (event) => setCloudDraft((draft) => ({ ...draft, baseUrl: event.target.value })),
-            }),
-            h(Field, {
-              key: 'cloudmodel',
-              style: styles.textarea,
-              placeholder: 'model（如 whisper-1）',
-              value: cloudDraft.model,
-              spellCheck: false,
-              onChange: (event) => setCloudDraft((draft) => ({ ...draft, model: event.target.value })),
-            }),
-            h(Field, {
-              key: 'cloudlanguage',
-              style: styles.textarea,
-              placeholder: 'language（如 zh，可留空）',
-              value: cloudDraft.language,
-              spellCheck: false,
-              onChange: (event) => setCloudDraft((draft) => ({ ...draft, language: event.target.value })),
-            }),
-            h(Field, {
-              key: 'cloudkey',
-              type: 'password',
-              style: styles.textarea,
-              placeholder: cloud.asr?.keySet === true ? t('secretKept') : 'API Key',
-              value: cloudDraft.apiKey,
-              spellCheck: false,
-              onChange: (event) => setCloudDraft((draft) => ({ ...draft, apiKey: event.target.value })),
-            }),
-            // Saying exactly where the audio would go is the point of asking: "cloud" on its
-            // own is not something a person can judge.
-            h('span', { key: 'cloudwhere', style: styles.hint }, cloud.asr?.host === undefined || cloud.asr.host === ''
-              ? t('cloudNowhere')
-              : `${t('cloudWhere')}：${cloud.asr.host} · ${t('cloudRetention')}`),
-            cloud.state?.fallback === true
-              ? h('span', { key: 'cloudfallback', style: styles.error }, `${t('cloudFallback')}：${cloud.state.message}`)
-              : null,
-            h('div', { key: 'cloudactions', style: styles.row }, [
-              h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveCloud() } }, t('cloudSave')),
-              h(Btn, { key: 'test', type: 'button', style: styles.button, disabled: cloudBusy, onClick: () => { void runCloudTest() } }, t('cloudTest')),
-              cloudNote === '' ? null : h('span', { key: 'note', style: styles.status }, cloudNote),
             ]),
             ]),
             settingsTab !== 'speaker' ? null : h('div', { key: 'settings-speaker', style: styles.list }, [

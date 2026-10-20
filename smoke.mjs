@@ -555,10 +555,20 @@ check('评分输入是受控草稿而不是 defaultValue', clientSource.includes
 check('评分表有表格语义与逐控件标签', clientSource.includes("role: 'table'")
   && clientSource.includes("role: 'columnheader'") && clientSource.includes("role: 'rowheader'")
   && clientSource.includes('${t(\'scoreHours\')}：${row.person}'))
-// 设置页按功能分 tab：六个分组各有自己的标签，且每块只在对应 tab 下渲染。
-check('设置页按功能分成六个 tab', clientSource.includes('settingsTab, setSettingsTab')
-  && ['push', 'cloud', 'transcript', 'speaker', 'weights', 'templates'].every((id) => clientSource.includes(`settingsTab !== '${id}' ? null`))
-  && ['settingsTabPush', 'settingsTabCloud', 'settingsTabTranscript', 'settingsTabSpeaker', 'settingsTabWeights', 'settingsTabTemplates'].every((key) => clientSource.includes(`'${key}'`)))
+// 设置页按功能分 tab：五个分组各有自己的标签，且每块只在对应 tab 下渲染。
+// 云端识别不再是第六个 tab，而是并进「模型」页，与本地模型并列。
+check('设置页按功能分成五个 tab', clientSource.includes('settingsTab, setSettingsTab')
+  && ['push', 'transcript', 'speaker', 'weights', 'templates'].every((id) => clientSource.includes(`settingsTab !== '${id}' ? null`))
+  && !clientSource.includes("settingsTab !== 'cloud' ? null")
+  && ['settingsTabPush', 'settingsTabTranscript', 'settingsTabSpeaker', 'settingsTabWeights', 'settingsTabTemplates'].every((key) => clientSource.includes(`'${key}'`)))
+// 模型页要一眼分出「本地模型」和「云端模型」：本地按用途分组，云端带同意项与测试。
+check('模型页区分本地与云端模型', clientSource.includes("modelsLocalTitle: '本地模型'")
+  && clientSource.includes("modelsCloudTitle: '云端模型（默认关闭）'")
+  && clientSource.includes('function ModelRow')
+  && clientSource.includes('MODEL_KIND_ORDER.flatMap')
+  && clientSource.includes("key: 'cloudhead'")
+  && clientSource.includes("key: 'cloudconsent'")
+  && clientSource.includes("key: 'cloudactions'"))
 check('会议记录页提示上次会议主题', clientSource.includes("key: 'lasttopic'") && clientSource.includes("t('hubLastTopic')"))
 // 起名对话框要说明「可以留空」：留空后前 5 分钟会自动补标题。
 check('起名对话框说明留空会自动命名', clientSource.includes("key: 'autohint'")
