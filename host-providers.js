@@ -12,6 +12,15 @@ import { readSettings, writeSettings } from './host-tools.js'
 /** Provider names this module understands. */
 export const CLOUD_PROVIDERS = ['off', 'openai-compatible', 'custom']
 
+/**
+ * How recognition chooses between the on-machine model and the cloud one.
+ *
+ * `local` never calls out, `prefer-cloud` tries the cloud and silently keeps the local result
+ * after repeated failures, and `cloud-only` is the strict mode: failures are reported instead
+ * of being absorbed by the local model.
+ */
+export const CLOUD_MODES = ['local', 'prefer-cloud', 'cloud-only']
+
 /** Order of magnitude guard rails: a runaway loop must not become a bill. */
 export const MAX_REQUESTS_PER_MINUTE = 60
 /** One cloud attempt may not hang a meeting. */
@@ -28,6 +37,8 @@ export const cloudState = {
   message: '',
   lastModel: '',
   lastAt: 0,
+  /** The stored mode, cached so a request path can tell whether falling back is allowed. */
+  mode: 'local',
 }
 
 /**
@@ -48,6 +59,8 @@ function defaultCloud() {
   return {
     // Explicit consent, never implied: no call happens while this is false.
     consent: false,
+    // Local by default: saving a cloud address is not the same as using it.
+    mode: 'local',
     asr: { provider: 'off', baseUrl: '', model: '', language: '', apiKey: '', keepRemote: false },
     speaker: { provider: 'off', baseUrl: '', model: '', apiKey: '' },
   }
@@ -63,6 +76,7 @@ export async function readCloudSettings() {
   const cloud = defaultCloud()
   if (stored !== null && typeof stored === 'object') {
     cloud.consent = stored.consent === true
+    if (CLOUD_MODES.includes(stored.mode)) cloud.mode = stored.mode
     for (const kind of ['asr', 'speaker']) {
       const part = stored[kind]
       if (part === null || typeof part !== 'object') continue
@@ -73,6 +87,9 @@ export async function readCloudSettings() {
       if (kind === 'asr') cloud.asr.keepRemote = part.keepRemote === true
     }
   }
+  // A request path that only has the module state still needs the current mode: `cloud-only`
+  // must not quietly turn on the process-wide fallback.
+  cloudState.mode = cloud.mode
   return cloud
 }
 
@@ -86,6 +103,7 @@ export async function writeCloudSettings(patch) {
   const current = await readCloudSettings()
   const next = {
     consent: typeof patch?.consent === 'boolean' ? patch.consent : current.consent,
+    mode: CLOUD_MODES.includes(patch?.mode) ? patch.mode : current.mode,
     asr: { ...current.asr },
     speaker: { ...current.speaker },
   }
@@ -111,6 +129,9 @@ export async function writeCloudSettings(patch) {
 export async function cloudStatus(kind) {
   const cloud = await readCloudSettings()
   const part = cloud[kind]
+  // The mode is checked first: `local` means no request is made even when everything else
+  // is configured, so switching back to local is an immediate, complete stop.
+  if (cloud.mode === 'local') return { ok: false, reason: '当前选择本地识别', cloud }
   if (cloud.consent !== true) return { ok: false, reason: '还没有同意上传：云端识别默认关闭', cloud }
   if (part.provider === 'off') return { ok: false, reason: '没有选择云端服务', cloud }
   if (part.baseUrl === '') return { ok: false, reason: '还没有填写服务地址', cloud }
@@ -134,6 +155,7 @@ export async function cloudSummary() {
   }
   return {
     consent: cloud.consent,
+    mode: cloud.mode,
     asr: {
       provider: cloud.asr.provider,
       baseUrl: cloud.asr.baseUrl,
@@ -152,6 +174,7 @@ export async function cloudSummary() {
     },
     state: {
       fallback: cloudState.fallback,
+      strict: cloud.mode === 'cloud-only',
       message: redact(cloudState.message),
       lastModel: cloudState.lastModel,
       lastAt: cloudState.lastAt,
@@ -208,7 +231,9 @@ async function guardedFetch(url, options, label) {
     }
   }
   cloudState.consecutiveFailures += 1
-  if (cloudState.consecutiveFailures >= FAILURES_BEFORE_FALLBACK) {
+  // Strict mode reports every failure instead of going quiet: a person who picked
+  // "cloud only" asked for cloud text, not for the local model's text without being told.
+  if (cloudState.mode !== 'cloud-only' && cloudState.consecutiveFailures >= FAILURES_BEFORE_FALLBACK) {
     cloudState.fallback = true
     cloudState.message = redact(`云端连续 ${cloudState.consecutiveFailures} 次失败，已回退到本机识别：${lastError}`)
   }

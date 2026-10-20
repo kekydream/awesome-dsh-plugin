@@ -482,12 +482,17 @@ const cloudBase = `http://127.0.0.1:${cloudServer.address().port}/v1`
 const cuePcm = Buffer.alloc(3200)
 
 // 1) Consent off: the switch's promise is that nothing is sent at all.
-await call('/cloud', { consent: false, asr: { provider: 'openai-compatible', baseUrl: cloudBase, model: 'test', apiKey: CLOUD_KEY } }, 'POST')
+await call('/cloud', { consent: false, mode: 'prefer-cloud', asr: { provider: 'openai-compatible', baseUrl: cloudBase, model: 'test', apiKey: CLOUD_KEY } }, 'POST')
 const skippedByConsent = await providers.cloudTranscribe({ pcm: cuePcm, sampleRate: 16000 })
 check('未同意上传时一处请求都不发', skippedByConsent.skipped === true && cloudHits === 0, `hits=${cloudHits}`)
 
+// 1b) Mode `local` wins over a fully configured cloud: the switch stops requests outright.
+await call('/cloud', { consent: true, mode: 'local', asr: { provider: 'openai-compatible', baseUrl: cloudBase, model: 'test', apiKey: CLOUD_KEY } }, 'POST')
+const skippedByMode = await providers.cloudTranscribe({ pcm: cuePcm, sampleRate: 16000 })
+check('识别方式选本地时不发云端请求', skippedByMode.skipped === true && skippedByMode.reason === '当前选择本地识别' && cloudHits === 0, JSON.stringify(skippedByMode))
+
 // 2) Consent on: the cloud text is used, and the key travels as a bearer token only.
-await call('/cloud', { consent: true, asr: { provider: 'openai-compatible', baseUrl: cloudBase, model: 'test', apiKey: CLOUD_KEY } }, 'POST')
+await call('/cloud', { consent: true, mode: 'prefer-cloud', asr: { provider: 'openai-compatible', baseUrl: cloudBase, model: 'test', apiKey: CLOUD_KEY } }, 'POST')
 const answered = await providers.cloudTranscribe({ pcm: cuePcm, sampleRate: 16000 })
 check('同意后云端识别回文本与模型', answered.skipped === false && answered.text === '云端识别文本' && answered.model === 'test-cloud-model', JSON.stringify(answered))
 check('确实只发了一次请求', cloudHits === 1, `hits=${cloudHits}`)
@@ -514,13 +519,29 @@ const afterFallback = await providers.cloudTranscribe({ pcm: cuePcm, sampleRate:
 check('回退后不再发起任何请求', afterFallback.skipped === true && cloudHits === hitsBeforeFallback, `hits=${cloudHits}`)
 check('回退原因不含密钥', !String(afterFallback.reason).includes(CLOUD_KEY))
 
+// 3b) Strict mode: failures are reported, never turned into a silent fallback.
+await call('/cloud', { mode: 'cloud-only' }, 'POST')
+providers.resetCloudFallback()
+const strictRead = await call('/cloud')
+check('严格模式在云接口里如实上报', strictRead.value.mode === 'cloud-only' && strictRead.value.state.strict === true)
+let strictThrew = 0
+for (let attempt = 0; attempt < 3; attempt += 1) {
+  try {
+    await providers.cloudTranscribe({ pcm: cuePcm, sampleRate: 16000 })
+  } catch {
+    strictThrew += 1
+  }
+}
+check('严格模式下连续失败也不回退本地', strictThrew === 3 && providers.cloudState.fallback === false && providers.cloudState.consecutiveFailures >= 3, `threw=${strictThrew} fallback=${providers.cloudState.fallback}`)
+await call('/cloud', { mode: 'prefer-cloud' }, 'POST')
+
 // 4) The package must never carry a key, whatever the meeting holds.
 const packedBytes = (await call('/package?meetingId=m-brief')).body
 check('会议工程包里搜不到密钥', !packedBytes.includes(CLOUD_KEY))
 
 // Leave the harness as it was found: fallback cleared, cloud off.
 providers.resetCloudFallback()
-await call('/cloud', { consent: false, asr: { provider: 'off', baseUrl: '', model: '', apiKey: '' } }, 'POST')
+await call('/cloud', { consent: false, mode: 'local', asr: { provider: 'off', baseUrl: '', model: '', apiKey: '' } }, 'POST')
 await new Promise((resolve) => cloudServer.close(resolve))
 
 // ---------------------------------------------------------------------------
@@ -569,6 +590,13 @@ check('模型页区分本地与云端模型', clientSource.includes("modelsLocal
   && clientSource.includes("key: 'cloudhead'")
   && clientSource.includes("key: 'cloudconsent'")
   && clientSource.includes("key: 'cloudactions'"))
+// 本地/云端要能切换：三种方式（本地／云端优先降级／只用云端），并且「当前生效」读已保存的值。
+check('模型页有本地与云端的切换', clientSource.includes("cloudMode: '识别方式'")
+  && clientSource.includes("const CLOUD_MODE_VALUES = ['local', 'prefer-cloud', 'cloud-only']")
+  && clientSource.includes("key: 'cloudmode'")
+  && clientSource.includes("key: 'cloudmodenow'")
+  && clientSource.includes('cloudModeInEffect')
+  && clientSource.includes("t('cloudStrictFailed')"))
 check('会议记录页提示上次会议主题', clientSource.includes("key: 'lasttopic'") && clientSource.includes("t('hubLastTopic')"))
 // 起名对话框要说明「可以留空」：留空后前 5 分钟会自动补标题。
 check('起名对话框说明留空会自动命名', clientSource.includes("key: 'autohint'")

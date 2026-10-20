@@ -373,7 +373,10 @@ export function createHandler(ctx) {
               used: false,
               skipped: false,
               message: redact(failure instanceof Error ? failure.message : String(failure)),
+              // In `prefer-cloud` a run of failures turns into a fallback; in `cloud-only` the
+              // panel must say the cloud failed instead of presenting local text as cloud text.
               fallback: cloudState.fallback,
+              strict: cloudState.mode === 'cloud-only',
             }
           }
         }

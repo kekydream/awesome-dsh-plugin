@@ -418,6 +418,19 @@ registerProcessor('meeting-capture', MeetingCapture)
       modelByDsh: '由 DSH 提供',
       modelInUse: '正在使用',
       cloudConsent: '我同意把音频发到下面这个地址做识别',
+      cloudMode: '识别方式',
+      cloudModeLocal: '只用本地模型',
+      cloudModePrefer: '云端优先（失败降级本地）',
+      cloudModeStrict: '只用云端模型（不降级）',
+      cloudModeLocalHint: '全程在本机识别，插件不发任何请求。',
+      cloudModePreferHint: '每段先发云端；连续失败 3 次自动回到本地识别，并在面板说明原因。',
+      cloudModeStrictHint: '每段只发云端；失败时保留本机文字并明确报错，不会静默降级。',
+      cloudModeNow: '当前生效',
+      cloudModeNowLocal: '本地模型',
+      cloudModeNowCloud: '云端模型',
+      cloudModeNowStrict: '云端模型（严格）',
+      cloudModeNowFallback: '已回退本地',
+      cloudStrictFailed: '云端识别失败（只用云端，未降级）',
       cloudProvider: '服务类型',
       cloudOff: '关闭',
       cloudOpenAi: 'OpenAI 兼容（/audio/transcriptions）',
@@ -829,6 +842,19 @@ registerProcessor('meeting-capture', MeetingCapture)
       modelByDsh: 'Provided by DSH',
       modelInUse: 'In use',
       cloudConsent: 'I agree to send audio to the address below for recognition',
+      cloudMode: 'Recognition mode',
+      cloudModeLocal: 'Local model only',
+      cloudModePrefer: 'Cloud first (fall back to local)',
+      cloudModeStrict: 'Cloud only (never fall back)',
+      cloudModeLocalHint: 'Everything is recognised on this machine and the plugin makes no request at all.',
+      cloudModePreferHint: 'Each cue goes to the cloud first; after three failures in a row recognition returns to this machine and the panel says why.',
+      cloudModeStrictHint: 'Each cue goes to the cloud only; on failure the local text is kept and the error is reported instead of a silent fallback.',
+      cloudModeNow: 'In effect',
+      cloudModeNowLocal: 'Local model',
+      cloudModeNowCloud: 'Cloud model',
+      cloudModeNowStrict: 'Cloud model (strict)',
+      cloudModeNowFallback: 'Fell back to local',
+      cloudStrictFailed: 'Cloud recognition failed (cloud only, no fallback)',
       cloudProvider: 'Service type',
       cloudOff: 'Off',
       cloudOpenAi: 'OpenAI-compatible (/audio/transcriptions)',
@@ -2106,6 +2132,11 @@ function periodBucketOf(startedAt, unit) {
     /** Cloud providers the settings page offers, and their locale keys. */
     const CLOUD_PROVIDER_VALUES = ['off', 'openai-compatible', 'custom']
     const CLOUD_PROVIDER_KEYS = { off: 'cloudOff', 'openai-compatible': 'cloudOpenAi', custom: 'cloudCustom' }
+
+    /** The three ways to combine the local and the cloud recogniser, in the order offered. */
+    const CLOUD_MODE_VALUES = ['local', 'prefer-cloud', 'cloud-only']
+    const CLOUD_MODE_KEYS = { local: 'cloudModeLocal', 'prefer-cloud': 'cloudModePrefer', 'cloud-only': 'cloudModeStrict' }
+    const CLOUD_MODE_HINTS = { local: 'cloudModeLocalHint', 'prefer-cloud': 'cloudModePreferHint', 'cloud-only': 'cloudModeStrictHint' }
 
     /** Settings groups, in the order a person configures them: what leaves the machine
      *  first (push), then how this installation cuts and scores, then voices. Model choice,
@@ -3833,6 +3864,10 @@ function periodBucketOf(startedAt, unit) {
               }
             } else if (reply.cloud.fallback === true) {
               setError(`${t('cloudFallback')}: ${reply.cloud.message ?? ''}`)
+            } else if (reply.cloud.strict === true && reply.cloud.message !== undefined && reply.cloud.message !== '') {
+              // Strict mode asked for cloud text: say the call failed instead of letting the
+              // local text look like a cloud result.
+              setError(`${t('cloudStrictFailed')}: ${reply.cloud.message}`)
             }
           }
         } catch (failure) { const msg = failure instanceof Error ? failure.message : String(failure); setError(msg); if (msg.indexOf('\u8bed\u97f3\u6a21\u578b\u5c1a\u672a\u4e0b\u8f7d') !== -1) setSpeech((c) => ({ ...c, ready: false }))
@@ -6191,7 +6226,7 @@ function periodBucketOf(startedAt, unit) {
        * being edited. A blank key field means "leave the stored one alone".
        */
       const [cloud, setCloud] = React.useState({ consent: false, asr: {}, speaker: {}, state: {} })
-      const [cloudDraft, setCloudDraft] = React.useState({ consent: false, provider: 'off', baseUrl: '', model: '', language: '', apiKey: '' })
+      const [cloudDraft, setCloudDraft] = React.useState({ consent: false, mode: 'local', provider: 'off', baseUrl: '', model: '', language: '', apiKey: '' })
       const [cloudNote, setCloudNote] = React.useState('')
       const [cloudBusy, setCloudBusy] = React.useState(false)
       /**
@@ -6404,6 +6439,7 @@ function periodBucketOf(startedAt, unit) {
           setCloud(value)
           setCloudDraft({
             consent: value.consent === true,
+            mode: CLOUD_MODE_VALUES.includes(value.mode) ? value.mode : 'local',
             provider: value.asr?.provider ?? 'off',
             baseUrl: value.asr?.baseUrl ?? '',
             model: value.asr?.model ?? '',
@@ -6508,7 +6544,7 @@ function periodBucketOf(startedAt, unit) {
             language: cloudDraft.language,
           }
           if (cloudDraft.apiKey !== '') asr.apiKey = cloudDraft.apiKey
-          await post('/cloud', { consent: cloudDraft.consent, asr })
+          await post('/cloud', { consent: cloudDraft.consent, mode: cloudDraft.mode, asr })
           setCloudNote(t('cloudSaved'))
           await loadCloud()
         } catch (failure) {
@@ -6687,6 +6723,15 @@ function periodBucketOf(startedAt, unit) {
 
       /** Kinds this page has no heading for still get listed, under 其它. */
       const otherModels = models.models.filter((model) => !MODEL_KIND_ORDER.some(([kind]) => kind === model.kind))
+
+      // Which recogniser is in effect right now, read from the saved settings rather than the
+      // draft: a person who has not pressed 保存 must not be told the cloud is already on.
+      const cloudModeSaved = CLOUD_MODE_VALUES.includes(cloud.mode) ? cloud.mode : 'local'
+      const cloudModeInEffect = cloudModeSaved === 'local'
+        ? t('cloudModeNowLocal')
+        : cloudModeSaved === 'cloud-only'
+          ? t('cloudModeNowStrict')
+          : cloud.state?.fallback === true ? t('cloudModeNowFallback') : t('cloudModeNowCloud')
 
       /**
        * Bring one exported archive in as a meeting of this machine. The bytes go up as they
@@ -6932,6 +6977,20 @@ function periodBucketOf(startedAt, unit) {
           // the local/cloud split is the first thing to make visible about it.
           h('span', { key: 'cloudhead', style: styles.label }, t('modelsCloudTitle')),
           h('span', { key: 'cloudhint', style: styles.hint }, t('modelsCloudHint')),
+          // The switch comes before the fields: somebody deciding whether to use the cloud
+          // should not have to fill in an address first.
+          h('div', { key: 'cloudmode', style: styles.row }, [
+            h('span', { key: 'label', style: styles.status }, t('cloudMode')),
+            h(Picker, {
+              key: 'select',
+              style: styles.inlineInput,
+              value: cloudDraft.mode,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, mode: event.target.value })),
+            }, CLOUD_MODE_VALUES.map((value) => h('option', { key: value, value }, t(CLOUD_MODE_KEYS[value])))),
+          ]),
+          h('span', { key: 'cloudmodehint', style: styles.hint }, t(CLOUD_MODE_HINTS[cloudDraft.mode] ?? 'cloudModeLocalHint')),
+          // What is actually happening now: the saved mode, never the unsaved draft.
+          h('span', { key: 'cloudmodenow', style: styles.note }, `${t('cloudModeNow')}：${cloudModeInEffect}`),
           h('div', { key: 'cloudconsent', style: styles.row }, [
             h(Field, {
               key: 'consent',
