@@ -1,0 +1,35 @@
+name: mirror-from-gitee
+
+# 为什么由 GitHub 这边拉：开发机在中国大陆、连不上 github.com，而 GitHub 的 runner 能连 Gitee。
+# 因此镜像同步放在 GitHub 侧执行，本地只需要能推 Gitee。
+#
+# 不需要任何自定义 secret：Gitee 仓库是公开的，推送用工作流自带的 GITHUB_TOKEN。
+#
+# 放置与设置：
+#   1. 把本文件放在镜像仓库的**默认分支**上（.github/workflows/mirror-from-gitee.yml）；
+#   2. 镜像仓库 Settings → General → Default branch 设为 master；
+#   3. 需要时在 Actions 页面手动点一次 "Run workflow"。
+
+on:
+  schedule:
+    # 每天一次（UTC 03:17，北京时间 11:17）
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 从 Gitee 同步 master / develop / 标签
+        run: |
+          set -euo pipefail
+          git clone --bare https://gitee.com/kekydream/dsh-meeting-room.git source.git
+          cd source.git
+          remote="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          # 只推 heads 与 tags：不使用 --mirror，以免误删镜像侧独有的分支（例如默认分支 main 与本工作流）。
+          git push --force "$remote" 'refs/heads/*:refs/heads/*'
+          git push --force "$remote" 'refs/tags/*:refs/tags/*'
+          echo "mirrored: $(git rev-parse --short master 2>/dev/null || echo 'no master') / $(git tag --points-at master 2>/dev/null || true)"

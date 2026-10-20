@@ -13,6 +13,7 @@ import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 
 import { PACKAGE_DIR } from './host-constants.js'
+import { activeModel, verifyModel, modelDirectory } from './host-models.js'
 
 /** Pinned handwriting recognizer assets: the ModelScope DAMO line model and its vocabulary. */
 export const HANDWRITING_ASSETS = [
@@ -44,7 +45,27 @@ export function handwritingDirectory() {
 }
 
 /** Handwriting support as this process sees it. */
-export const handwritingState = { phase: 'unprepared', message: '', modulePath: '' }
+export const handwritingState = { phase: 'unprepared', message: '', modulePath: '', modelId: '', modelPath: '' }
+
+/**
+ * The handwriting model this installation runs: the registry's active choice when it is present
+ * and verified, otherwise the pinned one. Same rule as the speaker model, same reason — the
+ * registry is data, so a better model can be installed without touching code.
+ * @returns `{ id, directory, file, path }` or null when the registry has nothing usable.
+ */
+export async function handwritingModelInUse() {
+  const chosen = await activeModel('handwriting').catch(() => undefined)
+  if (chosen === undefined || chosen.runtime !== 'onnx' || (chosen.files ?? []).length === 0) return null
+  const state = await verifyModel(chosen).catch(() => null)
+  if (state === null || state.verified !== true) return null
+  const file = chosen.files[0]
+  return {
+    id: chosen.id,
+    directory: modelDirectory(chosen),
+    file: file.name,
+    path: join(modelDirectory(chosen), file.name),
+  }
+}
 
 /** The running handwriting worker, or null. */
 let handwritingWorker = null
@@ -145,8 +166,11 @@ export function ensureHandwritingWorker(ctx) {
   const child = spawn(process.execPath, [
     join(PACKAGE_DIR, 'handwriting-worker.js'),
     handwritingState.modulePath,
-    join(directory, 'handwriting-damo.onnx'),
-    join(directory, 'vocab.txt'),
+    // Whatever prepareHandwriting settled on; the pinned path remains the fallback.
+    handwritingState.modelPath === '' ? join(directory, 'handwriting-damo.onnx') : handwritingState.modelPath,
+    // The vocabulary always travels with the pinned assets; a chosen model keeps its own copy
+    // in its own directory when it has one.
+    handwritingState.modelPath === '' ? join(directory, 'vocab.txt') : join(handwritingState.modelPath, '..', 'vocab.txt'),
   ], { stdio: ['pipe', 'pipe', 'pipe'] })
   const worker = { child, ready: false, pending: new Map(), nextId: 1, buffer: '' }
   handwritingWorker = worker
@@ -207,7 +231,17 @@ export async function prepareHandwriting(ctx) {
   handwritingState.phase = 'downloading'
   handwritingState.message = ''
   try {
-    await ensureHandwritingAssets(ctx)
+    // A verified model chosen in the registry is used as it is; otherwise the pinned assets are
+    // fetched exactly as before.
+    const inUse = await handwritingModelInUse()
+    if (inUse !== null) {
+      handwritingState.modelId = inUse.id
+      handwritingState.modelPath = inUse.path
+    } else {
+      handwritingState.modelId = 'handwriting.damo.line'
+      await ensureHandwritingAssets(ctx)
+      handwritingState.modelPath = join(handwritingDirectory(), 'handwriting-damo.onnx')
+    }
     const worker = ensureHandwritingWorker(ctx)
     const deadline = Date.now() + 120_000
     while (!worker.ready && handwritingState.phase !== 'failed' && Date.now() < deadline) {

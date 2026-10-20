@@ -54,6 +54,8 @@ export function knownSpeakerLabels(meeting) {
 
 import { SPEAKER_MODEL, SPEAKER_MODEL_ORIGINS, SPEAKER_THRESHOLD, SPEAKER_WORKER_RESTARTS, SAMPLE_RATE } from './host-constants.js'
 import { exportDirectory } from './host-helpers.js'
+import { activeModel, verifyModel, modelDirectory } from './host-models.js'
+import { readSpeakerSettings } from './host-voices.js'
 
 /** This package's own directory, used to locate the worker beside this file. */
 const PACKAGE_DIR = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -68,11 +70,66 @@ export function speakerDirectory() {
 }
 
 /**
+ * The speaker model this installation runs: the registry's active choice when it is present and
+ * verified, otherwise the built-in pinned one. The registry is data, so a stronger model can be
+ * installed and switched without touching code — this is the only place that knows that.
+ * @returns the model entry in the shape both the downloader and the worker need.
+ */
+export async function speakerModelInUse() {
+  const chosen = await activeModel('speaker').catch(() => undefined)
+  if (chosen === undefined || chosen.runtime !== 'onnx' || (chosen.files ?? []).length === 0) return null
+  const state = await verifyModel(chosen).catch(() => null)
+  if (state === null || state.verified !== true) return null
+  const file = chosen.files[0]
+  return {
+    id: chosen.id,
+    name: chosen.name,
+    directory: modelDirectory(chosen),
+    file: file.name,
+    path: join(modelDirectory(chosen), file.name),
+    bytes: file.bytes ?? 0,
+  }
+}
+
+/**
+ * The pinned model, in the same shape, for the download path and as the fallback.
+ * @returns the built-in speaker model.
+ */
+export function pinnedSpeakerModel() {
+  return {
+    id: 'speaker.campplus.zh-en.16k',
+    name: '3D-Speaker CAM++（中英，16 kHz）',
+    directory: speakerDirectory(),
+    file: SPEAKER_MODEL.name,
+    path: join(speakerDirectory(), SPEAKER_MODEL.name),
+    bytes: SPEAKER_MODEL.bytes,
+  }
+}
+
+/**
  * Speaker support as this process sees it: the model must be present and verified, and
  * the worker started, before any cue can be labelled. The byte counters let the panel
  * render a real download percentage instead of an indeterminate spinner.
  */
-export const speakerState = { phase: 'unprepared', message: '', modulePath: '', completedBytes: 0, totalBytes: 0 }
+export const speakerState = { phase: 'unprepared', message: '', modulePath: '', completedBytes: 0, totalBytes: 0, modelId: '', modelPath: '', threshold: 0 }
+
+/**
+ * Retire the running worker, so the next prepare starts a fresh one.
+ *
+ * The clustering threshold travels as a spawn argument, so a changed threshold only takes
+ * effect in a new process; this is what the settings route calls when it changes.
+ * @returns whether a worker was running.
+ */
+export function retireSpeakerWorker() {
+  if (speakerWorker === null) return false
+  try {
+    speakerWorker.child.kill()
+  } catch {
+    // Already gone: nothing to retire.
+  }
+  speakerWorker = null
+  return true
+}
 
 /** The running speaker worker, or null. */
 export let speakerWorker = null
@@ -143,8 +200,11 @@ export function ensureSpeakerWorker(ctx) {
   const child = spawn(process.execPath, [
     join(PACKAGE_DIR, 'speaker-worker.js'),
     speakerState.modulePath,
-    join(speakerDirectory(), SPEAKER_MODEL.name),
-    String(SPEAKER_THRESHOLD),
+    // Whatever prepareSpeakers settled on: a model installed through the registry, or the
+    // pinned one. Never a guess — the path is only set once the file is verified.
+    speakerState.modelPath === '' ? join(speakerDirectory(), SPEAKER_MODEL.name) : speakerState.modelPath,
+    // The threshold is a setting now, handed over at spawn; prepareSpeakers reads it first.
+    String(speakerState.threshold === 0 ? SPEAKER_THRESHOLD : speakerState.threshold),
   ], { stdio: ['pipe', 'pipe', 'pipe'] })
   const worker = { child, ready: false, pending: new Map(), nextId: 1, buffer: '' }
   speakerWorker = worker
@@ -212,7 +272,24 @@ export async function prepareSpeakers(ctx) {
   speakerState.totalBytes = SPEAKER_MODEL.bytes
   speakerState.completedBytes = 0
   try {
-    await ensureSpeakerModel(ctx)
+    // A model chosen in the registry and already verified here is used as it is: that is what
+    // makes "install a stronger local model" mean something. Otherwise the pinned model is
+    // fetched exactly as before.
+    // The clustering threshold is a setting; read it before the worker is spawned, because it
+    // travels as an argument.
+    const speakerSettings = await readSpeakerSettings().catch(() => null)
+    if (speakerSettings !== null) speakerState.threshold = speakerSettings.threshold
+    const inUse = await speakerModelInUse()
+    if (inUse !== null) {
+      speakerState.modelId = inUse.id
+      speakerState.modelPath = inUse.path
+      speakerState.totalBytes = inUse.bytes
+      speakerState.completedBytes = inUse.bytes
+    } else {
+      speakerState.modelId = 'speaker.campplus.zh-en.16k'
+      await ensureSpeakerModel(ctx)
+      speakerState.modelPath = join(speakerDirectory(), SPEAKER_MODEL.name)
+    }
     const worker = ensureSpeakerWorker(ctx)
     const deadline = Date.now() + 60_000
     while (!worker.ready && speakerState.phase !== 'failed' && Date.now() < deadline) {
@@ -234,7 +311,7 @@ export async function prepareSpeakers(ctx) {
  * @param pcm - Raw PCM16 bytes of the cue.
  * @returns the speaker label and its base64 embedding, both empty when unjudged.
  */
-export async function labelCue(ctx, pcm) {
+export async function labelCue(ctx, pcm, contextPcm) {
   const none = { speaker: '', embedding: '' }
   if (speakerState.phase !== 'ready') {
     // A worker that died mid-meeting must not silently end labeling for the rest of
@@ -263,7 +340,13 @@ export async function labelCue(ctx, pcm) {
       clearTimeout(timer)
       resolve(typeof reply === 'string' ? { speaker: reply, embedding: '' } : reply ?? none)
     })
-    worker.child.stdin.write(`${JSON.stringify({ id, pcmBase64: pcm.toString('base64') })}\n`)
+    // `contextBase64` lets the worker match a very short cue against the audio just
+// before it instead of enrolling a new voice from two syllables.
+    const request = { id, pcmBase64: pcm.toString('base64') }
+    if (Buffer.isBuffer(contextPcm) && contextPcm.length > 0) {
+      request.contextBase64 = contextPcm.toString('base64')
+    }
+    worker.child.stdin.write(`${JSON.stringify(request)}\n`)
   })
 }
 

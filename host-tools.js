@@ -27,6 +27,9 @@ import {
   DEFAULT_QUERY_LIMIT,
   MAX_QUERY_LIMIT,
   SCORE_WEIGHTS,
+  scoreWeights,
+  setScoreWeights,
+  SCORE_WEIGHT_KEYS,
   WEBHOOK_KINDS,
   PUSH_MODES,
   DOCUMENT_KINDS,
@@ -51,6 +54,7 @@ import {
   QUESTION_MARKERS,
   POINT_KINDS,
   TASK_PRIORITIES,
+  relabelPlanOf,
 } from './host-constants.js'
 
 import {
@@ -67,9 +71,12 @@ import {
 
 import { flushMeetings } from './host-persistence.js'
 
-import { meetingForSession } from './host-sessions.js'
+import { ensureMeetingForSession, meetingForSession } from './host-sessions.js'
 
 import { relabelFromRecording, knownSpeakerLabels } from './host-speaker.js'
+import { centroidsOf } from './host-voices.js'
+import { normalizeText } from './host-text.js'
+import { readTranscriptSettings } from './host-transcript.js'
 
 // Re-export regex constants and seenText so consumers can import from this module.
 export {
@@ -149,7 +156,46 @@ function localDayOf(value, endOfDay = false) {
   const month = Number(match[2]) - 1
   const day = Number(match[3])
   const date = endOfDay ? new Date(year, month, day, 23, 59, 59, 999) : new Date(year, month, day)
-  return Number.isNaN(date.getTime()) ? undefined : date.getTime()
+  if (Number.isNaN(date.getTime())) return undefined
+  // 2026-13-40 otherwise rolls over into 2027-02-09 and silently searches the wrong range.
+  if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) return undefined
+  return date.getTime()
+}
+
+/**
+ * The local time span a period bucket covers. A WEEK bucket must match the daily meetings
+ * inside that week, and a MONTH bucket every meeting in that month: the buckets are derived
+ * per kind, so comparing strings would only ever find the weekly/monthly meeting itself.
+ * @param period - a day (YYYY-MM-DD), ISO week (YYYY-Www) or month (YYYY-MM) bucket.
+ * @returns inclusive millisecond bounds, or undefined for an unrecognised bucket.
+ */
+export function periodRange(period) {
+  const text = typeof period === 'string' ? period.trim() : ''
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(text)
+  if (day !== null) {
+    const from = localDayOf(text)
+    const to = localDayOf(text, true)
+    return from === undefined || to === undefined ? undefined : { from, to }
+  }
+  const week = /^(\d{4})-W(\d{2})$/u.exec(text)
+  if (week !== null) {
+    const year = Number(week[1])
+    const number = Number(week[2])
+    if (number < 1 || number > 53) return undefined
+    // ISO week 1 is the week containing January 4th; its Monday is the anchor.
+    const january4 = new Date(year, 0, 4)
+    const monday = new Date(year, 0, 4 - ((january4.getDay() + 6) % 7) + (number - 1) * 7)
+    const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6, 23, 59, 59, 999)
+    return { from: monday.getTime(), to: sunday.getTime() }
+  }
+  const month = /^(\d{4})-(\d{2})$/u.exec(text)
+  if (month !== null) {
+    const year = Number(month[1])
+    const index = Number(month[2]) - 1
+    if (index < 0 || index > 11) return undefined
+    return { from: new Date(year, index, 1).getTime(), to: new Date(year, index + 1, 0, 23, 59, 59, 999).getTime() }
+  }
+  return undefined
 }
 
 /**
@@ -184,6 +230,16 @@ export function queryMeetings(args) {
   const period = resolvePeriod(request.period)
   const from = localDayOf(request.from)
   const to = localDayOf(request.to, true)
+  if (typeof request.from === 'string' && request.from.trim() !== '' && from === undefined) {
+    return `from 不是合法日期：${request.from}。请写成 YYYY-MM-DD。`
+  }
+  if (typeof request.to === 'string' && request.to.trim() !== '' && to === undefined) {
+    return `to 不是合法日期：${request.to}。请写成 YYYY-MM-DD。`
+  }
+  if (period !== '' && (from !== undefined || to !== undefined)) {
+    return 'period 与 from/to 互斥：给周期就不要再给日期范围，二者选一个。'
+  }
+  const range = period === '' ? undefined : periodRange(period)
   const person = typeof request.person === 'string' ? request.person.trim() : ''
   const include = new Set((Array.isArray(request.include) ? request.include : []).filter((entry) => typeof entry === 'string'))
   const wanted = Number(request.limit)
@@ -192,7 +248,11 @@ export function queryMeetings(args) {
   const matches = []
   for (const meeting of meetings.values()) {
     if (kind !== '' && (meeting.kind ?? '') !== kind) continue
-    if (period !== '' && (meeting.period ?? '') !== period) continue
+    // A recognised bucket matches by its time span, so "this-week" finds every briefing and
+// review inside the week as well as the weekly meeting (§3.3, §4.1).
+    if (period !== '' && range !== undefined) {
+      if (meeting.startedAt < range.from || meeting.startedAt > range.to) continue
+    } else if (period !== '' && (meeting.period ?? '') !== period) continue
     if (from !== undefined && meeting.startedAt < from) continue
     if (to !== undefined && meeting.startedAt > to) continue
     if (person !== '') {
@@ -281,7 +341,7 @@ export function scoreTotal(row) {
   const quality = clampNumber(row.quality, 10) * 10
   const completion = clampNumber(row.completion, 100)
   const learn = clampNumber(row.learn, 10) * 10
-  return Math.round(SCORE_WEIGHTS.quality * quality + SCORE_WEIGHTS.completion * completion + SCORE_WEIGHTS.learn * learn)
+  return Math.round(scoreWeights.quality * quality + scoreWeights.completion * completion + scoreWeights.learn * learn)
 }
 
 /**
@@ -543,11 +603,22 @@ export async function appendChunk(ctx, meeting, pcm, collectedSeconds) {
   }
   const end = collectedSeconds + pcm.length / 2 / SAMPLE_RATE
   if (text !== '') {
+    // Read once per cue: the normalisation rules and cue limits are settings, and a cue that
+    // arrives after a change should follow the change.
+    const transcriptSettings = await readTranscriptSettings().catch(() => null)
     const revised = await correctText(ctx, text, meeting.terms)
     // The raw recognition records what was heard; a correction is stored beside it and never
     // replaces it, so the original stays auditable.
     const segment = { id: `${meeting.segments.length + 1}`, start: collectedSeconds, end, text }
     if (revised !== text) segment.revised = revised
+    // Numbers, dates and clocks written the way a person writes them: a purely local rewrite
+    // (host-text.js), stored BESIDE the recognition rather than replacing it, so the literal
+    // output stays auditable and a later rule change can be re-derived from it. The rules are
+    // a setting, so a meeting can keep numerals exactly as they were said.
+    if (transcriptSettings.normalize) {
+      const normalised = normalizeText(revised, transcriptSettings.normalizeRules)
+      if (normalised !== revised) segment.normalised = normalised
+    }
     meeting.segments.push(segment)
   }
   meeting.seconds = end
@@ -1118,11 +1189,13 @@ export async function finalizeRecording(ctx, meeting) {
   }
   // Cues captured before the speaker model finished downloading carry no label, and a
   // worker that died mid-meeting leaves the rest blank too. The finished recording
-  // still holds every cue's audio, so judge the unlabeled ones from it now; capped so
-  // a long first meeting never stalls the stop button.
+  // still holds every cue's audio, so judge the unlabeled ones from it now. By default this
+  // covers EVERY cue: the old 60-cue cap was the main reason labels broke apart in a long
+  // meeting. `fullRelabel: false` in the speaker settings restores a capped tail pass.
+  const plan = relabelPlanOf((await readSettings()).speaker)
   let backfilled = 0
   try {
-    backfilled = await relabelFromRecording(ctx, meeting, { limit: SPEAKER_BACKFILL_CAP })
+    backfilled = await relabelFromRecording(ctx, meeting, plan)
   } catch (error) {
     ctx?.logger?.warn('dsh-meeting-room: speaker backfill failed: %s', error instanceof Error ? error.message : String(error))
   }
@@ -1130,11 +1203,197 @@ export async function finalizeRecording(ctx, meeting) {
   // The recording is finished, so the cues can be re-clustered as a whole: the online
   // gallery cannot split or merge what it has already labelled.
   const voices = relabelSpeakers(meeting)
+  // Keep one centroid per voice before the per-cue vectors go: the voice library is written
+  // when a person NAMES a speaker, which happens after the meeting, and a centroid is all it
+  // needs. Centroids are never persisted (see recordOf) and never leave this machine.
+  meeting.voiceCentroids = centroidsOf(meeting)
   // The embeddings have done their job once the voices are settled, so a long meeting
   // does not keep every cue's vector in memory for the rest of the session.
   for (const segment of meeting.segments) delete segment.embedding
   void flushMeetings(ctx)
   return voices
+}
+
+/** A spoken sentence ends here; a cue that does not end this way is still going on. */
+const TERMINAL_PUNCTUATION = /[。！？!?…]$/u
+
+/**
+ * Join two cue texts without inserting a space between Chinese characters.
+ * @param left - earlier text.
+ * @param right - later text.
+ * @returns the joined text.
+ */
+function joinFragment(left, right) {
+  if (left === '') return right
+  if (right === '') return left
+  return /[A-Za-z0-9]$/u.test(left) && /^[A-Za-z0-9]/u.test(right) ? `${left} ${right}` : `${left}${right}`
+}
+
+/** A clause boundary inside a long sentence, used only when the sentence must be cut. */
+const CLAUSE_PUNCTUATION = /[，,、；;：:]/u
+
+/**
+ * Break recognized text into readable sentence-sized pieces.
+ *
+ * Fast speech arrives as one 10-second cue holding several sentences; the local recognizer
+ * does punctuate, but it never reports where one sentence ends in time. Splitting on its
+ * punctuation is the closest local equivalent of "按语义断句": sentence enders first, then
+ * clause punctuation inside an over-long sentence, and a hard cut only as a last resort.
+ * The cloud recognizer's own `segments` (Whisper-style) are used instead when present —
+ * those carry real boundaries.
+ * @param text - recognized text.
+ * @param maxChars - longest piece a person wants on one line.
+ * @returns the pieces, in order; empty for blank text.
+ */
+export function sentenceParts(text, maxChars = 60) {
+  const clean = typeof text === 'string' ? text.trim() : ''
+  if (clean === '') return []
+  const cap = Math.max(12, Math.round(maxChars))
+  // 1. Cut after every sentence terminator (，。！？；…), keeping the punctuation.
+  const sentences = []
+  let buffer = ''
+  for (const character of clean) {
+    buffer += character
+    if (/[。！？!?…]/u.test(character)) {
+      sentences.push(buffer)
+      buffer = ''
+    }
+  }
+  if (buffer.trim() !== '') sentences.push(buffer)
+  // 2. A sentence longer than the cap is cut at a clause mark, never mid-word if avoidable.
+  const pieces = []
+  for (const sentence of sentences) {
+    let rest = sentence
+    while (rest.length > cap) {
+      let cut = -1
+      for (let index = cap; index >= Math.max(6, Math.floor(cap / 2)); index -= 1) {
+        if (CLAUSE_PUNCTUATION.test(rest[index - 1])) {
+          cut = index
+          break
+        }
+      }
+      if (cut < 0) cut = cap
+      pieces.push(rest.slice(0, cut))
+      rest = rest.slice(cut)
+    }
+    if (rest !== '') pieces.push(rest)
+  }
+  // 3. A dangling two-word tail (no terminator of its own) reads badly alone; keep it with
+  // the sentence before it. A short but complete sentence stays its own line.
+  const merged = []
+  for (const piece of pieces) {
+    const complete = /[。！？!?…]/u.test(piece)
+    if (merged.length > 0 && piece.trim().length < 6 && !complete) merged[merged.length - 1] += piece
+    else merged.push(piece)
+  }
+  return merged.map((piece) => piece.trim()).filter((piece) => piece !== '')
+}
+
+/**
+ * Replace one cue with its sentence-sized pieces.
+ *
+ * The recording is written cue by cue, so sub-cue times are proportional to character
+ * count unless the cloud recognizer supplied real segment times. Speaker and embedding are
+ * copied onto every piece: one person said the whole cue.
+ * @param meeting - Meeting whose cue is split.
+ * @param index - position of the cue.
+ * @param options - `maxChars`, optional cloud `hints` (relative seconds + text), and
+ *   `normalizeRules` so each piece is still written the way a person writes it.
+ * @returns the number of pieces now at that position (1 when nothing changed).
+ */
+export function splitCueIntoSentences(meeting, index, options = {}) {
+  const cue = meeting.segments[index]
+  if (cue === undefined || typeof cue.text !== 'string') return 0
+  const maxChars = options.maxChars
+  const hints = Array.isArray(options.hints) ? options.hints.filter((hint) => hint !== null && typeof hint === 'object' && typeof hint.text === 'string' && hint.text.trim() !== '') : []
+  let pieces = []
+  if (hints.length > 1) {
+    // Real boundaries from the cloud recognizer: trust its times and wording.
+    pieces = hints.map((hint) => ({
+      text: hint.text.trim(),
+      start: cue.start + Math.max(0, Number(hint.start) || 0),
+      end: cue.start + Math.max(0, Number(hint.end) || 0),
+    }))
+  } else {
+    const parts = sentenceParts(cue.text, maxChars)
+    if (parts.length <= 1) return 1
+    const totalChars = parts.reduce((sum, part) => sum + part.length, 0)
+    let cursor = cue.start
+    const span = Math.max(0.001, cue.end - cue.start)
+    pieces = parts.map((part) => {
+      const start = cursor
+      const end = cursor + (part.length / totalChars) * span
+      cursor = end
+      return { text: part, start, end }
+    })
+    pieces[pieces.length - 1].end = cue.end
+  }
+  if (pieces.length <= 1) return 1
+  // Corrections and the normalised reading describe the whole cue. Split them too when the
+  // sentence count lines up, so a split cue does not lose its terminology corrections.
+  const revisedParts = typeof cue.revised === 'string' && hints.length <= 1 ? sentenceParts(cue.revised, maxChars) : []
+  const rules = Array.isArray(options.normalizeRules) ? options.normalizeRules : null
+  const rebuilt = pieces.map((piece, pieceIndex) => {
+    const revised = revisedParts.length === pieces.length ? revisedParts[pieceIndex] : undefined
+    const readable = revised ?? piece.text
+    const normalised = rules === null ? '' : normalizeText(readable, rules)
+    return {
+      ...cue,
+      id: `${cue.id}.${pieceIndex + 1}`,
+      start: piece.start,
+      end: piece.end,
+      text: piece.text,
+      revised: revised !== undefined && revised !== piece.text ? revised : undefined,
+      normalised: normalised !== '' && normalised !== readable ? normalised : undefined,
+    }
+  })
+  meeting.segments.splice(index, 1, ...rebuilt)
+  return rebuilt.length
+}
+
+/**
+ * Fold a cue into the one before it when the first sentence is not finished yet.
+ *
+ * The browser endpoints audio on a pause, not on a full stop, so a single spoken
+ * sentence often arrives as two or three cues. Left alone, the transcript showed
+ * fragments ("我们下周" / "把方案交上来") instead of sentences, and every fragment got
+ * its own speaker guess. Merging is text-only: the earlier cue keeps its start and
+ * takes the later end, so seeking and speaker evidence stay one per sentence.
+ * @param meeting - Meeting whose last cue may continue the previous one.
+ * @param index - position of the new cue.
+ * @returns whether the cue was merged.
+ */
+export function mergeContinuation(meeting, index) {
+  if (!Number.isInteger(index) || index <= 0 || index >= meeting.segments.length) return false
+  const previous = meeting.segments[index - 1]
+  const current = meeting.segments[index]
+  if (typeof previous.text !== 'string' || typeof current.text !== 'string') return false
+  // A change of voice is a new utterance even when the sentence is unfinished.
+  if (previous.speaker !== current.speaker) return false
+  if (current.start - previous.end > 1.0) return false
+  if (TERMINAL_PUNCTUATION.test(previous.text.trim())) return false
+  // Fast speech can produce a very long cue; merging without a cap turned several
+// sentences into one unreadable paragraph, which is the opposite of sentence-per-line.
+  if (previous.text.length + current.text.length > 90) return false
+  previous.text = joinFragment(previous.text, current.text)
+  previous.end = current.end
+  // Derived readings describe the old fragment; join them when both exist, otherwise
+  // drop them so the panel does not show half a sentence.
+  if (typeof previous.revised === 'string' && typeof current.revised === 'string') {
+    previous.revised = joinFragment(previous.revised, current.revised)
+  } else {
+    delete previous.revised
+  }
+  if (typeof previous.normalised === 'string' && typeof current.normalised === 'string') {
+    previous.normalised = joinFragment(previous.normalised, current.normalised)
+  } else {
+    delete previous.normalised
+  }
+  if (typeof previous.localText === 'string' && typeof current.localText === 'string') {
+    previous.localText = joinFragment(previous.localText, current.localText)
+  }
+  meeting.segments.splice(index, 1)
+  return true
 }
 
 /** The transcript as the panel reads it: every field except the speaker embeddings. */
@@ -1248,7 +1507,13 @@ export function webhookFile() {
  * @returns one value per setting, empty when unset.
  */
 export async function readSettings() {
-  const empty = { dingtalk: '', wecom: '', appKey: '', appSecret: '', agentId: '', mode: 'group', people: [], departments: [] }
+  const empty = {
+    dingtalk: '', wecom: '', appKey: '', appSecret: '', agentId: '', mode: 'group', people: [], departments: [],
+    // The score weights in force (FEATURES §2.4); the default until a person changes them.
+    scoreWeights: { ...scoreWeights },
+    // Per-type distillation wording (§9 P4): an empty entry means "use the built-in text".
+    templates: {},
+  }
   try {
     const parsed = JSON.parse(await readFile(webhookFile(), 'utf8'))
     for (const kind of WEBHOOK_KINDS) {
@@ -1269,6 +1534,31 @@ export async function readSettings() {
         }))
     }
     if (Array.isArray(parsed.departments)) empty.departments = parsed.departments
+    // The cloud section belongs to whoever reads it (host-providers), which validates its own
+    // fields; passing it through untouched is what keeps a saved key from vanishing on read.
+    if (parsed.cloud !== null && typeof parsed.cloud === 'object') empty.cloud = parsed.cloud
+    // Same for the speaker section (the speaker settings routes and the voice library read it).
+    if (parsed.speaker !== null && typeof parsed.speaker === 'object') empty.speaker = parsed.speaker
+    // Same for the transcript section (normalisation rules and cue limits).
+    if (parsed.transcript !== null && typeof parsed.transcript === 'object') empty.transcript = parsed.transcript
+    if (parsed.templates !== null && typeof parsed.templates === 'object') {
+      const kept = {}
+      for (const kind of ['briefing', 'review', 'weekly', 'monthly']) {
+        if (typeof parsed.templates[kind] === 'string') kept[kind] = parsed.templates[kind].slice(0, 4000)
+      }
+      empty.templates = kept
+    }
+    // Score weights: adopt only a complete, positive set; a half-written section leaves the
+    // defaults in force instead of scoring everyone zero.
+    if (parsed.scoreWeights !== null && typeof parsed.scoreWeights === 'object') {
+      const candidate = {}
+      for (const key of SCORE_WEIGHT_KEYS) {
+        if (typeof parsed.scoreWeights[key] === 'number') candidate[key] = parsed.scoreWeights[key]
+      }
+      if (SCORE_WEIGHT_KEYS.every((key) => typeof candidate[key] === 'number')) {
+        empty.scoreWeights = setScoreWeights(candidate)
+      }
+    }
   } catch {
     // Absent or unreadable: nothing is configured yet, which is not an error.
   }
@@ -1592,6 +1882,79 @@ export async function readTranscript(args, exec) {
 }
 
 /**
+ * Create/configure the calling session's meeting, or report its live state.
+ *
+ * The microphone belongs to the browser panel, so `record` does not open it: it leaves a
+ * request the panel picks up within a few seconds and acts on with the same code path as
+ * its own Start button. That is the honest version of "start recording from the chat" —
+ * if the browser blocks the microphone, the panel says so instead of pretending.
+ * The five-minute scribe loop needs the rest: set the name/type up front, and know
+ * whether the recording has stopped (so the loop can finish and delete itself).
+ * @param args - Model arguments, validated here because a raw definition is not.
+ * @param exec - Tool run context carrying the calling session.
+ * @returns a short readable state, or an actionable refusal.
+ */
+export function meetingSession(args, exec) {
+  const request = args !== null && typeof args === 'object' ? args : {}
+  const sessionId = exec?.agent?.session?.id
+  const meetingId = typeof request.meetingId === 'string' ? request.meetingId : ''
+  let meeting = meetingForSession(typeof sessionId === 'string' ? sessionId : '', meetingId)
+  const action = typeof request.action === 'string' ? request.action : 'status'
+  // `create` may be the very first call of a meeting ("开始记录", nothing named yet), so it
+  // is allowed to create the session's meeting instead of refusing: the same lazy creation
+  // the panel's Start button uses, just triggered from the chat.
+  if (meeting === undefined && action === 'create' && typeof sessionId === 'string') {
+    meeting = ensureMeetingForSession(undefined, exec?.agent?.session)
+  }
+  if (meeting === undefined) {
+    return '这个会话还没有会议记录。请先在右侧会议面板点「开始记录」创建会议，再调用 meeting_session。'
+  }
+  if (action === 'create') {
+    if (typeof request.title === 'string' && request.title.trim() !== '') {
+      meeting.title = request.title.trim().slice(0, 120)
+    }
+    if (typeof request.kind === 'string' && MEETING_KINDS.includes(request.kind)) {
+      meeting.kind = request.kind
+      // The period is derived, never typed: a later weekly/monthly meeting finds this
+      // one through it (FEATURES §2.1).
+      meeting.period = periodOf(meeting.kind, meeting.startedAt)
+    }
+    if (typeof request.summary === 'string' && request.summary.trim() !== '') {
+      meeting.summary = request.summary.trim().slice(0, 400)
+    }
+  } else if (action === 'record') {
+    if (meeting.audioHandle !== undefined) {
+      return '录音已经在进行中，无需重复开始。可以直接开始每 5 分钟的整理。'
+    }
+    // A request, not a capture: the panel polls for it and calls its own start().
+    meeting.recordRequestedAt = Date.now()
+    return '已请求开始录音：会议面板会在几秒内自动开始（浏览器第一次会询问麦克风权限）。'
+      + '若十几秒后仍未开始，请在面板点「开始记录」。'
+  } else if (action !== 'status') {
+    return `未知的 action：${action}。可用 create、record 或 status。`
+  }
+  const recording = meeting.audioHandle !== undefined
+  const last = meeting.segments.length === 0 ? undefined : meeting.segments[meeting.segments.length - 1]
+  const lines = [
+    `会议：${meeting.id}`,
+    `名称：${meeting.title === undefined || meeting.title === '' ? '（未命名）' : meeting.title}`,
+    `类型：${KIND_TEXT[meeting.kind ?? ''] ?? '通用'}　周期：${meeting.period === undefined || meeting.period === '' ? '（无）' : meeting.period}`,
+    `录音：${recording ? '进行中' : '已停止'}　已录：${clockOf(meeting.seconds ?? 0)}`,
+    `实录：${meeting.segments.length} 段${last === undefined ? '' : `（最后一段 ${clockOf(last.end)}）`}`,
+    `要点：${meeting.points.length} 条　工作安排：${meeting.tasks.length} 项`,
+  ]
+  if (action === 'create') {
+    lines.push('', recording
+      ? '会议名称与类型已保存。录音已在面板中进行，按计划开始每 5 分钟的整理即可。'
+      : '会议名称与类型已保存。可以调用 action=record 请求面板自动开始录音；'
+        + '若不成功，再请在会议面板点「开始记录」。')
+  } else if (!recording) {
+    lines.push('', '录音已停止：可以读全文收尾，并删除「会议要点整理」提醒。')
+  }
+  return lines.join('\n')
+}
+
+/**
  * Store the agent's structured reading of the calling session's meeting.
  * @param args - Model arguments, validated here because a raw definition is not.
  * @param exec - Tool run context carrying the calling session.
@@ -1629,6 +1992,7 @@ export async function writeAnalysis(args, exec) {
   }
   let storedTasks = 0
   let updatedTasks = 0
+  const unknownTaskIds = []
   for (const item of Array.isArray(request.tasks) ? request.tasks : []) {
     const source = item !== null && typeof item === 'object' ? item : {}
     const id = typeof source.id === 'string' ? source.id.trim() : ''
@@ -1643,14 +2007,22 @@ export async function writeAnalysis(args, exec) {
       if (TASK_PRIORITIES.includes(source.priority)) existing.priority = source.priority
       if (typeof source.source === 'string' && source.source.trim() !== '') existing.source = source.source.trim()
       if (typeof source.done === 'boolean') {
+        // The first check-off is the fact worth keeping: repeating `done: true` (another
+        // review meeting, a retry) must not move the completion time (§2.3).
+        if (source.done && existing.done !== true) existing.doneAt = Date.now()
+        if (!source.done) delete existing.doneAt
         existing.done = source.done
-        if (source.done) existing.doneAt = Date.now()
-        else delete existing.doneAt
       }
       updatedTasks += 1
       continue
     }
     const title = typeof source.title === 'string' ? source.title.trim() : ''
+    // An addressed id that does not exist must not pass silently: a review meeting would
+    // report "0 updated" as if the check-off had worked (§4.2).
+    if (id !== '' && title === '') {
+      unknownTaskIds.push(id)
+      continue
+    }
     if (title === '' || meeting.tasks.some((existing) => existing.title === title)) continue
     meeting.tasks.push({
       id: `t${meeting.tasks.length + 1}`,
@@ -1667,12 +2039,23 @@ export async function writeAnalysis(args, exec) {
     storedTasks += 1
   }
   let storedScores = 0
+  let unscoredForBasis = 0
   for (const item of Array.isArray(request.scores) ? request.scores : []) {
     const source = item !== null && typeof item === 'object' ? item : {}
     const person = typeof source.person === 'string' ? source.person.trim() : ''
     if (person === '') continue
     if (!Array.isArray(meeting.scores)) meeting.scores = []
     const existing = meeting.scores.find((row) => row.person === person)
+    const basis = (Array.isArray(source.basis) ? source.basis : [])
+      .filter((entry) => typeof entry === 'string' && entry.trim() !== '')
+      .map((entry) => entry.trim())
+    // A score must be traceable to the transcript or to a task id (§2.4): a row with no
+    // evidence is refused, whether it is new or an existing row still has none. A row that
+    // already carries evidence may be corrected without resending it.
+    if (basis.length === 0 && (existing === undefined || (existing.basis ?? []).length === 0)) {
+      unscoredForBasis += 1
+      continue
+    }
     const target = existing ?? {
       person, hours: 0, completion: 0, quality: 0, learn: 0, highlight: '', improve: '', basis: [],
       // A score is a draft until a human confirms it, exactly like a task.
@@ -1684,14 +2067,21 @@ export async function writeAnalysis(args, exec) {
     }
     if (typeof source.highlight === 'string') target.highlight = source.highlight.trim()
     if (typeof source.improve === 'string') target.improve = source.improve.trim()
-    if (Array.isArray(source.basis)) {
-      target.basis = source.basis.filter((entry) => typeof entry === 'string' && entry.trim() !== '').map((entry) => entry.trim())
+    if (basis.length > 0) target.basis = basis
+    // The weighted total is a default, not a cage: a person may override it, and the
+    // override survives until it is cleared (§2.4).
+    if (typeof source.total === 'number' && Number.isFinite(source.total)) {
+      target.total = Math.min(Math.max(Math.round(source.total), 0), 100)
+      target.totalOverride = true
+    } else if (target.totalOverride !== true) {
+      target.total = scoreTotal(target)
     }
-    target.total = scoreTotal(target)
     if (existing === undefined) meeting.scores.push(target)
     storedScores += 1
   }
-  return `Meeting ${meeting.id}: stored ${storedPoints} point(s), ${storedTasks} new task(s), ${updatedTasks} updated task(s) and ${storedScores} score row(s); it now holds ${meeting.points.length} point(s), ${meeting.tasks.length} task(s) and ${(meeting.scores ?? []).length} score row(s). Tasks and scores stay drafts until a human confirms them.`
+  const refused = unscoredForBasis === 0 ? '' : ` ${unscoredForBasis} score row(s) were refused because their basis was empty — evidence (a transcript quote or a task id) is required.`
+  const unknown = unknownTaskIds.length === 0 ? '' : ` Unknown task id(s), not updated: ${unknownTaskIds.join(', ')}.`
+  return `Meeting ${meeting.id}: stored ${storedPoints} point(s), ${storedTasks} new task(s), ${updatedTasks} updated task(s) and ${storedScores} score row(s); it now holds ${meeting.points.length} point(s), ${meeting.tasks.length} task(s) and ${(meeting.scores ?? []).length} score row(s). Tasks and scores stay drafts until a human confirms them.${refused}`
 }
 
 /**

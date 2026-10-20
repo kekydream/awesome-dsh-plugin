@@ -69,6 +69,12 @@ window.__ModuleLoader__.load({
     /** Target sample rate for the speech provider. */
     const TARGET_RATE = 16000
 
+    /**
+     * Cue shaping: the defaults, replaced at runtime by the settings the host reports (a longer
+     * cue means fewer requests, a shorter silence hold means a snappier transcript).
+     */
+    const CUES = { minSeconds: 1.2, maxSeconds: 12, silenceRms: 0.012, silenceHoldSeconds: 0.7 }
+
     /** Shortest audio a cue may hold; below this a pause is not treated as an endpoint. */
     const MIN_CHUNK_SECONDS = 1.2
 
@@ -77,13 +83,33 @@ window.__ModuleLoader__.load({
      * recognizer is request/response, so this ceiling — not a partial hypothesis — is what
      * decides how live the transcript feels during a long uninterrupted sentence.
      */
-    const MAX_CHUNK_SECONDS = 5
+    const MAX_CHUNK_SECONDS = 12
+
+    /**
+     * Adopt the cue settings the host reports. The capture loop reads CUES on every block, so
+     * this takes effect on the next block rather than on the next meeting.
+     * @param stored - the transcript settings from the host.
+     */
+    function applyCueSettings(stored) {
+      if (stored === null || typeof stored !== "object") return
+      const numbers = {
+        minSeconds: Number(stored.minChunkSeconds),
+        maxSeconds: Number(stored.maxChunkSeconds),
+        silenceRms: Number(stored.silenceRms),
+        silenceHoldSeconds: Number(stored.silenceHoldSeconds),
+      }
+      for (const [key, value] of Object.entries(numbers)) {
+        if (Number.isFinite(value) && value > 0) CUES[key] = value
+      }
+      // Order matters: a minimum above the maximum would make every cue the maximum.
+      if (CUES.minSeconds > CUES.maxSeconds) CUES.maxSeconds = CUES.minSeconds
+    }
 
     /** Block RMS under which the microphone hears room noise rather than speech. */
     const SILENCE_RMS = 0.012
 
     /** Silence that must accumulate before a cue is closed. */
-    const SILENCE_HOLD_SECONDS = 0.5
+    const SILENCE_HOLD_SECONDS = 0.7
 
     /**
      * Worklet source, installed from a Blob URL so the client bundle needs no asset.
@@ -115,6 +141,9 @@ registerProcessor('meeting-capture', MeetingCapture)
 
     const zh = {
       title: '会议记录',
+      guideTitle: '开始会议',
+      guideDescription: '立即录音，会议助手自动整理',
+      guideOpening: '正在打开会议…',
       open: '会议记录',
       start: '开始记录',
       stop: '停止记录',
@@ -140,7 +169,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubHowTo: '录制在会话作用域进行：它需要会话身份，才能让 Agent 用 meeting_read 读到这场实录。',
       hubRecords: '会议记录（每场会议一条）',
       hubRefresh: '刷新',
+        hubLoadMore: '加载更早的会议',
       hubEmpty: '还没有会议记录。开一场会后就会出现在这里。',
+        hubFilterEmpty: '这个类型下还没有会议。',
+        hubAll: '全部',
+        hubGroupBy: '分组',
+        hubGroupDay: '按天',
+        hubGroupWeek: '按周',
+        hubGroupMonth: '按月',
+        hubTasksDone: '已完成',
       hubSend: '发送到新对话',
       hubSendHint: '新建一个对话，把这场会议的实录放进去，确认后发送',
       hubOpenSession: '打开会议',
@@ -185,7 +222,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       point_question: '待定',
       taskDraft: '待确认',
       taskConfirmed: '已确认',
-      noAnalysis: '还没有要点或工作安排。点下面的按钮在本地生成。',
+      noAnalysis: '还没有要点或工作安排。点上面的「本地提取」按规则生成草稿，或在会话里让 Agent 精修。',
       pointsNoRecording: '本场还没有实录。点上方「开始记录」，也可以在下面直接写一条要点。',
       tasksNoRecording: '本场还没有实录。点上方「开始记录」，也可以在下面直接写一条工作安排。',
       tasksEmpty: '还没有工作安排。可以直接添加，或让 Agent 依据实录写进本会；勾选表示人已确认，确认后才能推送。',
@@ -194,6 +231,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       taskTextRequired: '请先写工作安排的内容',
       originManual: '手填',
       kindGeneral: '通用',
+        kindAdhoc: '临时会议',
       kindBriefing: '晨会',
       kindReview: '复盘会',
       kindWeekly: '例会',
@@ -215,20 +253,40 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardDiscard: '不保存并打开',
       meetingNameHint: '选一个常用名称，或自己写一个；名称会显示在面板、实录抬头与纪要里。',
       meetingNamePlaceholder: '会议名称，如「晨会 · 10月18日」',
-      meetingNameSkip: '暂不命名并开始记录',
+        meetingTitleHint: '改完点别处即保存；类型决定周期归属与一键提炼模板',
+        seriesPrev: '上一场',
+        seriesNext: '下一场',
+        seriesNone: '本类型没有更早/更晚的会议',
+      meetingNameSkip: '留空并开始（稍后自动命名）',
+      meetingNameAutoHint: '标题可以留空：开始记录后，头 5 分钟的内容会自动起一个标题，之后也能在面板里改。',
       meetingNameNone: '（未命名）',
       periodNone: '（无周期）',
       panelTabScores: '评分',
       scoresPrefill: '统计预填',
       scoresExportCsv: '导出 CSV',
       scoresExportXlsx: '导出 Excel',
-      scoresHint: '完成率可按本月任务统计预填；质量与学习由人打分（1–10）。勾选＝已确认。总分＝质量 40% ＋ 完成率 40% ＋ 学习 20%。',
+      scoresHint: '完成率可按本月任务统计预填；质量与学习由人打分（1–10）。勾选＝已确认（需先填依据）。总分按「会议管理 → 设置 → 评分权重」计算，默认质量 40% ＋ 完成率 40% ＋ 学习 20%。',
+        scoreBasisPlaceholder: '依据：实录原文或任务 id（多条用；分隔）',
+        scoreBasisRequired: '先填一条依据（实录原文或任务 id）才能确认',
+        scoreBasisMissing: '缺依据',
       scoresAddPerson: '添加人员',
       scoreHours: '课时',
       scoreCompletion: '完成率 %',
       scoreQuality: '工作质量 1–10',
+        scoreWeightTitle: '评分权重',
+        scoreWeightHint: '月度总结会的总分按这三项加权：质量（1–10 换算百分制）、完成率（百分制）、学习（1–10 换算百分制）。三项之和须为 100%，保存后对已有评分同样生效。',
+        scoreWeightSum: '合计',
+        scoreWeightSave: '保存权重',
+        scoreWeightSaved: '权重已保存，之后重算的总分都按它算',
+        templateTitle: '一键提炼模板',
+        templateHint: '每种会议的一键提炼发给 Agent 的原文；留空使用内置文案。可用 {meetingId}、{title}、{period} 占位。',
+        templateSave: '保存模板',
+        templateSaved: '模板已保存',
       scoreLearn: '学习参与 1–10',
       scoreTotal: '总分',
+        scorePerson: '姓名',
+        scoreTotalAuto: '留空=按权重自动算',
+        scoreTotalManual: '已手改；清空回到自动',
       scoreHighlight: '亮点',
       scoreImprove: '待改进',
       scoreBasis: '依据',
@@ -242,6 +300,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       pausedStatus: '已暂停 · 已录',
       pauseLongHint: '仍在暂停（已超过 10 分钟）',
       carryOverPrompt: '昨天复盘会留下了 {count} 项未完成/遗留事项：\n{list}\n\n请在本次晨会实录里对照这些事项，决定今天派给谁、什么时候完成，并用 meeting_write 把结果写成本会 tasks（草稿，等人确认）。只依据实录与上面的清单，不要编造。',
+        distillBriefing: '一键提炼部署',
+        distillBriefingPrompt: '请整理这场晨会（{title}，{period}，meetingId={meetingId}）的部署安排：先用 meeting_read 读取本场实录，再用 meeting_write 把要点与工作写进这场会议（people 不填，tasks 的 owner/due 按实录写清）。只依据实录，不要编造。完成后在对话里用三句话说明今天谁做什么。',
+        distillReview: '一键复盘',
+        distillReviewPrompt: '请复盘这场会议（{title}，{period}，meetingId={meetingId}）：先用 meeting_read 读取实录，提炼结论、风险、待办与未决问题，再用 meeting_write 把要点与工作写进这场会议（tasks 到人到时间）。只依据实录；聊天里给出三条最重要的结论。',
+        distillWeekly: '一键整理本周',
+        distillWeeklyPrompt: '请整理这场例会（{title}，{period}，meetingId={meetingId}）：先用 meeting_query 取本周（period="this-week"）的晨会与复盘会，再结合本场实录，用 meeting_write 把本周进展、风险与下周计划写成要点和任务（写回 meetingId={meetingId}）。只依据记录，不要编造；聊天里给出本周三条结论。',
+        distillMonthly: '一键生成评分',
+        distillMonthlyPrompt: '请为这场月度总结会（{title}，{period}，meetingId={meetingId}）生成评分建议：先用 meeting_query 取本月（period="this-month"）的会议与任务完成情况，按人给出完成率、质量、学习三项建议分数，每一项都带依据（实录原文或任务 id），再用 meeting_write 写入这场会议的 scores（草稿，等人确认）。没有依据就不打分，并在回复里说明缺什么。',
+        extractNow: '本地提取',
+        extractDone: '已提取',
       historyPlaceholder: '搜索历史会议（名称 / 日期 / 类型 / 实录关键词）',
       historyOpen: '打开会议',
       historyLoading: '正在读取…',
@@ -268,7 +336,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       ownerPh: '负责人',
       duePh: '时间',
       originRule: '规则',
-      originAgent: 'AI',
+      originAgent: 'Agent',
       ink: '手写笔记',
       inkHint: '用笔或鼠标在下面书写；Windows 触屏笔的橡皮端会被识别为橡皮。',
       inkPen: '笔',
@@ -285,6 +353,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       inkSelection: '识别选中',
       inkToTask: '转为任务',
       inkToTaskDone: '已转为待确认任务',
+        taskMarkDone: '标记为已完成（核销）',
+        taskDoneAt: '完成于',
       needSession: '这需要一个会话：请先在某个对话里打开会议记录面板',
       roleLabel: '我的角色',
       speakingNow: '正在说',
@@ -294,7 +364,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       roleHint: '复盘时会按这个角色组织内容',
       review: '复盘会议',
       pushDone: '已推送到机器人',
-      robotSettings: '机器人设置',
+      robotSettings: '设置',
+      settingsTabs: '设置分类',
+      settingsTabPush: '推送与机器人',
+      settingsTabTranscript: '实录与切句',
+      settingsTabSpeaker: '发言人识别',
+      settingsTabWeights: '评分权重',
+      settingsTabTemplates: '提炼模板',
       robotHint: '填入钉钉 / 企业微信机器人的 Webhook 地址，留空表示不推送；只推送【已确认】的任务。地址保存在本机。',
       robotSave: '保存地址',
       robotSaved: '已保存',
@@ -311,8 +387,94 @@ registerProcessor('meeting-capture', MeetingCapture)
       userIdPh: 'UserId',
       peopleUnit: '人',
       hubTabRecords: '会议记录',
+      hubTabModels: '模型',
+      modelsHint: '这里决定识别用哪些模型：装好、校验通过（大小与 sha256 都对）才能启用。默认不出本机；换模型只影响之后的识别，不改动已有会议的文字。',
+      modelsLocalTitle: '本地模型',
+      modelsLocalHint: '在这台机器上运行，录音不出本机。按用途分组：语音识别、发言人声纹、手写识别。',
+      modelsCloudTitle: '云端模型（默认关闭）',
+      modelsCloudHint: '只有勾选下面的同意项后，录音片段才会发到这里的地址做识别；不打开则一律在本机识别，插件不会对外发起任何请求。发送时只带当前这一段音频（不是整场录音），并在请求里声明不保留；失败会自动回到本地模型，不会静默丢字。密钥只存在本机设置里：不显示、不进日志，也不进会议工程包。',
+      modelKindAsr: '语音识别',
+      modelKindSpeaker: '发言人声纹',
+      modelKindHandwriting: '手写识别',
+      modelKindVad: '端点检测',
+      modelKindDiarization: '说话人分离',
+      modelKindOther: '其它',
+      modelInstall: '下载并安装',
+      modelRetry: '重新下载',
+      modelInstalled: '已安装',
+      modelImportFile: '从本地文件导入',
+      modelImportHint: '选这个模型的模型文件（离线机房、内网镜像、或你自己训练的模型都可以）；文件与目录记录对不上时会被拒绝',
+      modelImported: '已导入',
+      modelActivate: '启用这个',
+      modelActivated: '已切换',
+      modelRemove: '删除',
+      modelRemoved: '已删除文件数',
+      modelDownloading: '正在下载',
+      modelLicence: '许可',
+      modelDirectory: '模型目录',
+      modelStateReady: '已装好',
+      modelStateMissing: '未安装',
+      modelStateBad: '校验不通过',
+      modelByDsh: '由 DSH 提供',
+      modelInUse: '正在使用',
+      cloudConsent: '我同意把音频发到下面这个地址做识别',
+      cloudMode: '识别方式',
+      cloudModeLocal: '只用本地模型',
+      cloudModePrefer: '云端优先（失败降级本地）',
+      cloudModeStrict: '只用云端模型（不降级）',
+      cloudModeLocalHint: '全程在本机识别，插件不发任何请求。',
+      cloudModePreferHint: '每段先发云端；连续失败 3 次自动回到本地识别，并在面板说明原因。',
+      cloudModeStrictHint: '每段只发云端；失败时保留本机文字并明确报错，不会静默降级。',
+      cloudModeNow: '当前生效',
+      cloudModeNowLocal: '本地模型',
+      cloudModeNowCloud: '云端模型',
+      cloudModeNowStrict: '云端模型（严格）',
+      cloudModeNowFallback: '已回退本地',
+      cloudStrictFailed: '云端识别失败（只用云端，未降级）',
+      cloudProvider: '服务类型',
+      cloudOff: '关闭',
+      cloudOpenAi: 'OpenAI 兼容（/audio/transcriptions）',
+      cloudCustom: '自定义',
+      cloudWhere: '音频将发往',
+      cloudRetention: '声明不保留',
+      cloudNowhere: '还没有填写地址',
+      cloudSave: '保存云端设置',
+      cloudSaved: '已保存',
+      cloudTest: '测试连接',
+      cloudOk: '已连通',
+      cloudFailed: '未连通',
+      cloudFallback: '已回退到本机识别',
+      cloudUsed: '这一段由云端识别',
+      speakerTitle: '发言人识别',
+      transcriptTitle: '实录书写与切句',
+      transcriptNormalize: '把数字、日期、时间写成平时写的样子',
+      transcriptNormalizeHint: '例如「二零二六年十月十九号」→「2026年10月19日」、「百分之三十」→「30%」、「三点半」→「3点半」。这是本机规则、不联网；原文仍保留在实录里，可随时对照。',
+      transcriptMinCue: '最短一段（秒）',
+      transcriptMaxCue: '最长一段（秒）',
+      transcriptMaxLine: '每行最多多少字',
+      transcriptSilenceHold: '停顿多久算说完（秒）',
+      transcriptSilenceRms: '静音判定阈值',
+      transcriptCueHint: '录音在浏览器里切段：停顿超过「停顿多久算说完」就结束一段，最短一段之内的停顿不算切点。最长一段越小，文字上屏越快、请求越多；越大则相反。识别出的长句会按标点拆成「每行最多多少字」的行，语速快时特别有用。',
+      transcriptRules: '启用的规整规则',
+      transcriptSave: '保存实录设置',
+      speakerThreshold: '聚类的严格程度',
+      speakerFullRelabel: '结束录音时全量重判所有实录（推荐）',
+      speakerSettingsHint: '人多时把阈值调高（更严格：宁可多分几个声音，也不把两个人合成一个）；人少、或同一个人语气变化大时调低。全量重判替换了旧的「只补最后 60 条」，长会议的标签不容易断裂。改了阈值需要重新准备一次语音识别（识别进程会自动重启）。',
+      speakerRestarted: '已保存；识别进程已重启，新阈值在下次准备时生效',
+      speakerSave: '保存发言人设置',
+      voiceLibrary: '声纹库（只存向量，不存音频）',
+      voiceLibraryEmpty: '声纹库还是空的：在「发言人姓名」里给某个声音填上真实姓名，它就会被记下来；之后同一场或别的会议再听到这个人，会给出建议。',
+      voiceLibraryFile: '声纹库文件',
+      voiceForget: '忘记',
+      voiceClear: '清空声纹库',
       hubTabTerms: '会议术语',
-      hubTabSettings: '机器人设置',
+      autoRecordStarted: '已收到开始记录请求：录音已开启',
+      stopFinishing: '正在收尾：等待最后几段识别完成…',
+      stopRemaining: '剩余',
+      stopElapsed: '已等待',
+      stopFinished: '收尾完成，会议已保存',
+      hubLastTopic: '上次会议',
+      hubTabSettings: '设置',
       hubTabPeople: '人员管理',
       panelTabTranscript: '会议实录',
       panelTabSpeakers: '发言人',
@@ -341,6 +503,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       priorityNormal: '普通',
       priorityLow: '低',
       speakerNames: '发言人姓名',
+      voiceSuggestions: '声纹库认出的名字（要你确认才写入）',
+      voiceSoundsLike: '听起来像',
+      voiceAccept: '采用这个名字',
       openNames: '填写姓名',
       speakerNameHint: '给识别到的发言人填上真实姓名；标签不变，会终重聚类后姓名会跟着声音走。留空则显示 S1、S2。',
       speakerNamePlaceholder: '姓名',
@@ -366,7 +531,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: '会议术语',
       notesToggle: '手写笔记',
       helpToggle: '使用说明',
-      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听三个按钮，或在右侧「其他角色」里自己写）、选会议类型（通用／晨会／复盘会／例会／总结会）。选类型会**自动把标题填成「类型 · 今天日期」**，也可以自己改；不想命名就点「暂不命名并开始记录」。\n· 一个会话对应一场会议；分支出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟会提醒一次（不会自动停止）。\n· 状态行显示已录时长与当前发言人；所有按钮都在面板最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你往上滚就自动取消跟随，并出现「回到最新」可以一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx；两者都会弹出浏览器的下载保存对话框，纪要同时留在会议里可随时打开。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。负责人与发言人姓名都从「会议管理 → 人员」的名册（含从钉钉同步过来的人）里取候选。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n· 工作安排页签的「一键同步到钉钉/企业微信」按「会议管理 → 设置」里选的推送方式（群机器人／工作通知／两者）把**已确认**的任务发出去；没有配置目标时会告诉你原因；每条工作安排右侧还有「发送这条」，可以只发其中一条。\n\n【发言人】\n· 每个声纹标签直接填姓名：可以自己输入，也可以从名册下拉里选（输入即过滤）。\n· 「重新识别发言人」会从录音重新判断，用于识别当时模型还没就绪、或长会议只补标了后段的情况。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时内容只读（历史内容不会被改动），可「打开原会话」或「返回本会话」；其中工作安排的「已确认」勾选是允许的 —— 那是发送它的前提，且只会写入该场会议。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【保存为文件 · 导入 · 关于】\n· 「更多 → 保存为文件」把这场会议打成**一个 zip 工程包**：会议记录、录音、以及纪要/图片等产出都在里面；右下角会显示进度提示（打包中 → 百分比 → 已保存到文件）。\n· 「会议管理 → 记录 → 导入会议」选择这样的 zip，就能把它导入本机（导入为新会议，不覆盖已有记录、不挂在任何会话上，重名文件自动改名），因此可以把一场会议带到另一台 DSH 上打开。\n· 「更多 → 关于」显示本机实际安装的**版本号**、作者与邮箱；发现 bug 或想提改进意见，点「发邮件」直接写给我，附上版本号与操作步骤即可。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要；「刷新」重新读取，「导入会议」导入工程包；点名称可在下方回看实录与播放。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式 —— 工作安排的「一键同步」就按这里的选择发送。\n· 人员：共享名单（姓名／手机／用户 ID），可手工维护，也可从钉钉通讯录同步部门；这份名单同时是任务负责人与发言人姓名的候选来源。\n· 术语：与「更多 → 会议术语」同一份内容。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
+      helpBody: '【开始与命名】\n· 点「开始记录」先弹出「这场会议叫什么？」：填会议名称、选我的角色（主持人／参会人／旁听三个按钮，或在右侧「其他角色」里自己写）、选会议类型（通用／晨会／复盘会／例会／总结会）。选类型会**自动把标题填成「类型 · 今天日期」**，也可以自己改；不想命名就点「留空并开始（稍后自动命名）」：标题可以留空，开始后头 5 分钟的内容会自动起一个标题，之后仍可在面板里改。\n· 一个会话对应一场会议；分支出来的会话各自独立，子代理与团队共享同一场会议。\n· 语音识别与声纹模型按需下载，面板会显示进度；点开始后若模型未就绪，会先准备再自动开录。\n\n【录制】\n· 「开始记录／停止」控制整场；「暂停／继续」用于中场休息，暂停期间不采集、时间轴保持连续，暂停超过 10 分钟会提醒一次（不会自动停止）。\n· 状态行显示已录时长与当前发言人；所有按钮都在面板最上面这一排。\n\n【会议实录】\n· 自动跟随最新发言；你往上滚就自动取消跟随，并出现「回到最新」可以一键跳回。\n· 勾选多条实录 → 「合并为任务」：几句话讲的一件事合成一个任务草稿。\n· 点某条实录跳到那句录音播放；每条右侧「转为任务」把这一句变成任务。\n· 「更多」里可复制 SRT、复制纯文本、复制给模型订正的请求。\n\n【会议纪要】\n· 「生成纪要」出 Markdown，「导出 Word」出 .docx；两者都会弹出浏览器的下载保存对话框，纪要同时留在会议里可随时打开。\n· 「更多 → 会议术语」：每行一条，写成「错词=正确词」可在转写里自动替换，只写词则作为热词；边打字边保存。\n\n【要点与任务】\n· 两个页签都能直接增、改、删；任务是草稿，勾选后才算确认；任务可填负责人、时限、优先级。负责人与发言人姓名都从「会议管理 → 人员」的名册（含从钉钉同步过来的人）里取候选。\n· 想让模型来写，就在对话里说一句，例如「读一下本场会议实录，把要点和任务写进会议」——Agent 会用 meeting_write 落库。\n· 工作安排页签的「一键同步到钉钉/企业微信」按「会议管理 → 设置」里选的推送方式（群机器人／工作通知／两者）把**已确认**的任务发出去；没有配置目标时会告诉你原因；每条工作安排右侧还有「发送这条」，可以只发其中一条。\n\n【发言人】\n· 每个声纹标签直接填姓名：可以自己输入，也可以从名册下拉里选（输入即过滤）。\n· 「重新识别发言人」会从录音重新判断，用于识别当时模型还没就绪、或长会议只补标了后段的情况；结束录音时的补标默认已覆盖整场实录（可在「会议管理 → 设置」里改回按上限补）。\n· 给某个声音填上真实姓名，它会被记进声纹库（只存向量、不存音频）；别的会议再听到这个人，会给出「听起来像 X」的建议，**要你点「采用」才会写入**。阈值（人多/默认/人少）与声纹库的忘记/清空也在「设置」页。\n\n【评分（月度总结会）】\n· 只有类型是「总结会」时才出现评分页签：可从本月统计预填完成率，再逐人打分（课时／完成率／工作质量／学习参与）、写亮点与待改进、附依据。\n· 可导出 CSV 与 Excel；分数在人工确认前是草稿。\n\n【手写笔记】\n· 手写板：笔／橡皮／撤销／清空；轻点自动发现的一个字即可选中，长按约 0.6 秒可直接开始圈选。\n· 「识别为文字」用本机模型离线识别（约 43 毫秒一行），识别后可「转为任务」；「保存为图片」把整页存进会议记录。\n· 不录音也能写笔记、识别与转任务，第一次写入会自动建好这场会议。\n\n【打开会议与历史会议】\n· 动作行的「打开会议」是一个带搜索的下拉：按名称／日期／类型／实录关键词即时过滤，滚动到底自动加载更多，点名称或整行即可打开。\n· 查看历史会议时内容只读（历史内容不会被改动），可「打开原会话」或「返回本会话」；其中工作安排的「已确认」勾选是允许的 —— 那是发送它的前提，且只会写入该场会议。\n· 切换前若当前会议有内容：3 秒倒计时后自动保存再打开，也可选「立即保存并打开」或「不保存并打开」。\n\n【保存为文件 · 导入 · 关于】\n· 「更多 → 保存为文件」把这场会议打成**一个 zip 工程包**：会议记录、录音、以及纪要/图片等产出都在里面；右下角会显示进度提示（打包中 → 百分比 → 已保存到文件）。\n· 「会议管理 → 记录 → 导入会议」选择这样的 zip，就能把它导入本机（导入为新会议，不覆盖已有记录、不挂在任何会话上，重名文件自动改名），因此可以把一场会议带到另一台 DSH 上打开。\n· 「更多 → 关于」显示本机实际安装的**版本号**、作者与邮箱；发现 bug 或想提改进意见，点「发邮件」直接写给我，附上版本号与操作步骤即可。\n\n【会议管理（左侧栏）】\n· 记录：一场会议一条，显示时间、名称、类型与各项条数、摘要；「刷新」重新读取，「导入会议」导入工程包；点名称可在下方回看实录与播放。\n· 设置：群机器人 Webhook、钉钉应用（appKey／appSecret／agentId）与推送方式 —— 工作安排的「一键同步」就按这里的选择发送。\n· 人员：共享名单（姓名／手机／用户 ID），可手工维护，也可从钉钉通讯录同步部门；这份名单同时是任务负责人与发言人姓名的候选来源。\n· 术语：与「更多 → 会议术语」同一份内容。\n· 模型：识别用哪个模型在这里选 —— 内置的声纹与手写模型、以及从本地文件导入的更强模型；装好并通过大小与 sha256 校验才能启用，启用后只影响之后的识别。\n\n【数据都在本机】\n· 录音、实录、要点、任务、纪要、评分与笔记都保存在本机（$DSH_HOME/meeting-room），不上传云端；空会议不会落盘；历史文件不会被自动删除。',
       inkNote: '笔记文字',
       documents: '会议文档',
       openDocument: '查看',
@@ -401,6 +566,9 @@ registerProcessor('meeting-capture', MeetingCapture)
 
     const en = {
       title: 'Meeting notes',
+      guideTitle: 'Start a meeting',
+      guideDescription: 'Record now and let the meeting agent organise',
+      guideOpening: 'Opening the meeting…',
       open: 'Meeting notes',
       start: 'Start',
       stop: 'Stop',
@@ -426,7 +594,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       hubHowTo: 'Recording runs in the session scope: the session identity is what lets the agent read this meeting through meeting_read.',
       hubRecords: 'Meetings (one row per meeting)',
       hubRefresh: 'Refresh',
+        hubLoadMore: 'Load older meetings',
       hubEmpty: 'No meetings recorded yet — hold one and it appears here.',
+        hubFilterEmpty: 'No meeting of this type yet.',
+        hubAll: 'All',
+        hubGroupBy: 'Group by',
+        hubGroupDay: 'Day',
+        hubGroupWeek: 'Week',
+        hubGroupMonth: 'Month',
+        hubTasksDone: 'done',
       hubSend: 'Send to new chat',
       hubSendHint: 'Open a new conversation with this meeting\'s transcript, ready to send',
       hubOpenSession: 'Open meeting',
@@ -471,7 +647,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       point_question: 'Open question',
       taskDraft: 'Draft',
       taskConfirmed: 'Confirmed',
-      noAnalysis: 'No points or assignments yet. Use the button below to extract them locally.',
+      noAnalysis: 'No points or assignments yet. Use "Extract locally" above for rule-based drafts, or ask the agent to refine them in the conversation.',
       pointsNoRecording: 'This meeting has no recording yet. Press Start above, or write a point below.',
       tasksNoRecording: 'This meeting has no recording yet. Press Start above, or write an assignment below.',
       tasksEmpty: 'No assignments yet. Add one directly, or ask the agent to write them from the transcript; the checkbox is the human confirmation that sending requires.',
@@ -480,6 +656,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       taskTextRequired: 'Write the assignment first',
       originManual: 'written',
       kindGeneral: 'General',
+        kindAdhoc: 'Ad-hoc meeting',
       kindBriefing: 'Morning briefing',
       kindReview: 'Daily review',
       kindWeekly: 'Weekly meeting',
@@ -501,20 +678,40 @@ registerProcessor('meeting-capture', MeetingCapture)
       historyGuardDiscard: 'Open without saving',
       meetingNameHint: 'Pick a common name or type your own; it shows in the panel, the transcript header and the minutes.',
       meetingNamePlaceholder: 'Meeting name, e.g. "Briefing · Oct 18"',
-      meetingNameSkip: 'Skip naming and start recording',
+        meetingTitleHint: 'Click elsewhere to save; the type decides the period and the one-click template',
+        seriesPrev: 'Previous',
+        seriesNext: 'Next',
+        seriesNone: 'No earlier/later meeting of this type',
+      meetingNameSkip: 'Start with no name (auto-name later)',
+      meetingNameAutoHint: 'The title may stay empty: once recording starts, the first five minutes name the meeting automatically, and you can still rename it in the panel.',
       meetingNameNone: '(unnamed)',
       periodNone: '(no period)',
       panelTabScores: 'Scores',
       scoresPrefill: 'Pre-fill completion',
       scoresExportCsv: 'Export CSV',
       scoresExportXlsx: 'Export Excel',
-      scoresHint: 'Completion can be pre-filled from this period\'s tasks; quality and learning are scored by a person (1–10). Checked = confirmed. Total = quality 40% + completion 40% + learning 20%.',
+      scoresHint: 'Completion can be pre-filled from this period\'s tasks; quality and learning are scored by a person (1–10). Checked = confirmed (evidence is required first). The total follows Meeting management → Settings → Score weights; the defaults are quality 40% + completion 40% + learning 20%.',
+        scoreBasisPlaceholder: 'Evidence: a transcript quote or a task id (separate several with ;)',
+        scoreBasisRequired: 'Add evidence (a transcript quote or a task id) before confirming',
+        scoreBasisMissing: 'no evidence',
       scoresAddPerson: 'Add a person',
       scoreHours: 'Hours',
       scoreCompletion: 'Completion %',
       scoreQuality: 'Quality 1–10',
+        scoreWeightTitle: 'Score weights',
+        scoreWeightHint: 'A monthly review total weighs these three: quality (1–10 as a percentage), completion (percentage) and learning (1–10 as a percentage). They must add up to 100%; saving applies to existing rows too.',
+        scoreWeightSum: 'Total',
+        scoreWeightSave: 'Save weights',
+        scoreWeightSaved: 'Weights saved; totals are recomputed with them from now on',
+        templateTitle: 'One-click distillation templates',
+        templateHint: 'The text each type\'s distillation sends to the agent; leave it empty to use the built-in wording. {meetingId}, {title} and {period} are placeholders.',
+        templateSave: 'Save templates',
+        templateSaved: 'Templates saved',
       scoreLearn: 'Learning 1–10',
       scoreTotal: 'Total',
+        scorePerson: 'Name',
+        scoreTotalAuto: 'Empty = computed from the weights',
+        scoreTotalManual: 'Overridden; clear to compute again',
       scoreHighlight: 'Highlight',
       scoreImprove: 'To improve',
       scoreBasis: 'Evidence',
@@ -528,6 +725,16 @@ registerProcessor('meeting-capture', MeetingCapture)
       pausedStatus: 'Paused · recorded',
       pauseLongHint: 'Still paused (over 10 minutes)',
       carryOverPrompt: 'Yesterday\'s review left {count} item(s) unfinished or carried over:\n{list}\n\nCheck them against this briefing\'s transcript, decide who takes each one and by when, then write the result into this meeting\'s tasks with meeting_write (drafts a human confirms). Use only the transcript and the list above; do not invent anything.',
+        distillBriefing: 'Distil the briefing',
+        distillBriefingPrompt: 'Turn this briefing ({title}, {period}, meetingId={meetingId}) into a deployment plan: call meeting_read for the transcript, then meeting_write to store the points and assignments in this meeting (fill owner and due from the transcript). Use only the transcript; never invent. Finish with three sentences on who does what today.',
+        distillReview: 'Distil the review',
+        distillReviewPrompt: 'Review this meeting ({title}, {period}, meetingId={meetingId}): call meeting_read for the transcript, extract conclusions, risks, actions and open questions, then meeting_write to store them in this meeting (assignments need an owner and a time). Use only the transcript; finish with the three most important conclusions.',
+        distillWeekly: 'Summarise the week',
+        distillWeeklyPrompt: 'Summarise this weekly meeting ({title}, {period}, meetingId={meetingId}): call meeting_query for this week\'s briefings and reviews (period="this-week"), then combine them with this transcript and use meeting_write to store the week\'s progress, risks and next week\'s plan as points and tasks in meetingId={meetingId}. Use only the records; finish with three conclusions.',
+        distillMonthly: 'Draft the scores',
+        distillMonthlyPrompt: 'Draft scores for this monthly review ({title}, {period}, meetingId={meetingId}): call meeting_query for this month\'s meetings and task completion (period="this-month"), propose completion, quality and learning scores per person, each with evidence (a transcript quote or a task id), then meeting_write them into this meeting\'s scores (drafts a human confirms). Do not score without evidence; say what is missing.',
+        extractNow: 'Extract locally',
+        extractDone: 'Extracted',
       historyPlaceholder: 'Search meetings (name / date / type / transcript)',
       historyOpen: 'Open meeting',
       historyLoading: 'Loading…',
@@ -554,7 +761,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       ownerPh: 'Owner',
       duePh: 'Due',
       originRule: 'Rule',
-      originAgent: 'AI',
+      originAgent: 'Agent',
       ink: 'Handwritten note',
       inkHint: 'Write below with the pen or the mouse; the Windows pen eraser end is read as an eraser.',
       inkPen: 'Pen',
@@ -571,6 +778,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       inkSelection: 'Recognize selection',
       inkToTask: 'To task',
       inkToTaskDone: 'Added as a draft task',
+        taskMarkDone: 'Mark as done (checked off)',
+        taskDoneAt: 'Done at',
       needSession: 'This needs a session: open the meeting panel from a conversation first',
       roleLabel: 'My role',
       speakingNow: 'speaking',
@@ -580,7 +789,13 @@ registerProcessor('meeting-capture', MeetingCapture)
       roleHint: 'Reviews are organised around this role',
       review: 'Review the meeting',
       pushDone: 'Pushed to the group robot',
-      robotSettings: 'Robot settings',
+      robotSettings: 'Settings',
+      settingsTabs: 'Settings groups',
+      settingsTabPush: 'Push & robots',
+      settingsTabTranscript: 'Transcript & cues',
+      settingsTabSpeaker: 'Speaker recognition',
+      settingsTabWeights: 'Score weights',
+      settingsTabTemplates: 'Distillation prompts',
       robotHint: 'Paste the DingTalk / WeCom robot webhook addresses; leave one empty to skip it. Only confirmed tasks are pushed, and the addresses stay on this machine.',
       robotSave: 'Save addresses',
       robotSaved: 'Saved',
@@ -596,8 +811,94 @@ registerProcessor('meeting-capture', MeetingCapture)
       userIdPh: 'UserId',
       peopleUnit: 'people',
       hubTabRecords: 'Records',
+      hubTabModels: 'Models',
+      modelsHint: 'Which models recognition runs on. A model must be installed and verified (size and sha256) before it can be chosen. Nothing leaves this machine by default, and switching only affects later recognition — text already recorded is untouched.',
+      modelsLocalTitle: 'Local models',
+      modelsLocalHint: 'These run on this machine and the recording never leaves it. Grouped by purpose: speech, speaker voices, handwriting.',
+      modelsCloudTitle: 'Cloud models (off by default)',
+      modelsCloudHint: 'Only after you tick the consent box below is audio sent to this address; with it off everything is recognised on this machine and the plugin makes no outgoing request at all. Only the current cue travels (never the whole recording) and the request declares that it may not be retained; on failure recognition falls back to the local model instead of silently losing words. The key lives in this machine\'s settings only: never displayed, never logged, never inside a meeting package.',
+      modelKindAsr: 'Speech recognition',
+      modelKindSpeaker: 'Speaker voices',
+      modelKindHandwriting: 'Handwriting',
+      modelKindVad: 'Endpointing',
+      modelKindDiarization: 'Speaker separation',
+      modelKindOther: 'Other',
+      modelInstall: 'Download and install',
+      modelRetry: 'Download again',
+      modelInstalled: 'Installed',
+      modelImportFile: 'Import from a file',
+      modelImportHint: 'Pick this model\'s file (an offline machine, a private mirror, or a model you trained). Anything that does not match the catalog is refused.',
+      modelImported: 'Imported',
+      modelActivate: 'Use this one',
+      modelActivated: 'Switched',
+      modelRemove: 'Remove',
+      modelRemoved: 'Files removed',
+      modelDownloading: 'Downloading',
+      modelLicence: 'Licence',
+      modelDirectory: 'Model directory',
+      modelStateReady: 'Ready',
+      modelStateMissing: 'Not installed',
+      modelStateBad: 'Verification failed',
+      modelByDsh: 'Provided by DSH',
+      modelInUse: 'In use',
+      cloudConsent: 'I agree to send audio to the address below for recognition',
+      cloudMode: 'Recognition mode',
+      cloudModeLocal: 'Local model only',
+      cloudModePrefer: 'Cloud first (fall back to local)',
+      cloudModeStrict: 'Cloud only (never fall back)',
+      cloudModeLocalHint: 'Everything is recognised on this machine and the plugin makes no request at all.',
+      cloudModePreferHint: 'Each cue goes to the cloud first; after three failures in a row recognition returns to this machine and the panel says why.',
+      cloudModeStrictHint: 'Each cue goes to the cloud only; on failure the local text is kept and the error is reported instead of a silent fallback.',
+      cloudModeNow: 'In effect',
+      cloudModeNowLocal: 'Local model',
+      cloudModeNowCloud: 'Cloud model',
+      cloudModeNowStrict: 'Cloud model (strict)',
+      cloudModeNowFallback: 'Fell back to local',
+      cloudStrictFailed: 'Cloud recognition failed (cloud only, no fallback)',
+      cloudProvider: 'Service type',
+      cloudOff: 'Off',
+      cloudOpenAi: 'OpenAI-compatible (/audio/transcriptions)',
+      cloudCustom: 'Custom',
+      cloudWhere: 'Audio would go to',
+      cloudRetention: 'declared as not retained',
+      cloudNowhere: 'No address configured yet',
+      cloudSave: 'Save cloud settings',
+      cloudSaved: 'Saved',
+      cloudTest: 'Test connection',
+      cloudOk: 'Reachable',
+      cloudFailed: 'Not reachable',
+      cloudFallback: 'Fell back to on-machine recognition',
+      cloudUsed: 'This cue came from the cloud',
+      speakerTitle: 'Speaker recognition',
+      transcriptTitle: 'How the transcript reads, and where it is cut',
+      transcriptNormalize: 'Write numbers, dates and times the way people write them',
+      transcriptNormalizeHint: 'For example 二零二六年十月十九号 becomes 2026年10月19日, 百分之三十 becomes 30%, 三点半 becomes 3点半. These are local rules with no network involved, and the literal recognition stays in the transcript for comparison.',
+      transcriptMinCue: 'Shortest cue (s)',
+      transcriptMaxCue: 'Longest cue (s)',
+      transcriptMaxLine: 'Most characters per line',
+      transcriptSilenceHold: 'Pause that ends a cue (s)',
+      transcriptSilenceRms: 'Silence threshold',
+      transcriptCueHint: 'Cues are cut in the browser: a pause longer than the hold ends a cue, and no pause inside the shortest cue counts. A smaller maximum puts words on screen sooner at the cost of more requests; a larger one does the opposite.',
+      transcriptRules: 'Normalisation rules enabled',
+      transcriptSave: 'Save transcript settings',
+      speakerThreshold: 'How strictly voices are separated',
+      speakerFullRelabel: 'Re-judge every cue when the recording stops (recommended)',
+      speakerSettingsHint: 'Raise the threshold for a crowded room (stricter: rather split one voice than merge two people); lower it for a small meeting, or a voice that varies a lot. The full pass replaces the old rule of backfilling only the last 60 cues, which is what used to break labels apart in a long meeting. Changing the threshold needs a fresh prepare — the recogniser restarts itself.',
+      speakerRestarted: 'Saved; the recogniser restarted, so the new threshold applies on the next prepare',
+      speakerSave: 'Save speaker settings',
+      voiceLibrary: 'Voice library (vectors only, never audio)',
+      voiceLibraryEmpty: 'The library is empty: give a voice a real name under Speaker names and it is remembered, so a later meeting suggests it when that person speaks again.',
+      voiceLibraryFile: 'Voice library file',
+      voiceForget: 'Forget',
+      voiceClear: 'Clear the library',
       hubTabTerms: 'Terms',
-      hubTabSettings: 'Robot settings',
+      autoRecordStarted: 'Start request received — recording is on',
+      stopFinishing: 'Finishing up: waiting for the last cues…',
+      stopRemaining: 'left',
+      stopElapsed: 'waited',
+      stopFinished: 'Finished — the meeting is saved',
+      hubLastTopic: 'Last meeting',
+      hubTabSettings: 'Settings',
       hubTabPeople: 'People',
       panelTabTranscript: 'Transcript',
       panelTabSpeakers: 'Speakers',
@@ -627,6 +928,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       priorityLow: 'Low',
       more: 'More',
       speakerNames: 'Speaker names',
+      voiceSuggestions: 'Names the voice library recognises (yours to confirm)',
+      voiceSoundsLike: 'sounds like',
+      voiceAccept: 'Use this name',
       openNames: 'Name them',
       speakerNameHint: 'Give each recognized voice a real name. The label stays the same, and names follow the voice through the end-of-meeting re-clustering; empty shows S1, S2.',
       speakerNamePlaceholder: 'Name',
@@ -652,7 +956,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       tabTerms: 'Terms',
       notesToggle: 'Handwritten note',
       helpToggle: 'Help',
-      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer buttons, or your own words under Other role) and the type (general / briefing / review / weekly / monthly). Choosing a type fills the title as "type · today" and you can still edit it; "Skip naming and start recording" begins without one.\n· One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with one reminder after 10 minutes (never an automatic stop).\n· The status line shows elapsed time and who is speaking. Every control lives in the top row of the panel.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority. Owners and speaker names are suggested from the roster on Meeting management → People, including the people synced from DingTalk.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n· "Send to DingTalk / WeCom" in the tasks tab sends the CONFIRMED assignments the way Meeting management → Settings chose (group robot, work notification, or both), and says why when nothing is configured. Each row also has "Send this one" for a single assignment.\n\n[Speakers]\n· Each voice label takes a name: type it, or pick from the roster dropdown (typing filters it).\n· "Identify speakers again" re-reads the recording — for a meeting whose model was not ready, or a long one the stop-time backfill only partly covered.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session"; ticking "confirmed" on an assignment is allowed there — it is the step sending needs, and it is written to that meeting.\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Save as file · Import · About]\n· More → Save as file packs this meeting into ONE zip project: the record, the recording, and the artifacts (minutes, images). A notice in the bottom-right corner tracks it (packaging → percentage → saved to file).\n· Meeting management → Records → Import meeting takes such a zip back in (as a NEW meeting: nothing is overwritten, it belongs to no conversation, and clashing file names are renamed), which is how a meeting travels to another DSH.\n· More → About shows the version actually installed here, the author and the address; use "Email" to report a problem or an idea, with the version and what you did.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview; "Refresh" re-reads the list and "Import meeting" brings in a package; click a name to review its transcript and recording below.\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed — the tasks tab\'s one-click send follows this choice.\n· People: the shared roster (name / phone / user id), maintained by hand or synced from DingTalk departments; it is also where task owners and speaker names are suggested from.\n· Terms: the same list as More → Meeting terms.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
+      helpBody: '[Starting and naming]\n· Start recording opens "Name this meeting": the name, your role (host / attendee / observer buttons, or your own words under Other role) and the type (general / briefing / review / weekly / monthly). Choosing a type fills the title as "type · today" and you can still edit it; "Start with no name" leaves the title empty on purpose: the first five minutes name the meeting automatically, and it can still be renamed in the panel.\n· One conversation owns one meeting; forks get their own, and subagents share the conversation\'s meeting.\n· Speech and speaker models download on demand with progress in the panel; a Start before they are ready prepares them and then records automatically.\n\n[Recording]\n· Start/Stop runs the meeting; Pause/Resume covers a break — nothing is captured while paused and the timeline stays continuous, with one reminder after 10 minutes (never an automatic stop).\n· The status line shows elapsed time and who is speaking. Every control lives in the top row of the panel.\n\n[Transcript]\n· It follows the newest cue; scrolling up turns following off and offers "Jump to newest".\n· Tick several cues and choose "Merge into task" to make one assignment out of them.\n· Clicking a cue plays from that sentence; "to task" on a row turns that one sentence into an assignment.\n· The More menu copies SRT, plain text, or a correction request for a model.\n\n[Minutes]\n· "Minutes" writes Markdown and "Export Word" writes .docx; both open the browser\'s save dialog, and the minutes also stay in the meeting for later.\n· More → Meeting terms: one per line, "wrong=right" is replaced in the transcript, a bare word becomes a hot word; edits save as you type.\n\n[Points and tasks]\n· Both tabs add, edit and delete directly. Tasks are drafts until ticked as confirmed, and carry an owner, a due time and a priority. Owners and speaker names are suggested from the roster on Meeting management → People, including the people synced from DingTalk.\n· To let the model write them, say so in the conversation ("read this meeting\'s transcript and write the points and tasks into the meeting") — the agent stores them with meeting_write.\n· "Send to DingTalk / WeCom" in the tasks tab sends the CONFIRMED assignments the way Meeting management → Settings chose (group robot, work notification, or both), and says why when nothing is configured. Each row also has "Send this one" for a single assignment.\n\n[Speakers]\n· Each voice label takes a name: type it, or pick from the roster dropdown (typing filters it).\n· "Identify speakers again" re-reads the recording — for a meeting whose model was not ready, or a long one the stop-time backfill only partly covered; the stop-time pass now covers every cue by default (changeable under Meeting management → Settings).\n· Naming a voice remembers it in the voice library (vectors only, never audio); another meeting suggests "sounds like X" for that person, and nothing is written until you press Use this name. The threshold presets and the library (forget / clear) live in Settings too.\n\n[Scores (monthly review)]\n· The score tab appears for a monthly meeting only: prefill completion from the month\'s tasks, then score each person (hours / completion / quality / learning), note what went well and what to improve, and record the evidence.\n· CSV and Excel export are available; rows stay drafts until a human confirms them.\n\n[Handwritten notes]\n· The pad has pen, eraser, undo and clear; tap a discovered character to select it, or long-press about 0.6 s to start a lasso.\n· "Recognise" runs the local offline model (about 43 ms a line) and can turn the text into a task; "Save as image" stores the page in the meeting.\n· Notes, recognition and tasks work without recording: the first write creates the meeting.\n\n[Opening meetings and history]\n· "Open meeting" in the action row is a searchable dropdown: filter by name, date, type or transcript words, scroll to load more, and click the name or the row to open it.\n· A past meeting opens read-only (history is never edited), with "Open its conversation" and "Back to this session"; ticking "confirmed" on an assignment is allowed there — it is the step sending needs, and it is written to that meeting.\n· If the current meeting has content, switching counts down three seconds and saves first; you may also save immediately or open without saving.\n\n[Save as file · Import · About]\n· More → Save as file packs this meeting into ONE zip project: the record, the recording, and the artifacts (minutes, images). A notice in the bottom-right corner tracks it (packaging → percentage → saved to file).\n· Meeting management → Records → Import meeting takes such a zip back in (as a NEW meeting: nothing is overwritten, it belongs to no conversation, and clashing file names are renamed), which is how a meeting travels to another DSH.\n· More → About shows the version actually installed here, the author and the address; use "Email" to report a problem or an idea, with the version and what you did.\n\n[Meeting management (left sidebar)]\n· Records: one row per meeting with its time, name, type, counts and a preview; "Refresh" re-reads the list and "Import meeting" brings in a package; click a name to review its transcript and recording below.\n· Settings: group-robot webhooks, the DingTalk application (appKey / appSecret / agentId) and how results are pushed — the tasks tab\'s one-click send follows this choice.\n· People: the shared roster (name / phone / user id), maintained by hand or synced from DingTalk departments; it is also where task owners and speaker names are suggested from.\n· Terms: the same list as More → Meeting terms.\n· Models: which model recognition runs on — the built-in speaker and handwriting models, plus any stronger model imported from a local file; a model must be installed and verified (size and sha256) before it can be chosen, and switching only affects later recognition.\n\n[Everything stays on this machine]\n· Recordings, transcripts, points, tasks, minutes, scores and notes live in $DSH_HOME/meeting-room and are never uploaded; an empty meeting is not written to disk, and history is never deleted automatically.',
       inkNote: 'Note text',
       documents: 'Meeting documents',
       openDocument: 'Open',
@@ -758,6 +1062,57 @@ registerProcessor('meeting-capture', MeetingCapture)
         borderRadius: '6px',
         border: '1px dashed var(--dsw-alias-border-l2)',
       },
+      /** The panel's title row: the meeting's name, larger than the controls beside it. */
+      templateArea: {
+      width: '100%',
+      minHeight: 64,
+      padding: 6,
+      borderRadius: 6,
+      border: '1px solid var(--dsw-alias-border-l2)',
+      background: 'transparent',
+      color: 'inherit',
+      fontFamily: 'inherit',
+      fontSize: 12,
+      lineHeight: 1.5,
+      resize: 'vertical',
+      boxSizing: 'border-box',
+    },
+    scoreHeadRow: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 6,
+      alignItems: 'center',
+      padding: '2px 6px',
+    },
+    scoreHead: {
+      flex: 1,
+      minWidth: 56,
+      fontSize: 11,
+      color: 'var(--dsh-text-secondary, #6b7280)',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    },
+    titleStatic: {
+      flex: 1,
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      fontWeight: 600,
+    },
+    titleInput: {
+        flex: '1 1 160px',
+        minWidth: '120px',
+        padding: '2px 4px',
+        border: 'none',
+        borderRadius: '4px',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        fontSize: '15px',
+        fontWeight: 600,
+      },
       taskTitleInput: {
         flex: 1,
         minWidth: '160px',
@@ -809,6 +1164,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       toasts: { position: 'fixed', right: '16px', bottom: '16px', zIndex: 4000, display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: 'min(420px, 80vw)' },
       toastCard: { padding: '8px 12px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' },
       hubTitle: { margin: 0, fontSize: '18px', fontWeight: 600 },
+      /** A day/week/month heading above one group of records. */
+      groupHead: { fontSize: '11px', fontWeight: 600, opacity: 0.7, padding: '6px 8px 2px', letterSpacing: '0.02em' },
       /** One meeting in the management page: fixed columns, so the rows line up. */
       hubRecord: { display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
       hubRecordWhen: { flex: '0 0 128px', fontSize: '11px', opacity: 0.7, fontVariantNumeric: 'tabular-nums' },
@@ -1186,7 +1543,7 @@ registerProcessor('meeting-capture', MeetingCapture)
      * @param maxWidth - the widest the dropdown may become.
      * @returns fixed-position coordinates, or null when the element cannot be measured.
      */
-    function measureUnder(element, maxWidth) {
+    function measureUnder(element, maxWidth, height = 0) {
       if (element === null || element === undefined || typeof element.getBoundingClientRect !== 'function') return null
       const section = typeof element.closest === 'function' ? element.closest('section') : null
       const box = (section ?? element).getBoundingClientRect()
@@ -1195,8 +1552,15 @@ registerProcessor('meeting-capture', MeetingCapture)
       // Hung off the button's bottom-LEFT corner: the left edges line up, and the panel's
       // width only caps how wide it may get. Clamped so it cannot leave the window.
       const viewport = typeof window === 'undefined' ? box.width : window.innerWidth
+      const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight
       const left = Math.min(Math.max(8, rect.left), Math.max(8, viewport - width - 8))
-      return { top: rect.bottom + 6, left, width }
+      // A tall dropdown opened near the bottom would run off the window; flip it above the
+      // button instead of letting the last rows become unreachable.
+      const below = rect.bottom + 6
+      const top = height > 0 && viewportHeight > 0 && below + height > viewportHeight - 8
+        ? Math.max(8, rect.top - height - 6)
+        : below
+      return { top, left, width }
     }
 
     /**
@@ -1381,8 +1745,8 @@ registerProcessor('meeting-capture', MeetingCapture)
      */
     function shouldFlush(active) {
       const rate = active.audio.sampleRate
-      if (active.frames >= rate * MAX_CHUNK_SECONDS) return true
-      return active.frames >= rate * MIN_CHUNK_SECONDS && active.silenceFrames >= rate * SILENCE_HOLD_SECONDS
+      if (active.frames >= rate * CUES.maxSeconds) return true
+      return active.frames >= rate * CUES.minSeconds && active.silenceFrames >= rate * CUES.silenceHoldSeconds
     }
 
     /**
@@ -1723,6 +2087,40 @@ registerProcessor('meeting-capture', MeetingCapture)
     /** Meeting kinds the panel offers, and the copy each one uses. */
     const KIND_VALUES = ['', 'briefing', 'review', 'weekly', 'monthly']
     const KIND_LABEL_KEYS = { '': 'kindGeneral', briefing: 'kindBriefing', review: 'kindReview', weekly: 'kindWeekly', monthly: 'kindMonthly' }
+    // The one-click distillation each type offers (§3.1–§3.4): a button label and the recipe
+    // it hands the agent, the same words a person would type in the conversation.
+    // §5.5 names the general type "临时会议" where §2.1 calls it 通用; the start dialog uses the
+// §5.5 wording, the panel and filters keep the data model's name.
+    const NAMING_LABEL_KEYS = { ...KIND_LABEL_KEYS, '': 'kindAdhoc' }
+    const DISTILL_LABEL_KEYS = { briefing: 'distillBriefing', review: 'distillReview', weekly: 'distillWeekly', monthly: 'distillMonthly' }
+    const DISTILL_PROMPT_KEYS = { briefing: 'distillBriefingPrompt', review: 'distillReviewPrompt', weekly: 'distillWeeklyPrompt', monthly: 'distillMonthlyPrompt' }
+
+/**
+ * The local calendar bucket a meeting falls into, for the management page's day / week /
+ * month grouping (FEATURES §5.2). The weekly bucket is the ISO week (Monday-based), the
+ * same definition the host derives `period` from, so a group heading matches the badge the
+ * panel shows for that meeting.
+ * @param startedAt - when the meeting started, in milliseconds.
+ * @param unit - 'day', 'week' or 'month'.
+ * @returns the bucket key, e.g. 2026-10-19, 2026-W43 or 2026-10.
+ */
+function periodBucketOf(startedAt, unit) {
+  const date = new Date(startedAt)
+  const pad = (value) => String(value).padStart(2, '0')
+  if (unit === 'month') return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`
+  if (unit === 'week') {
+    // ISO week: the Monday of this date's week, then the Thursday of that week decides the
+    // ISO year (a week can straddle New Year, and the year must be the ISO one).
+    const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
+    const thursday = new Date(monday)
+    thursday.setDate(monday.getDate() + 3)
+    const firstThursday = new Date(thursday.getFullYear(), 0, 4)
+    const week = 1 + Math.round((((thursday - firstThursday) / 86400000) - 3 + ((firstThursday.getDay() + 6) % 7)) / 7)
+    return `${thursday.getFullYear()}-W${pad(week)}`
+  }
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
 
     /** Id of the datalist that offers this meeting's speaker names as owners. */
     const OWNER_LIST_ID = 'meeting-room-owners'
@@ -1731,9 +2129,38 @@ registerProcessor('meeting-capture', MeetingCapture)
     const PUSH_MODE_VALUES = ['group', 'work', 'both']
     const PUSH_MODE_KEYS = { group: 'pushModeGroup', work: 'pushModeWork', both: 'pushModeBoth' }
 
+    /** Cloud providers the settings page offers, and their locale keys. */
+    const CLOUD_PROVIDER_VALUES = ['off', 'openai-compatible', 'custom']
+    const CLOUD_PROVIDER_KEYS = { off: 'cloudOff', 'openai-compatible': 'cloudOpenAi', custom: 'cloudCustom' }
+
+    /** The three ways to combine the local and the cloud recogniser, in the order offered. */
+    const CLOUD_MODE_VALUES = ['local', 'prefer-cloud', 'cloud-only']
+    const CLOUD_MODE_KEYS = { local: 'cloudModeLocal', 'prefer-cloud': 'cloudModePrefer', 'cloud-only': 'cloudModeStrict' }
+    const CLOUD_MODE_HINTS = { local: 'cloudModeLocalHint', 'prefer-cloud': 'cloudModePreferHint', 'cloud-only': 'cloudModeStrictHint' }
+
+    /** Settings groups, in the order a person configures them: what leaves the machine
+     *  first (push), then how this installation cuts and scores, then voices. Model choice,
+     *  local or cloud, lives on the 模型 page so every recognition decision sits together. */
+    const SETTINGS_TABS = [
+      ['push', 'settingsTabPush'],
+      ['transcript', 'settingsTabTranscript'],
+      ['speaker', 'settingsTabSpeaker'],
+      ['weights', 'settingsTabWeights'],
+      ['templates', 'settingsTabTemplates'],
+    ]
+
+    /** Local model kinds, in the order the 模型 page lists them. */
+    const MODEL_KIND_ORDER = [
+      ['asr', 'modelKindAsr'],
+      ['speaker', 'modelKindSpeaker'],
+      ['handwriting', 'modelKindHandwriting'],
+      ['vad', 'modelKindVad'],
+      ['diarization', 'modelKindDiarization'],
+    ]
+
     /** Hub sections, in the order a user meets them. */
-    const HUB_TAB_VALUES = ['records', 'terms', 'settings', 'people']
-    const HUB_TAB_KEYS = { records: 'hubTabRecords', terms: 'hubTabTerms', settings: 'hubTabSettings', people: 'hubTabPeople' }
+    const HUB_TAB_VALUES = ['records', 'models', 'terms', 'settings', 'people']
+    const HUB_TAB_KEYS = { records: 'hubTabRecords', models: 'hubTabModels', terms: 'hubTabTerms', settings: 'hubTabSettings', people: 'hubTabPeople' }
 
     /** Panel body sections: the record first, then what was read out of it. */
     const BODY_TAB_VALUES = ['transcript', 'minutes', 'points', 'tasks', 'names']
@@ -1831,6 +2258,8 @@ registerProcessor('meeting-capture', MeetingCapture)
       startedAt: 0,
       seconds: 0,
       segments: [],
+      /** True while this start came from the agent's /record request, not a person's click. */
+      autoStart: false,
       listeners: new Set(),
       /** Notify every subscribed panel that recorder state moved. */
       emit() { for (const listener of this.listeners) listener() },
@@ -1841,6 +2270,13 @@ registerProcessor('meeting-capture', MeetingCapture)
        */
       subscribe(listener) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } },
     }
+
+    /**
+     * The start page's "开始会议" card hands the panel a begin request before the tab
+     * mounts. A module-level flag plus a window event covers both orders: a panel already
+     * open hears the event, a panel that mounts afterwards consumes the flag.
+     */
+    const guideBegin = { pending: false, opened: false, deadline: 0, target: '' }
 
     /**
      * Read the shared recorder inside a component, re-rendering on every change.
@@ -1968,13 +2404,31 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [namesOpen, setNamesOpen] = React.useState(false)
       /** Whether a whole-meeting re-identification is running. */
       const [relabeling, setRelabeling] = React.useState(false)
+      /** Per-type distillation wording saved in settings (§9 P4); empty = built-in. */
+      const [templates, setTemplates] = React.useState({})
+      React.useEffect(() => {
+        let live = true
+        void get('/webhooks').then(
+          (value) => { if (live && value !== null && typeof value === 'object') setTemplates(value.templates ?? {}) },
+          () => { /* settings unreadable: the built-in wording still works */ },
+        )
+        return () => { live = false }
+      }, [])
       /** Tasks whose row is showing the free date-and-time picker rather than a quick choice. */
       const [customDueIds, setCustomDueIds] = React.useState([])
       /** Voice labels found in this meeting and the real names assigned to them. */
       const [labels, setLabels] = React.useState([])
       const [speakers, setSpeakers] = React.useState({})
+      /** Names the voice library recognises but has NOT written: a person accepts them or not. */
+      const [suggestions, setSuggestions] = React.useState([])
       /** The monthly review's score table (FEATURES.md §5.1). */
       const [scores, setScores] = React.useState([])
+      /**
+       * Unsaved text per score field, keyed `person:field`. The inputs are controlled by
+       * these drafts so typing is never blocked by the round-trip, and a value the host
+       * clamps is shown as stored once the field loses focus.
+       */
+      const [scoreDrafts, setScoreDrafts] = React.useState({})
       /** The person being added to that table by hand. */
       const [newScorePerson, setNewScorePerson] = React.useState('')
       const [draftNames, setDraftNames] = React.useState({})
@@ -1984,10 +2438,14 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [meta, setMeta] = React.useState({ kind: '', period: '', title: '', summary: '' })
       /** The start-of-recording name dialog; null when it is closed (§5.5). */
       const [namePrompt, setNamePrompt] = React.useState(null)
+      /** The same kind's previous and next meeting, for the title row's series navigation (§5.1). */
+      const [series, setSeries] = React.useState({ prev: null, next: null })
       /** What the previous day's review left open, shown while a briefing is prepared (§3.1). */
       const [carry, setCarry] = React.useState({ review: null, items: [] })
       /** Whether capture is paused, and since when (FEATURES.md §5.6). */
-      const [paused, setPaused] = React.useState(false)
+      // Seeded from the shared recorder: the capture outlives a panel remount, so a
+// remounted panel must show "继续" when the meeting is still paused (§5.6).
+      const [paused, setPaused] = React.useState(recorder.active !== null && recorder.active.paused === true)
       const pausedAt = React.useRef(0)
       const pauseWarned = React.useRef(false)
       /** The meeting picker: open flag, query and the slices loaded so far (FEATURES.md §5.4). */
@@ -2016,13 +2474,16 @@ registerProcessor('meeting-capture', MeetingCapture)
        */
       const [toasts, setToasts] = React.useState([])
       const toastSeq = React.useRef(0)
-      const toast = React.useCallback((text) => {
+      const toast = React.useCallback((text, options = {}) => {
         toastSeq.current += 1
         const id = toastSeq.current
-        setToasts((current) => [...current, { id, text }])
+        setToasts((current) => [...current, { id, text, sticky: options.sticky === true }])
         // The host Toast calls onDone when it fades; this covers the fallback and a host that
-        // never does.
-        setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 8000)
+        // never does. A sticky toast has no timer: work whose end is unknown (stopping a long
+        // recording) must keep saying what it is doing, not vanish after eight seconds.
+        if (options.sticky !== true) {
+          setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 8000)
+        }
         return id
       }, [])
       const updateToast = React.useCallback((id, text) => {
@@ -2107,6 +2568,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           // had never identified a speaker: the labels were in the answer, unread.
           if (Array.isArray(value.meeting.notes)) setNotes(value.meeting.notes)
           if (Array.isArray(value.meeting.labels)) setLabels(value.meeting.labels)
+          setSuggestions(Array.isArray(value.meeting.suggestions) ? value.meeting.suggestions : [])
           if (value.meeting.speakers !== null && typeof value.meeting.speakers === 'object') setSpeakers(value.meeting.speakers)
           if (typeof value.meeting.role === 'string') setRole(value.meeting.role)
           if (Array.isArray(value.meeting.documents)) setDocuments(value.meeting.documents)
@@ -2144,6 +2606,26 @@ registerProcessor('meeting-capture', MeetingCapture)
             if (live) setCarry({ review: value.review ?? null, items: Array.isArray(value.items) ? value.items : [] })
           } catch {
             // The reminder is optional: a failure simply leaves it hidden.
+          }
+        })()
+        return () => { live = false }
+      }, [meetingId, meta.kind])
+
+      // Series navigation: the same kind's previous and next meeting (§5.1). It is part of
+      // the title row, so a briefing can step back through the week without searching — and
+      // it is reloaded whenever either the meeting or its type changes.
+      React.useEffect(() => {
+        if (meetingId === '' || meta.kind === '') {
+          setSeries({ prev: null, next: null })
+          return undefined
+        }
+        let live = true
+        void (async () => {
+          try {
+            const value = await get(`/series?meetingId=${encodeURIComponent(meetingId)}`)
+            if (live) setSeries({ prev: value.prev ?? null, next: value.next ?? null })
+          } catch {
+            // Optional navigation: a failure simply leaves the arrows hidden.
           }
         })()
         return () => { live = false }
@@ -2226,7 +2708,10 @@ registerProcessor('meeting-capture', MeetingCapture)
       const relabelRecording = React.useCallback(async () => {
         if (relabeling) return
         setError('')
-        const id = await ensureMeeting()
+        // A past meeting can be re-labelled too (§5.1): address the meeting on screen, so
+        // the repair never lands on the session's own record (§5.4).
+        const viewing = viewedRef.current
+        const id = viewing !== null ? viewing.meetingId : await ensureMeeting()
         if (id === '') {
           setError(t('needSession'))
           return
@@ -2359,6 +2844,8 @@ registerProcessor('meeting-capture', MeetingCapture)
           const reply = await post('/speaker/name', { meetingId: id, label, name })
           if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
           if (Array.isArray(reply.segments)) setSegments(reply.segments)
+          // An accepted name retires its own suggestion; the host has learned the voice by now.
+          setSuggestions((current) => current.filter((item) => !(item.label === label && item.name === name)))
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
         }
@@ -2405,7 +2892,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       const savePackage = React.useCallback(async () => {
         setError('')
         setNote('')
-        const id = await ensureMeeting()
+        // Addressing follows what the panel shows: exporting while a past meeting is open
+        // must export THAT meeting, not the session's own (§5.4).
+        const id = viewedRef.current !== null ? viewedRef.current.meetingId : await ensureMeeting()
         if (id === '') {
           setError(t('needSession'))
           return
@@ -2485,7 +2974,9 @@ registerProcessor('meeting-capture', MeetingCapture)
       const writeMinutes = React.useCallback(async (format = 'md') => {
         setError('')
         setNote('')
-        const id = await ensureMeeting()
+        // Same rule as packaging: a document written while viewing history belongs to the
+        // meeting on screen (§5.4).
+        const id = viewedRef.current !== null ? viewedRef.current.meetingId : await ensureMeeting()
         if (id === '') {
           setError(t('needSession'))
           return
@@ -2503,6 +2994,63 @@ registerProcessor('meeting-capture', MeetingCapture)
 
 
       /**
+       * One-click local extraction (§3, §5.7): the same rules the agent gets, without a model
+       * round-trip. It only ever writes drafts, which is why it is safe to offer in the panel.
+       */
+      const extractNow = React.useCallback(async () => {
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        try {
+          const reply = await post('/extract', { meetingId: id })
+          const foundPoints = Array.isArray(reply.points) ? reply.points : []
+          const foundTasks = Array.isArray(reply.tasks) ? reply.tasks : []
+          setPoints(foundPoints)
+          setTasks(foundTasks)
+          setNote(foundPoints.length + foundTasks.length === 0
+            ? t('extractEmpty')
+            : `${t('extractDone')}：${t('points')} ${foundPoints.length} · ${t('tasks')} ${foundTasks.length}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [ensureMeeting, post, t])
+
+      /**
+       * The type's one-click distillation (§3.1–§3.4, §5.1): it hands the agent the meeting
+       * id and the type's recipe, so the button does exactly what asking in the conversation
+       * would do. It writes through the agent's tools, never through a shortcut.
+       */
+      const distillNow = React.useCallback(async () => {
+        const viewing = viewedRef.current
+        if (viewing !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
+        const promptKey = DISTILL_PROMPT_KEYS[meta.kind] ?? ''
+        if (promptKey === '') return
+        setError('')
+        const id = await ensureMeeting()
+        if (id === '') {
+          setError(t('needSession'))
+          return
+        }
+        const custom = typeof templates[meta.kind] === 'string' ? templates[meta.kind].trim() : ''
+        const prompt = (custom === '' ? t(promptKey) : custom)
+          .replace('{meetingId}', id)
+          .replace('{title}', meta.title === '' ? t('meetingNameNone') : meta.title)
+          .replace('{period}', meta.period === '' ? '-' : meta.period)
+        const asked = await props.askText(sessionId, prompt)
+        if (asked.ok !== true) setError(`${t('reviewNoSession')}: ${asked.error}`)
+      }, [ensureMeeting, meta.kind, meta.period, meta.title, props, sessionId, t, templates])
+
+      /**
        * Confirm, edit, or remove one stored entry. Only a human reaches this path, which
        * is what keeps an unconfirmed draft from becoming somebody else's todo.
        * @param kind - 'point' or 'task'.
@@ -2515,7 +3063,9 @@ registerProcessor('meeting-capture', MeetingCapture)
         // A past meeting stays read-only for its CONTENT, but confirming an assignment is not
         // content: it is the human step that lets that assignment be sent, and opening a past
         // meeting to check off what is done and send it on is exactly the point.
-        const confirming = op === 'update' && Object.keys(patch).length === 1 && typeof patch.status === 'string'
+        // Only an assignment's confirmation is allowed in a past meeting: it is the human step
+// that lets it be sent, not a content edit. A point's confirmation stays out (§5.4).
+        const confirming = kind === 'task' && op === 'update' && Object.keys(patch).length === 1 && typeof patch.status === 'string'
         if (viewing !== null && !confirming) {
           setNote(t('historyViewOnly'))
           return
@@ -2540,6 +3090,8 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       /** Text from the most recent recognition, kept so it can be turned into a task. */
       const [lastNote, setLastNote] = React.useState('')
+      /** Which cloud model last answered, so the same line is not repeated for every cue. */
+      const cloudNote = React.useRef('')
 
       /**
        * Turn arbitrary text into a draft assignment; shared by the recognized-text row and
@@ -2611,6 +3163,12 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       /** Write one key point by hand — a meeting that was never recorded still gets notes. */
       const addPoint = React.useCallback(async () => {
+        // A viewed history is read-only: this would write to the session's own meeting,
+        // which is not what the panel is showing (§5.4).
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
         const text = newPoint.text.trim()
         if (text === '') {
           setError(t('pointTextRequired'))
@@ -2642,6 +3200,11 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       /** Write one work assignment by hand; it stays a draft until a human confirms it. */
       const addTask = React.useCallback(async () => {
+        // Same rule as the points tab: viewing a past meeting never writes elsewhere (§5.4).
+        if (viewedRef.current !== null) {
+          setNote(t('historyViewOnly'))
+          return
+        }
         const text = newTask.trim()
         if (text === '') {
           setError(t('taskTextRequired'))
@@ -2690,6 +3253,28 @@ registerProcessor('meeting-capture', MeetingCapture)
 
       /** Patch one person's row. */
       const editScore = React.useCallback((person, patch) => postScores({ person, patch }), [postScores])
+
+      /** What a score input shows: the unsaved draft, else the stored value. */
+      const scoreValueOf = (person, field, stored) => {
+        const key = `${person}:${field}`
+        return Object.prototype.hasOwnProperty.call(scoreDrafts, key) ? scoreDrafts[key] : stored
+      }
+      /** Keep a keystroke local until the field is left. */
+      const setScoreDraft = (person, field, value) => {
+        const key = `${person}:${field}`
+        setScoreDrafts((drafts) => ({ ...drafts, [key]: value }))
+      }
+      /** Send the field on blur, then drop the draft so the stored value takes over. */
+      const commitScore = (person, field, patch) => {
+        const key = `${person}:${field}`
+        void editScore(person, patch).finally(() => {
+          setScoreDrafts((drafts) => {
+            const next = { ...drafts }
+            delete next[key]
+            return next
+          })
+        })
+      }
       /** Drop one person's row. */
       const removeScore = React.useCallback((person) => postScores({ person, op: 'remove' }), [postScores])
       /** Fill completion rates from the period's tasks (a confirmed row is never touched). */
@@ -2762,6 +3347,12 @@ registerProcessor('meeting-capture', MeetingCapture)
         if (active === null) return
         const next = active.paused !== true
         active.paused = next
+        // Pause means "stop capturing", not "keep capturing and throw it away": turning the
+        // track off releases the microphone indicator too, which is what makes pausing safe
+        // for a private aside (§5.6).
+        try {
+          for (const track of active.stream?.getAudioTracks?.() ?? []) track.enabled = !next
+        } catch { /* a closed stream has nothing to switch off */ }
         // A pause boundary is a boundary: buffered audio is dropped, never split later.
         if (next) active.pending.length = 0
         setPaused(next)
@@ -2846,8 +3437,10 @@ registerProcessor('meeting-capture', MeetingCapture)
        */
       const onQueryChange = React.useCallback((value) => {
         setPicker((current) => ({ ...current, query: value, open: true }))
-        if (composingRef.current) return
+        // A pending search from before the composition started must be cancelled even while
+        // composing, or it fires with the previous text and rebuilds the list mid-typing.
         window.clearTimeout(searchTimer.current)
+        if (composingRef.current) return
         searchTimer.current = window.setTimeout(() => { void loadHistory(value) }, 150)
       }, [loadHistory])
 
@@ -2909,6 +3502,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           setDocuments(Array.isArray(value.documents) ? value.documents : [])
           setScores(Array.isArray(value.scores) ? value.scores : [])
           setLabels(Array.isArray(value.labels) ? value.labels : [])
+          setSuggestions(Array.isArray(value.suggestions) ? value.suggestions : [])
           setSpeakers(value.speakers !== null && typeof value.speakers === 'object' ? value.speakers : {})
           setMeta({
             kind: typeof value.kind === 'string' ? value.kind : '',
@@ -3211,6 +3805,7 @@ registerProcessor('meeting-capture', MeetingCapture)
         if (active === null) return
         recorder.active = null
         try {
+          clearInterval(active.ticker)
           active.node.port.onmessage = null
           active.node.disconnect()
           active.sink.disconnect()
@@ -3258,6 +3853,23 @@ registerProcessor('meeting-capture', MeetingCapture)
           if (reply.speakers !== null && typeof reply.speakers === 'object') setSpeakers(reply.speakers)
           if (Array.isArray(reply.labels)) setLabels(reply.labels)
           if (reply.speaker !== undefined) setSpeaker({ phase: reply.speaker.phase, message: reply.speaker.message ?? '', completedBytes: reply.speaker.completedBytes ?? 0, totalBytes: reply.speaker.totalBytes ?? 0 })
+          // Cloud recognition reports itself: which model answered, or why it fell back to the
+          // on-machine recogniser. A silent fallback is exactly what erodes trust in a switch.
+          if (reply.cloud !== undefined && reply.cloud !== null) {
+            if (reply.cloud.used === true) {
+              const model = typeof reply.cloud.model === 'string' ? reply.cloud.model : ''
+              if (cloudNote.current !== model) {
+                cloudNote.current = model
+                setNote(`${t('cloudUsed')}${model === '' ? '' : `: ${model}`}`)
+              }
+            } else if (reply.cloud.fallback === true) {
+              setError(`${t('cloudFallback')}: ${reply.cloud.message ?? ''}`)
+            } else if (reply.cloud.strict === true && reply.cloud.message !== undefined && reply.cloud.message !== '') {
+              // Strict mode asked for cloud text: say the call failed instead of letting the
+              // local text look like a cloud result.
+              setError(`${t('cloudStrictFailed')}: ${reply.cloud.message}`)
+            }
+          }
         } catch (failure) { const msg = failure instanceof Error ? failure.message : String(failure); setError(msg); if (msg.indexOf('\u8bed\u97f3\u6a21\u578b\u5c1a\u672a\u4e0b\u8f7d') !== -1) setSpeech((c) => ({ ...c, ready: false }))
         } finally {
           active.inflight = false
@@ -3279,7 +3891,12 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
         setPhase('starting')
         try {
-          const created = await post('/start', { sessionId, terms: termsText })
+          // Read here, not at the top: a start that first waits for the model keeps the flag for
+      // the run that actually reaches the host. `auto` stops the host from prompting the
+      // agent again when the agent is the one that asked for this start.
+      const auto = recorder.autoStart === true
+      recorder.autoStart = false
+      const created = await post('/start', { sessionId, terms: termsText, auto })
           let audio
           try {
             audio = new AudioContext({ sampleRate: TARGET_RATE })
@@ -3305,6 +3922,10 @@ registerProcessor('meeting-capture', MeetingCapture)
             audio, stream, source, node, sink, url,
             pending: [],
             frames: 0,
+            // Audio captured so far in this meeting, in samples. It drives the live elapsed
+            // clock; the host's own count stays authoritative once a cue is transcribed.
+            captured: 0,
+            ticker: 0,
             silenceFrames: 0,
             inflight: false,
             stopping: false,
@@ -3318,13 +3939,20 @@ registerProcessor('meeting-capture', MeetingCapture)
             const block = event.data
             active.pending.push(block)
             active.frames += block.length
+            active.captured += block.length
             // Endpoint at a pause instead of a fixed clock: a cue then holds what a
             // speaker actually said, rather than being cut mid-sentence. The cap keeps
             // a long monologue from growing without bound.
-            if (blockRms(block) < SILENCE_RMS) active.silenceFrames += block.length
+            if (blockRms(block) < CUES.silenceRms) active.silenceFrames += block.length
             else active.silenceFrames = 0
             if (!active.inflight && shouldFlush(active)) void flush(active)
           }
+          // The elapsed clock ticks on captured audio, not on wall time: a pause stops the
+          // count without leaving a gap in the recording (§5.6).
+          active.ticker = setInterval(() => {
+            if (active.paused === true) return
+            setSeconds(Math.round(active.captured / active.audio.sampleRate))
+          }, 1000)
           setPaused(false)
           pausedAt.current = 0
           pauseWarned.current = false
@@ -3334,6 +3962,18 @@ registerProcessor('meeting-capture', MeetingCapture)
           setStartedAt(created.startedAt ?? Date.now())
           setAudioName(typeof created.audioName === 'string' ? created.audioName : '')
           setPhase('recording')
+          // Recording belongs to this Session: show that conversation in the main panel and
+          // this meeting's record in the right column, whatever was in front before.
+          try {
+            if (typeof props.revealConversation === 'function') props.revealConversation(sessionId)
+          } catch (failure) {
+            console.warn('meeting-room: could not reveal the meeting conversation', failure)
+          }
+          try {
+            if (typeof props.focusMeetingPanel === 'function') props.focusMeetingPanel()
+          } catch (failure) {
+            console.warn('meeting-room: could not bring the meeting tab forward', failure)
+          }
         } catch (failure) {
           await release()
           setPhase('idle')
@@ -3350,27 +3990,104 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [pendingStart, speech.ready, phase, start])
 
+      // The agent can ask the panel to start recording (meeting-scribe: "开始记录" with no
+      // naming step). The microphone belongs to the browser, so the panel carries it out
+      // here with the same start() the button uses — permission prompt, model preparation
+      // and every error message stay in one place. The request is cleared before starting,
+      // so a reload cannot start a second meeting from a stale flag.
+      React.useEffect(() => {
+        if (viewed !== null) return undefined
+        const timer = setInterval(() => {
+          void (async () => {
+            if (phase !== 'idle' || recorder.active !== null) return
+            try {
+              const value = await get(`/record?sessionId=${encodeURIComponent(sessionId)}`)
+              const request = typeof value.request === 'number' ? value.request : 0
+              if (request <= 0) return
+              await post('/record', { sessionId })
+              // An old request (a panel that was closed for a while) must not start a
+              // meeting after the fact: it expires quietly.
+              if (Date.now() - request > 120_000) return
+              recorder.autoStart = true
+              await start()
+              if (recorder.active !== null) setNote(t('autoRecordStarted'))
+            } catch {
+              // No meeting yet, or the host is restarting: the next tick tries again.
+            }
+          })()
+        }, 3000)
+        return () => clearInterval(timer)
+      }, [phase, sessionId, start, t, viewed])
+
+      // The start page's "开始会议" card: consume its request here (the same start() the
+      // buttons use, so the microphone prompt and the host hand-off stay in one place).
+      React.useEffect(() => {
+        const begin = () => {
+          if (guideBegin.pending !== true) return
+          if (Date.now() > guideBegin.deadline) { guideBegin.pending = false; guideBegin.target = ''; return }
+          // Only the conversation the card asked for may start the meeting: the column can
+          // briefly still hold the previous session's panel, which must not grab the request.
+          if (guideBegin.target !== '' && sessionId !== guideBegin.target) return
+          // Without a session the panel has nothing to attach a meeting to; the pending
+          // request survives until a panel with a real session mounts.
+          if (sessionId === '') return
+          if (phase !== 'idle' || recorder.active !== null || viewed !== null) return
+          guideBegin.pending = false
+          guideBegin.opened = false
+          guideBegin.target = ''
+          void start()
+        }
+        begin()
+        window.addEventListener('meeting-room:begin', begin)
+        return () => window.removeEventListener('meeting-room:begin', begin)
+      }, [phase, sessionId, start, viewed])
+
       /** Stop capture, drain the remaining audio, then finalize the meeting. */
       const stop = React.useCallback(async () => {
         const active = recorder.active
         if (active === null) return
         active.stopping = true
+        // Stop always leaves the panel unpaused, even when the meeting was paused: a
+        // finished meeting cannot be "resumed" (§5.6).
+        setPaused(false)
+        pausedAt.current = 0
         setPhase('transcribing')
-        for (let attempt = 0; attempt < 120 && (active.inflight || active.pending.length > 0); attempt++) {
-          if (active.inflight) await new Promise((resolve) => setTimeout(resolve, 200))
-          else await flush(active)
-        }
-        await release()
+        // Draining the last cues and re-labelling the whole recording takes a while on a
+        // long meeting — minutes on a two-hour one. The notice is sticky (no auto-fade)
+        // and counts elapsed time, so it lasts exactly as long as the work does.
+        const startedAt = Date.now()
+        const waited = () => `${Math.round((Date.now() - startedAt) / 1000)}s`
+        const waiting = toast(t('stopFinishing'), { sticky: true })
+        // A ticking clock proves the page is alive even while `/stop` re-labels the whole
+        // recording and sends no progress back.
+        const ticker = setInterval(() => {
+          updateToast(waiting, `${t('stopFinishing')} ${t('stopElapsed')} ${waited()}`)
+        }, 1000)
         try {
+          for (let attempt = 0; attempt < 120 && (active.inflight || active.pending.length > 0); attempt++) {
+            if (active.inflight) {
+              updateToast(waiting, `${t('stopFinishing')} ${t('stopRemaining')} ${active.pending.length + 1} · ${waited()}`)
+              await new Promise((resolve) => setTimeout(resolve, 200))
+            } else {
+              updateToast(waiting, `${t('stopFinishing')} ${t('stopRemaining')} ${active.pending.length} · ${waited()}`)
+              await flush(active)
+            }
+          }
+          await release()
           const reply = await post('/stop', { meetingId: active.meetingId })
+          clearInterval(ticker)
           setSegments(reply.segments)
           setSeconds(reply.seconds)
           if (typeof reply.audioName === 'string') setAudioName(reply.audioName)
+          updateToast(waiting, `${t('stopFinished')} ${waited()}`)
+          setTimeout(() => dismissToast(waiting), 2500)
         } catch (failure) {
+          clearInterval(ticker)
+          dismissToast(waiting)
           setError(failure instanceof Error ? failure.message : String(failure))
         }
         setPhase('idle')
-      }, [flush, release])
+      }, [dismissToast, flush, release, t, toast, updateToast])
 
       /** Write the SRT record and its Markdown companion into the host's meetings directory. */
 
@@ -3436,6 +4153,67 @@ registerProcessor('meeting-capture', MeetingCapture)
         // player and the content tabs; only what follows it scrolls, so a long transcript
         // cannot push those controls out of reach.
         h('div', { key: 'head', style: styles.panelHead }, [
+          // The title row: the meeting's own name and type, the derived period, and the
+          // same kind's previous/next meeting (§5.1). The name and type are readable and
+          // changeable here at any time, including mid-recording: a meeting first thought
+          // to be a discussion can turn out to be a briefing.
+          h('div', { key: 'titlerow', style: styles.row }, [
+            // A past meeting still shows its own name and type, just not as editable
+            // fields: the name belongs to the meeting, editing belongs to the session that
+            // owns it (§5.4).
+            viewed !== null ? h('span', { key: 'titleview', style: styles.titleStatic }, meta.title === '' ? t('meetingNameNone') : meta.title) : h(Field, {
+              // Uncontrolled on purpose: the name is written when the field loses focus, so
+              // typing does not POST on every keystroke. The key remounts it per meeting, so
+              // switching conversations shows that meeting's own name.
+              key: `title-${meetingId}`,
+              type: 'text',
+              style: styles.titleInput,
+              defaultValue: meta.title,
+              placeholder: t('meetingNamePlaceholder'),
+              title: t('meetingTitleHint'),
+              'aria-label': t('meetingNamePlaceholder'),
+              spellCheck: false,
+              onBlur: (event) => {
+                const next = event.target.value.trim()
+                // Only a real change writes: focusing the field and leaving it must not
+                // create a meeting as a side effect.
+                if (next !== meta.title) void saveMeta({ title: next })
+              },
+              onKeyDown: (event) => { if (event.key === 'Enter') event.currentTarget.blur() },
+            }),
+            viewed !== null
+              ? h('span', { key: 'kindview', style: styles.chip }, t(KIND_LABEL_KEYS[meta.kind] ?? 'kindGeneral'))
+              : h(Picker, {
+                key: 'kind',
+                style: styles.inlineInput,
+                value: meta.kind,
+                title: t('kindLabel'),
+                'aria-label': t('kindLabel'),
+                onChange: (event) => { void saveMeta({ kind: event.target.value }) },
+              }, KIND_VALUES.map((value) => h('option', {
+                key: value === '' ? 'general' : value,
+                value,
+              }, t(KIND_LABEL_KEYS[value])))),
+            meta.period === '' ? null : h('span', { key: 'period', style: styles.chip }, meta.period),
+            series.prev === null && series.next === null ? null : h('div', { key: 'series', style: styles.row }, [
+              h(Btn, {
+                key: 'prev',
+                type: 'button',
+                style: styles.smallButton,
+                disabled: series.prev === null,
+                title: series.prev === null ? t('seriesNone') : `${t('seriesPrev')}: ${series.prev.title === '' ? t('meetingNameNone') : series.prev.title}`,
+                onClick: () => openSeries(series.prev),
+              }, `‹ ${t('seriesPrev')}`),
+              h(Btn, {
+                key: 'next',
+                type: 'button',
+                style: styles.smallButton,
+                disabled: series.next === null,
+                title: series.next === null ? t('seriesNone') : `${t('seriesNext')}: ${series.next.title === '' ? t('meetingNameNone') : series.next.title}`,
+                onClick: () => openSeries(series.next),
+              }, `${t('seriesNext')} ›`),
+            ]),
+          ]),
           viewed !== null ? null : h('div', { key: 'notebar', style: styles.row }, [
           h(Btn, {
             key: 'toggle',
@@ -3457,7 +4235,9 @@ registerProcessor('meeting-capture', MeetingCapture)
             key: 'pause',
             type: 'button',
             style: paused ? styles.buttonActive : styles.button,
-            disabled: phase === 'transcribing',
+            // Pausing is local and must work immediately; only a capture that has not
+            // started yet has nothing to pause (§5.6).
+            disabled: phase === 'starting',
             onClick: () => togglePause(),
           }, paused ? t('resumeRecording') : t('pauseRecording')) : null,
           h(Btn, {
@@ -3472,6 +4252,15 @@ registerProcessor('meeting-capture', MeetingCapture)
             style: styles.button,
             onClick: () => { void review() },
           }, t('review')),
+          // The type's own one-click distillation (§3.1–§3.4): only a typed meeting has a
+          // recipe, and the button is hidden while a past meeting is open because the
+          // distillation belongs to the session's own meeting (§5.4).
+          viewed !== null || meta.kind === '' ? null : h(Btn, {
+            key: 'distill',
+            type: 'button',
+            style: styles.buttonActive,
+            onClick: () => { void distillNow() },
+          }, t(DISTILL_LABEL_KEYS[meta.kind] ?? 'review')),
           h(Btn, {
             key: 'minutes',
             type: 'button',
@@ -3496,13 +4285,8 @@ registerProcessor('meeting-capture', MeetingCapture)
                 if (open) {
                   // The dropdown is as wide as the panel it lives in, measured rather than
                   // guessed, and fixed so the panel's own scrolling cannot clip it.
-                  const section = event.currentTarget.closest('section')
-                  const box = (section ?? event.currentTarget).getBoundingClientRect()
-                  setPickerRect({
-                    left: box.left + 8,
-                    top: event.currentTarget.getBoundingClientRect().bottom + 6,
-                    width: Math.max(260, box.width - 16),
-                  })
+                  // Measured, clamped to the viewport on both axes; the list is at most 320px tall.
+                  setPickerRect(measureUnder(event.currentTarget, 640, 340))
                 }
                 setPicker((value) => ({ ...value, open }))
                 if (open) void loadHistory(picker.query)
@@ -3685,7 +4469,8 @@ registerProcessor('meeting-capture', MeetingCapture)
           ]),
           // Recording and the meeting's own actions belong to the session's meeting, so they
           // step aside while a historical meeting is being read (§5.4).
-        h('span', { key: 'status', style: styles.status }, status),
+        // Pause/resume and the switch guard are state changes a screen reader must hear.
+        h('span', { key: 'status', style: styles.status, role: 'status', 'aria-live': 'polite' }, status),
         // The note pad is the handwriting pad and nothing else: one tool, one body, no tabs to
         // switch between. The terminology list lives with the other occasional settings, in
         // the More menu.
@@ -3845,7 +4630,7 @@ registerProcessor('meeting-capture', MeetingCapture)
           // only revealed the fields was a step in the way.
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, t('speakerNames')),
-            viewed !== null ? null : h(Btn, {
+            h(Btn, {
               key: 'relabel',
               type: 'button',
               style: styles.button,
@@ -3858,6 +4643,21 @@ registerProcessor('meeting-capture', MeetingCapture)
             // and the relabel button is the repair path when the online pass left it blank.
             ? h('span', { key: 'empty', style: styles.hint }, t('speakerNamesEmpty'))
             : h('div', { key: 'body', style: styles.list }, [
+              // The voice library offers names it recognises; nothing is written until a person
+              // accepts one. A wrong guess that applied itself would cost a correction each time.
+              suggestions.length === 0 ? null : h('div', { key: 'suggestions', style: styles.list }, [
+                h('span', { key: 'label', style: styles.label }, t('voiceSuggestions')),
+                ...suggestions.map((item) => h('div', { key: `${item.label}-${item.name}`, style: styles.row }, [
+                  h('span', { key: 'text', style: styles.status }, `${item.label} ${t('voiceSoundsLike')} ${item.name}（${item.score}）`),
+                  h(Btn, {
+                    key: 'accept',
+                    type: 'button',
+                    style: styles.smallButton,
+                    disabled: viewed !== null,
+                    onClick: () => { void nameSpeaker(item.label, item.name) },
+                  }, t('voiceAccept')),
+                ])),
+              ]),
             h('span', { key: 'hint', style: styles.hint }, t('speakerNameHint')),
             ...labels.map((label) => h('div', { key: label, style: styles.row }, [
             h('span', { key: 'label', style: styles.chip }, label),
@@ -3913,7 +4713,17 @@ registerProcessor('meeting-capture', MeetingCapture)
           openDocument === null ? null : h('div', { key: 'docview', style: styles.help }, openDocument),
         ]),
         bodyTab !== 'points' ? null : h('div', { key: 'points', style: styles.list }, [
-          h('div', { key: 'title', style: styles.label }, `${t('points')} (${points.length})`),
+          h('div', { key: 'title', style: styles.row }, [
+            h('span', { key: 'label', style: styles.label }, `${t('points')} (${points.length})`),
+            // The empty state used to point at a button that did not exist; this is it (§5.7).
+            viewed !== null ? null : h(Btn, {
+              key: 'extract',
+              type: 'button',
+              style: styles.smallButton,
+              disabled: segments.length === 0,
+              onClick: () => { void extractNow() },
+            }, t('extractNow')),
+          ]),
           points.length === 0
             // An empty tab must explain itself and stay usable: no recording yet, nothing
             // extracted yet, or the person simply wants to type an entry in.
@@ -3978,7 +4788,8 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t('remove')),
           ]))),
           // Hand-writing an entry is always possible: no recording, or nothing extracted yet.
-          h('div', { key: 'add', style: styles.row }, [
+          // The exception is a viewed history, which is read-only (§5.4).
+          viewed !== null ? null : h('div', { key: 'add', style: styles.row }, [
             h(Field, {
               key: 'text',
               type: 'text',
@@ -4006,6 +4817,13 @@ registerProcessor('meeting-capture', MeetingCapture)
         bodyTab !== 'tasks' ? null : h('div', { key: 'tasks', style: styles.list }, [
           h('div', { key: 'title', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, `${t('tasks')} (${tasks.filter((task) => task.status === 'confirmed').length}/${tasks.length})`),
+            viewed !== null ? null : h(Btn, {
+              key: 'extract',
+              type: 'button',
+              style: styles.smallButton,
+              disabled: segments.length === 0,
+              onClick: () => { void extractNow() },
+            }, t('extractNow')),
             // One click sends EVERY confirmed assignment out, in the way the management page's robot
             // settings chose — including while a past meeting is open, which sends that past
             // meeting's own assignments.
@@ -4038,17 +4856,30 @@ registerProcessor('meeting-capture', MeetingCapture)
               style: task.status === 'confirmed' ? styles.taskRow : styles.taskRowDraft,
             }, [
               h(Field, {
-                key: 'done',
+                key: 'confirmed',
                 type: 'checkbox',
                 checked: task.status === 'confirmed',
                 title: t('confirm'),
                 onChange: (event) => { void editEntry('task', task.id, { status: event.target.checked ? 'confirmed' : 'draft' }) },
+              }),
+              // Checked off is a separate fact from confirmed (§2.3): a review meeting ticks
+              // what got done without touching the status it was accepted with.
+              h(Field, {
+                key: 'done',
+                type: 'checkbox',
+                checked: task.done === true,
+                disabled: viewed !== null,
+                title: task.done === true
+                  ? `${t('taskDoneAt')}${typeof task.doneAt === 'number' ? ` ${new Date(task.doneAt).toLocaleString()}` : ''}`
+                  : t('taskMarkDone'),
+                onChange: (event) => { void editEntry('task', task.id, { done: event.target.checked }) },
               }),
               h(Field, {
                 key: 'title',
                 type: 'text',
                 style: styles.taskTitleInput,
                 defaultValue: task.title,
+                readOnly: viewed !== null,
                 placeholder: t('taskTitlePh'),
                 spellCheck: false,
                 title: task.status === 'draft' ? t('taskDraft') : t('taskConfirmed'),
@@ -4058,6 +4889,8 @@ registerProcessor('meeting-capture', MeetingCapture)
                   else event.target.value = task.title
                 },
               }),
+              // Where the assignment came from (§5.7): a rule, the agent, or a person.
+              h('span', { key: 'origin', style: styles.chip }, t(task.origin === 'agent' ? 'originAgent' : task.origin === 'rule' ? 'originRule' : 'originManual')),
               h(Picker, {
                 key: 'owner',
                 style: styles.inlineInput,
@@ -4124,8 +4957,9 @@ registerProcessor('meeting-capture', MeetingCapture)
               }, t('remove')),
             ])
           }),
-          // The same promise as the points tab: this tab is never a dead end.
-          h('div', { key: 'add', style: styles.row }, [
+          // The same promise as the points tab: this tab is never a dead end. A viewed
+          // history is the one exception — adding there would write to another meeting (§5.4).
+          viewed !== null ? null : h('div', { key: 'add', style: styles.row }, [
             h(Field, {
               key: 'text',
               type: 'text',
@@ -4144,7 +4978,7 @@ registerProcessor('meeting-capture', MeetingCapture)
             }, t('addEntry')),
           ]),
         ]),
-        bodyTab !== 'scores' ? null : h('div', { key: 'scores', style: styles.list }, [
+        bodyTab !== 'scores' ? null : h('div', { key: 'scores', style: styles.list, role: 'table', 'aria-label': t('panelTabScores') }, [
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'title', style: styles.label }, `${t('panelTabScores')} (${scores.length})`),
             viewed !== null ? null : h(Btn, { key: 'prefill', type: 'button', style: styles.button, onClick: () => { void prefillScores() } }, t('scoresPrefill')),
@@ -4152,29 +4986,85 @@ registerProcessor('meeting-capture', MeetingCapture)
             viewed !== null ? null : h(Btn, { key: 'xlsx', type: 'button', style: styles.smallButton, onClick: () => { void exportScores('xlsx') } }, t('scoresExportXlsx')),
           ]),
           h('span', { key: 'hint', style: styles.hint }, t('scoresHint')),
-          scores.length === 0 ? null : h('div', { key: 'rows', style: styles.list }, scores.map((row) => h('div', {
+          // Column headers, so the table reads as a table rather than a row of unnamed
+          // number boxes (§5.1).
+          scores.length === 0 ? null : h('div', { key: 'headers', style: styles.scoreHeadRow, role: 'row' }, [
+            h('span', { key: 'pad', style: styles.scoreHead, role: 'presentation', 'aria-hidden': 'true' }, ''),
+            h('span', { key: 'person', style: styles.scoreHead, role: 'columnheader', id: 'score-col-person' }, t('scorePerson')),
+            h('span', { key: 'hours', style: styles.scoreHead, role: 'columnheader', id: 'score-col-hours' }, t('scoreHours')),
+            h('span', { key: 'completion', style: styles.scoreHead, role: 'columnheader', id: 'score-col-completion' }, t('scoreCompletion')),
+            h('span', { key: 'quality', style: styles.scoreHead, role: 'columnheader', id: 'score-col-quality' }, t('scoreQuality')),
+            h('span', { key: 'learn', style: styles.scoreHead, role: 'columnheader', id: 'score-col-learn' }, t('scoreLearn')),
+            h('span', { key: 'total', style: styles.scoreHead, role: 'columnheader', id: 'score-col-total' }, t('scoreTotal')),
+            h('span', { key: 'highlight', style: styles.scoreHead, role: 'columnheader', id: 'score-col-highlight' }, t('scoreHighlight')),
+            h('span', { key: 'improve', style: styles.scoreHead, role: 'columnheader', id: 'score-col-improve' }, t('scoreImprove')),
+            h('span', { key: 'basis', style: styles.scoreHead, role: 'columnheader', id: 'score-col-basis' }, t('scoreBasis')),
+          ]),
+          scores.length === 0 ? null : h('div', { key: 'rows', style: styles.list, role: 'rowgroup' }, scores.map((row) => h('div', {
             key: row.person,
+            role: 'row',
             style: row.status === 'confirmed' ? styles.segment : styles.taskDone,
           }, [
             h(Field, {
               key: 'confirmed',
               type: 'checkbox',
               checked: row.status === 'confirmed',
-              title: t('confirm'),
+              // Evidence is required to confirm a row (§2.4): without it the box says why
+              // instead of sending a request the host would refuse.
+              disabled: row.status !== 'confirmed' && (row.basis ?? []).length === 0,
+              title: row.status !== 'confirmed' && (row.basis ?? []).length === 0 ? t('scoreBasisRequired') : t('confirm'),
+              'aria-label': `${t('confirm')}：${row.person}`,
               onChange: (event) => { void editScore(row.person, { status: event.target.checked ? 'confirmed' : 'draft' }) },
             }),
-            h('span', { key: 'person', style: styles.chip }, row.person),
-            h(Field, { key: 'hours', type: 'number', style: styles.inlineInput, defaultValue: String(row.hours ?? 0), title: t('scoreHours'), onBlur: (event) => { void editScore(row.person, { hours: Number(event.target.value) }) } }),
-            h(Field, { key: 'completion', type: 'number', style: styles.inlineInput, defaultValue: String(row.completion ?? 0), title: t('scoreCompletion'), onBlur: (event) => { void editScore(row.person, { completion: Number(event.target.value) }) } }),
-            h(Field, { key: 'quality', type: 'number', style: styles.inlineInput, defaultValue: String(row.quality ?? 0), title: t('scoreQuality'), onBlur: (event) => { void editScore(row.person, { quality: Number(event.target.value) }) } }),
-            h(Field, { key: 'learn', type: 'number', style: styles.inlineInput, defaultValue: String(row.learn ?? 0), title: t('scoreLearn'), onBlur: (event) => { void editScore(row.person, { learn: Number(event.target.value) }) } }),
-            h('span', { key: 'total', style: styles.chip }, `${t('scoreTotal')} ${row.total ?? 0}`),
-            h(Field, { key: 'highlight', type: 'text', style: styles.inlineWide, defaultValue: row.highlight ?? '', placeholder: t('scoreHighlight'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { highlight: event.target.value }) } }),
-            h(Field, { key: 'improve', type: 'text', style: styles.inlineWide, defaultValue: row.improve ?? '', placeholder: t('scoreImprove'), spellCheck: false, onBlur: (event) => { void editScore(row.person, { improve: event.target.value }) } }),
-            (row.basis ?? []).length === 0 ? null : h('span', { key: 'basis', style: styles.chip, title: (row.basis ?? []).join('\n') }, `${t('scoreBasis')} ${(row.basis ?? []).length}`),
+            h('span', { key: 'person', style: styles.chip, role: 'rowheader' }, row.person),
+            // Each control names its column and person for screen readers; the column headers
+            // above are visual only, because a div grid cannot associate them by itself.
+            h(Field, { key: 'hours', type: 'number', style: styles.inlineInput, value: scoreValueOf(row.person, 'hours', String(row.hours ?? 0)), title: t('scoreHours'), 'aria-label': `${t('scoreHours')}：${row.person}`, onChange: (event) => setScoreDraft(row.person, 'hours', event.target.value), onBlur: (event) => commitScore(row.person, 'hours', { hours: Number(event.target.value) }) }),
+            h(Field, { key: 'completion', type: 'number', style: styles.inlineInput, value: scoreValueOf(row.person, 'completion', String(row.completion ?? 0)), title: t('scoreCompletion'), 'aria-label': `${t('scoreCompletion')}：${row.person}`, onChange: (event) => setScoreDraft(row.person, 'completion', event.target.value), onBlur: (event) => commitScore(row.person, 'completion', { completion: Number(event.target.value) }) }),
+            h(Field, { key: 'quality', type: 'number', style: styles.inlineInput, value: scoreValueOf(row.person, 'quality', String(row.quality ?? 0)), title: t('scoreQuality'), 'aria-label': `${t('scoreQuality')}：${row.person}`, onChange: (event) => setScoreDraft(row.person, 'quality', event.target.value), onBlur: (event) => commitScore(row.person, 'quality', { quality: Number(event.target.value) }) }),
+            h(Field, { key: 'learn', type: 'number', style: styles.inlineInput, value: scoreValueOf(row.person, 'learn', String(row.learn ?? 0)), title: t('scoreLearn'), 'aria-label': `${t('scoreLearn')}：${row.person}`, onChange: (event) => setScoreDraft(row.person, 'learn', event.target.value), onBlur: (event) => commitScore(row.person, 'learn', { learn: Number(event.target.value) }) }),
+            // The weighted total is a default: a person may override it, and clearing the
+            // box goes back to the computed value (§2.4).
+            h(Field, {
+              key: 'total',
+              type: 'number',
+              style: styles.inlineInput,
+              // Empty means "computed"; the computed value shows as the placeholder.
+              value: scoreValueOf(row.person, 'total', row.totalOverride === true ? String(row.total ?? '') : ''),
+              placeholder: String(row.total ?? 0),
+              title: row.totalOverride === true ? t('scoreTotalManual') : t('scoreTotalAuto'),
+              'aria-label': `${t('scoreTotal')}：${row.person}`,
+              onChange: (event) => setScoreDraft(row.person, 'total', event.target.value),
+              onBlur: (event) => {
+                const text = event.target.value.trim()
+                commitScore(row.person, 'total', { total: text === '' ? null : Number(text) })
+              },
+            }),
+            h(Field, { key: 'highlight', type: 'text', style: styles.inlineWide, value: scoreValueOf(row.person, 'highlight', row.highlight ?? ''), placeholder: t('scoreHighlight'), 'aria-label': `${t('scoreHighlight')}：${row.person}`, spellCheck: false, onChange: (event) => setScoreDraft(row.person, 'highlight', event.target.value), onBlur: (event) => commitScore(row.person, 'highlight', { highlight: event.target.value }) }),
+            h(Field, { key: 'improve', type: 'text', style: styles.inlineWide, value: scoreValueOf(row.person, 'improve', row.improve ?? ''), placeholder: t('scoreImprove'), 'aria-label': `${t('scoreImprove')}：${row.person}`, spellCheck: false, onChange: (event) => setScoreDraft(row.person, 'improve', event.target.value), onBlur: (event) => commitScore(row.person, 'improve', { improve: event.target.value }) }),
+            // The evidence is editable here because it is what makes the score traceable:
+            // several entries are separated by a semicolon or a new line (§2.4).
+            h(Field, {
+              key: 'basis',
+              type: 'text',
+              style: styles.inlineWide,
+              value: scoreValueOf(row.person, 'basis', (row.basis ?? []).join('；')),
+              placeholder: t('scoreBasisPlaceholder'),
+              title: `${t('scoreBasis')}: ${(row.basis ?? []).join('\n')}`,
+              'aria-label': `${t('scoreBasis')}：${row.person}`,
+              spellCheck: false,
+              onChange: (event) => setScoreDraft(row.person, 'basis', event.target.value),
+              onBlur: (event) => {
+                const basis = event.target.value.split(/[；;\n]/u).map((entry) => entry.trim()).filter((entry) => entry !== '')
+                commitScore(row.person, 'basis', { basis })
+              },
+            }),
+            (row.basis ?? []).length === 0
+              ? h('span', { key: 'basisbad', style: styles.error }, t('scoreBasisMissing'))
+              : h('span', { key: 'basis', style: styles.chip, title: (row.basis ?? []).join('\n') }, `${t('scoreBasis')} ${(row.basis ?? []).length}`),
             h(Btn, { key: 'del', type: 'button', style: styles.smallButton, onClick: () => { void removeScore(row.person) } }, t('remove')),
           ]))),
-          h('div', { key: 'add', style: styles.row }, [
+          viewed === null ? h('div', { key: 'add', style: styles.row }, [
             h(Field, {
               key: 'person',
               type: 'text',
@@ -4186,7 +5076,7 @@ registerProcessor('meeting-capture', MeetingCapture)
               onKeyDown: (event) => { if (event.key === 'Enter') void addScore() },
             }),
             h(Btn, { key: 'add', type: 'button', style: styles.smallButton, onClick: () => { void addScore() } }, t('addEntry')),
-          ]),
+          ]) : null,
         ]),
         notes.length === 0 ? null : h('div', { key: 'notes', style: styles.list }, [
           h('div', { key: 'label', style: styles.label }, `${t('inkNote')} (${notes.length})`),
@@ -4242,9 +5132,11 @@ registerProcessor('meeting-capture', MeetingCapture)
           }, t('hubClose'))],
         }) : null,
         // Notices float at the document root so nothing in the panel can cover them, and sit
-        // below dialogs in the layering (4000 against 5000).
-        toasts.length === 0 ? null : float(h('div', { key: 'toasts', style: styles.toasts }, toasts.map((item) => (
-          HostToast === null
+        // below dialogs in the layering (4000 against 5000). A sticky notice uses this
+        // plugin's own card, because the host Toast fades on its own schedule — the one
+        // thing a stop-in-progress notice must not do.
+        toasts.length === 0 ? null : float(h('div', { key: 'toasts', style: styles.toasts, role: 'status', 'aria-live': 'polite' }, toasts.map((item) => (
+          HostToast === null || item.sticky === true
             ? h('div', {
               key: item.id,
               className: 'mr-card',
@@ -4358,6 +5250,9 @@ registerProcessor('meeting-capture', MeetingCapture)
               spellCheck: false,
               onChange: (event) => setNamePrompt((current) => ({ ...current, text: event.target.value })),
             }),
+            // Naming is optional: saying so here is what lets a person start immediately and
+            // trust that the meeting will not stay nameless.
+            namePrompt.start === false ? null : h('span', { key: 'autohint', style: styles.hint }, t('meetingNameAutoHint')),
             // The seat steers the review prompt, so it is chosen here — with the name the
             // meeting is starting under (§5.5). Three buttons cover the usual seats; the
             // narrow field next to them is for a seat of one's own, and it wins when filled.
@@ -4397,9 +5292,9 @@ registerProcessor('meeting-capture', MeetingCapture)
                 kind: value,
                 // Choosing a type names the meeting after it: the title is a default the
                 // person can still edit, and a name left over from another type is worse.
-                text: `${t(KIND_LABEL_KEYS[value])} · ${new Date().toLocaleDateString()}`,
+                text: `${t(NAMING_LABEL_KEYS[value])} · ${new Date().toLocaleDateString()}`,
               })),
-            }, t(KIND_LABEL_KEYS[value])))),
+            }, t(NAMING_LABEL_KEYS[value])))),
             ]),
           ],
           footer: [
@@ -4454,6 +5349,171 @@ registerProcessor('meeting-capture', MeetingCapture)
     }
 
     /**
+     * The start page's guide card for this panel. A single click arms the begin request
+     * and opens the meeting tab; the panel then runs its normal start path, so the
+     * microphone prompt, the meeting creation and the agent hand-off stay unchanged.
+     * @param props - Framework copy plus the injected opener.
+     * @returns one full-width card, matching the guide's own cards.
+     */
+    function GuideStartCard(props) {
+      const t = props.t
+      const [busy, setBusy] = React.useState(false)
+      const [hover, setHover] = React.useState(false)
+      const title = typeof props.title === 'string' && props.title !== '' ? props.title : t('guideTitle')
+      const description = typeof props.description === 'string' && props.description !== ''
+        ? props.description
+        : t('guideDescription')
+      // The shell's own guide card, in the shell's own numbers (GuideBody.module.css):
+      // 380px-wide cell, 56px minimum, 0.5px border, xl radius, 26px glyph, 14/11px text.
+      // Inline styles are the only handle a client plugin has on those hashed classes.
+      const baseBackground = 'var(--dsw-alias-bg-layer-1, rgba(127,127,127,0.06))'
+      return h('button', {
+        type: 'button',
+        'aria-label': title,
+        'aria-busy': busy ? 'true' : undefined,
+        title: description,
+        disabled: busy,
+        style: {
+          boxSizing: 'border-box',
+          width: '100%',
+          maxWidth: '100%',
+          minHeight: 56,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 14,
+          padding: '14px 20px',
+          textAlign: 'left',
+          font: 'inherit',
+          color: 'var(--dsw-alias-label-primary, inherit)',
+          background: hover && !busy ? 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.12))' : baseBackground,
+          border: '0.5px solid var(--dsw-alias-border-l3, rgba(127,127,127,0.24))',
+          borderRadius: 'var(--dsw-radius-xl, 20px)',
+          cursor: busy ? 'progress' : 'pointer',
+          opacity: busy ? 0.7 : 1,
+          transition: 'background 120ms ease',
+        },
+        onMouseEnter: () => setHover(true),
+        onMouseLeave: () => setHover(false),
+        onClick: () => {
+          if (busy) return
+          setBusy(true)
+          // Start the meeting in a fresh conversation: reuse nothing, so the new session
+          // owns the transcript and the Agent's own reading of it.
+          const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
+          let workspaceId
+          try {
+            const snapshot = typeof props.useWorkspaces === 'function' ? props.useWorkspaces((state) => state) : undefined
+            const items = Array.isArray(snapshot?.items) ? snapshot.items : []
+            workspaceId = items.find((item) => Array.isArray(item.sessionIds) && item.sessionIds.includes(sessionId))?.workspaceId
+          } catch (failure) {
+            console.warn('meeting-room: could not read the workspace for the guide card', failure)
+          }
+          try {
+            props.begin(workspaceId)
+          } catch (failure) {
+            console.warn('meeting-room: the guide card could not begin the meeting', failure)
+            setBusy(false)
+            return
+          }
+          // The card stays in the guide list, so it must become clickable again even when
+          // the microphone prompt is declined — the panel reports that failure itself.
+          setTimeout(() => setBusy(false), 2000)
+        },
+      }, [
+        h('span', {
+          key: 'icon',
+          style: {
+            width: 26, height: 26, flex: 'none', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            color: 'var(--dsw-alias-label-secondary, currentColor)',
+          },
+        }, h(MeetingPanelIcon, { size: 26 })),
+        h('span', {
+          key: 'text',
+          style: { display: 'flex', flexDirection: 'column', flex: 1, gap: 3, minWidth: 0 },
+        }, [
+          h('span', {
+            key: 'title',
+            style: {
+              fontSize: 14, lineHeight: 1.4, whiteSpace: 'nowrap',
+              overflow: 'hidden', textOverflow: 'ellipsis',
+            },
+          }, title),
+          h('span', {
+            key: 'description',
+            style: {
+              fontSize: 11, lineHeight: 1.4, color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,0.9))',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            },
+          }, busy ? t('guideOpening') : description),
+        ]),
+      ])
+    }
+
+    /**
+     * One local-model row on the 模型 page: what it is, whether it is usable, and the one
+     * action that applies to that state. Kept in its own component so adding a model kind
+     * only adds a heading on the page, never new markup.
+     * @param props - catalog entry, state flags and the page's callbacks.
+     * @returns the row element.
+     */
+    function ModelRow(props) {
+      const { model, t } = props
+      const state = model.locked === true
+        ? t('modelByDsh')
+        : model.verified === true ? t('modelStateReady') : model.installed === true ? t('modelStateBad') : t('modelStateMissing')
+      const size = model.totalBytes === 0 ? '—' : `${(model.totalBytes / 1048576).toFixed(1)} MB`
+      const actions = []
+      if (model.locked !== true) {
+        if (model.verified === true) {
+          actions.push(h(Btn, {
+            key: 'activate',
+            type: 'button',
+            style: styles.button,
+            disabled: props.used || props.busy,
+            onClick: () => props.onActivate(model.id, model.kind),
+          }, props.used ? t('modelInUse') : t('modelActivate')))
+        } else {
+          actions.push(h(Btn, {
+            key: 'install',
+            type: 'button',
+            style: styles.button,
+            disabled: props.busy || props.downloading,
+            onClick: () => props.onInstall(model.id),
+          }, props.retry ? t('modelRetry') : t('modelInstall')))
+        }
+        actions.push(h(Btn, {
+          key: 'import',
+          type: 'button',
+          style: styles.button,
+          disabled: props.busy,
+          title: t('modelImportHint'),
+          onClick: () => props.onImport(model),
+        }, t('modelImportFile')))
+        if (model.builtin !== true) {
+          actions.push(h(Btn, {
+            key: 'remove',
+            type: 'button',
+            style: styles.button,
+            disabled: props.busy,
+            onClick: () => props.onRemove(model.id),
+          }, t('modelRemove')))
+        }
+      }
+      return h('div', { style: styles.list }, [
+        h('div', { key: 'row', style: styles.row }, [
+          h('span', { key: 'name', style: styles.label }, `${model.name}${props.used ? ` · ${t('modelInUse')}` : ''}`),
+          h('span', { key: 'state', style: styles.stamp }, state),
+        ]),
+        // The kind is the group heading above the row, so the meta line carries only size.
+        h('span', { key: 'meta', style: styles.hint }, `${size} · ${model.sizeClass}${model.languages.length === 0 ? '' : ` · ${model.languages.join('/')}`}`),
+        model.note === '' ? null : h('span', { key: 'note', style: styles.hint }, model.note),
+        model.licence === '' ? null : h('span', { key: 'licence', style: styles.hint }, `${t('modelLicence')}：${model.licence}`),
+        h('div', { key: 'actions', style: styles.row }, actions),
+      ])
+    }
+
+    /**
      * Open the meeting panel from the session header.
      * @param props - Localized copy plus the injected opener.
      * @returns the header button.
@@ -4466,14 +5526,29 @@ registerProcessor('meeting-capture', MeetingCapture)
       React.useEffect(() => {
         const timer = setInterval(() => {
           const pending = pendingMeeting.current
-          if (pending === null || pending.openedByHeader === true) return
-          pending.openedByHeader = true
-          console.info('meeting-room: header opens the panel for', pending.meetingId)
-          try {
-            if (typeof props.openOnly === 'function') props.openOnly()
-            else props.open()
-          } catch (failure) {
-            console.warn('meeting-room: the header could not open the meeting panel', failure)
+          if (pending !== null && pending.openedByHeader !== true) {
+            pending.openedByHeader = true
+            console.info('meeting-room: header opens the panel for', pending.meetingId)
+            try {
+              if (typeof props.openOnly === 'function') props.openOnly()
+              else props.open()
+            } catch (failure) {
+              console.warn('meeting-room: the header could not open the meeting panel', failure)
+            }
+            return
+          }
+          // The start page's guide card starts a new conversation and then asks whoever
+          // is mounted in that conversation to open the meeting tab — this button is the
+          // one surface guaranteed to exist there, and it runs after the switch.
+          if (guideBegin.pending === true && guideBegin.opened !== true) {
+            if (Date.now() > guideBegin.deadline) { guideBegin.pending = false; return }
+            guideBegin.opened = true
+            try {
+              if (typeof props.openOnly === 'function') props.openOnly()
+              else props.open()
+            } catch (failure) {
+              console.warn('meeting-room: the header could not open the meeting panel', failure)
+            }
           }
         }, 300)
         return () => clearInterval(timer)
@@ -5107,12 +6182,23 @@ registerProcessor('meeting-capture', MeetingCapture)
     function MeetingHubPage(props) {
       const t = props.t
       const [records, setRecords] = React.useState([])
+      // The hub used to read the newest 200 and silently stop there; the host caps at 200,
+      // so an older archive needs explicit pages (§5.2).
+      const [recordsTotal, setRecordsTotal] = React.useState(0)
       const [preview, setPreview] = React.useState(null)
       const [error, setError] = React.useState('')
       const [termsText, setTermsText] = React.useState(readTerms)
       /** Push settings and the shared roster live here, not in a single meeting's panel. */
       const [settings, setSettings] = React.useState({ configured: [], people: [], departments: [] })
       const [settingsDraft, setSettingsDraft] = React.useState({ dingtalk: '', wecom: '', appKey: '', appSecret: '', agentId: '', mode: 'group' })
+      /** Which settings group is open. One tab per configuration function (§5.2). */
+      const [settingsTab, setSettingsTab] = React.useState('push')
+      /** The monthly score weights, as percentages; the host stores them normalised (§2.4). */
+      const [weightsDraft, setWeightsDraft] = React.useState({ quality: 40, completion: 40, learn: 20 })
+      const [weightsNote, setWeightsNote] = React.useState('')
+      /** Per-type distillation wording (§9 P4); an empty entry keeps the built-in text. */
+      const [templateDraft, setTemplateDraft] = React.useState({ briefing: '', review: '', weekly: '', monthly: '' })
+      const [templatesNote, setTemplatesNote] = React.useState('')
       const [personDraft, setPersonDraft] = React.useState({ name: '', phone: '', userId: '' })
       const [deptId, setDeptId] = React.useState(0)
       const [directoryBusy, setDirectoryBusy] = React.useState(false)
@@ -5122,6 +6208,42 @@ registerProcessor('meeting-capture', MeetingCapture)
       const [importing, setImporting] = React.useState(false)
       /** Which hub section is showing; the page keeps its own tabs, not the panel's. */
       const [hubTab, setHubTab] = React.useState('records')
+      /** The records page's kind filter chip and its day/week/month grouping (§5.2). */
+      // '__all__' is a state of its own: '' is "general meeting" and must not double as "all".
+      const [hubKind, setHubKind] = React.useState('__all__')
+      const [hubGroup, setHubGroup] = React.useState('day')
+      /**
+       * The model catalog: which models exist, which are installed here, which one each
+       * capability runs, and how a download in flight is going.
+       */
+      const [models, setModels] = React.useState({ models: [], active: {}, problem: '', directory: '', install: null })
+      const [modelBusy, setModelBusy] = React.useState('')
+      /** The hidden field used for "import a model from a local file", and what it is for. */
+      const modelField = React.useRef(null)
+      const modelTarget = React.useRef({ id: '', name: '' })
+      /**
+       * Cloud recognition: the summary the host reports (never the key itself) and the fields
+       * being edited. A blank key field means "leave the stored one alone".
+       */
+      const [cloud, setCloud] = React.useState({ consent: false, asr: {}, speaker: {}, state: {} })
+      const [cloudDraft, setCloudDraft] = React.useState({ consent: false, mode: 'local', provider: 'off', baseUrl: '', model: '', language: '', apiKey: '' })
+      const [cloudNote, setCloudNote] = React.useState('')
+      const [cloudBusy, setCloudBusy] = React.useState(false)
+      /**
+       * Speaker recognition: the clustering threshold, whether the end-of-meeting pass covers
+       * every cue, and the voice library (names and evidence only — vectors never arrive here).
+       */
+      const [speakerSettings, setSpeakerSettings] = React.useState({ threshold: 0.6, fullRelabel: true, backfillCap: 60, presets: [], library: [], libraryFile: '' })
+      const [speakerDraft, setSpeakerDraft] = React.useState({ threshold: 0.6, fullRelabel: true, backfillCap: 60 })
+      const [voiceNote, setVoiceNote] = React.useState('')
+      /**
+       * Transcript settings: how numbers and dates are written back, and where a cue is cut.
+       * The cue limits are applied to the live capture loop, not just displayed.
+       */
+      const [transcript, setTranscript] = React.useState({ normalize: true, normalizeRules: [], minChunkSeconds: 1.2, maxChunkSeconds: 12, silenceRms: 0.012, silenceHoldSeconds: 0.7, maxLineChars: 60 })
+      const [transcriptDraft, setTranscriptDraft] = React.useState(null)
+      const [transcriptRules, setTranscriptRules] = React.useState([])
+      const [transcriptNote, setTranscriptNote] = React.useState('')
 
       /** Load settings, the roster and any cached department tree when either tab opens. */
       React.useEffect(() => {
@@ -5132,6 +6254,21 @@ registerProcessor('meeting-capture', MeetingCapture)
             const config = await get('/webhooks')
             const roster = await get('/people')
             if (cancelled) return
+            if (config.scoreWeights !== null && typeof config.scoreWeights === 'object') {
+              setWeightsDraft({
+                quality: Math.round(Number(config.scoreWeights.quality ?? 0.4) * 100),
+                completion: Math.round(Number(config.scoreWeights.completion ?? 0.4) * 100),
+                learn: Math.round(Number(config.scoreWeights.learn ?? 0.2) * 100),
+              })
+            }
+            if (config.templates !== null && typeof config.templates === 'object') {
+              setTemplateDraft({
+                briefing: typeof config.templates.briefing === 'string' ? config.templates.briefing : '',
+                review: typeof config.templates.review === 'string' ? config.templates.review : '',
+                weekly: typeof config.templates.weekly === 'string' ? config.templates.weekly : '',
+                monthly: typeof config.templates.monthly === 'string' ? config.templates.monthly : '',
+              })
+            }
             setSettings({
               ...config,
               people: Array.isArray(roster.people) ? roster.people : [],
@@ -5161,6 +6298,45 @@ registerProcessor('meeting-capture', MeetingCapture)
           setError(failure instanceof Error ? failure.message : String(failure))
         }
       }, [settingsDraft, t])
+
+      /** Store the monthly score weights; the host refuses a set that does not add up. */
+      const saveWeights = React.useCallback(async () => {
+        setError('')
+        setWeightsNote('')
+        try {
+          const reply = await post('/webhooks', { scoreWeights: weightsDraft })
+          if (reply.scoreWeights !== null && typeof reply.scoreWeights === 'object') {
+            setWeightsDraft({
+              quality: Math.round(Number(reply.scoreWeights.quality) * 100),
+              completion: Math.round(Number(reply.scoreWeights.completion) * 100),
+              learn: Math.round(Number(reply.scoreWeights.learn) * 100),
+            })
+          }
+          setWeightsNote(t('scoreWeightSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [t, weightsDraft])
+
+      /** Store the per-type distillation wording; empty fields fall back to the built-in text. */
+      const saveTemplates = React.useCallback(async () => {
+        setError('')
+        setTemplatesNote('')
+        try {
+          const reply = await post('/webhooks', { templates: templateDraft })
+          if (reply.templates !== null && typeof reply.templates === 'object') {
+            setTemplateDraft({
+              briefing: typeof reply.templates.briefing === 'string' ? reply.templates.briefing : '',
+              review: typeof reply.templates.review === 'string' ? reply.templates.review : '',
+              weekly: typeof reply.templates.weekly === 'string' ? reply.templates.weekly : '',
+              monthly: typeof reply.templates.monthly === 'string' ? reply.templates.monthly : '',
+            })
+          }
+          setTemplatesNote(t('templateSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [t, templateDraft])
 
       /**
        * Add, update or remove one person on the shared roster.
@@ -5241,18 +6417,321 @@ registerProcessor('meeting-capture', MeetingCapture)
         }
       }, [termsText])
 
-      /** Re-read the exported artifacts from the host. */
-      const refresh = React.useCallback(async () => {
+      /** Re-read the first page of records from the host, or append the next one. */
+      const refresh = React.useCallback(async (offset = 0) => {
         setError('')
         try {
-          const value = await get('/history?limit=200')
-          setRecords(Array.isArray(value.meetings) ? value.meetings : [])
+          const value = await get(`/history?limit=200&offset=${offset}`)
+          const rows = Array.isArray(value.meetings) ? value.meetings : []
+          setRecords((current) => (offset === 0 ? rows : [...current, ...rows]))
+          setRecordsTotal(typeof value.total === 'number' ? value.total : rows.length)
         } catch (failure) {
           setError(failure instanceof Error ? failure.message : String(failure))
         }
       }, [])
 
       React.useEffect(() => { void refresh() }, [refresh])
+
+      /** Read the cloud summary and seed the fields with it (the key stays blank by design). */
+      const loadCloud = React.useCallback(async () => {
+        try {
+          const value = await get('/cloud')
+          setCloud(value)
+          setCloudDraft({
+            consent: value.consent === true,
+            mode: CLOUD_MODE_VALUES.includes(value.mode) ? value.mode : 'local',
+            provider: value.asr?.provider ?? 'off',
+            baseUrl: value.asr?.baseUrl ?? '',
+            model: value.asr?.model ?? '',
+            language: value.asr?.language ?? '',
+            apiKey: '',
+          })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /** Read the transcript settings and the rule catalogue. */
+      const loadTranscript = React.useCallback(async () => {
+        try {
+          const value = await get('/transcript')
+          const stored = value.transcript ?? {}
+          setTranscript(stored)
+          setTranscriptDraft(stored)
+          setTranscriptRules(Array.isArray(value.rules) ? value.rules : [])
+          // The browser half cuts cues, so the limits have to reach the capture loop; without
+          // this the settings page would be describing something that never happened.
+          applyCueSettings(stored)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /** Store the transcript settings and apply the cue limits immediately. */
+      const saveTranscript = React.useCallback(async () => {
+        setError('')
+        setTranscriptNote('')
+        try {
+          const reply = await post('/transcript', transcriptDraft ?? {})
+          setTranscript(reply.transcript)
+          setTranscriptDraft(reply.transcript)
+          applyCueSettings(reply.transcript)
+          setTranscriptNote(t('cloudSaved'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [transcriptDraft, t])
+
+      /** Read the speaker settings and the voice library. */
+      const loadSpeakerSettings = React.useCallback(async () => {
+        try {
+          const value = await get('/speaker/settings')
+          const speaker = value.speaker ?? {}
+          setSpeakerSettings({
+            threshold: speaker.threshold ?? 0.6,
+            fullRelabel: speaker.fullRelabel !== false,
+            backfillCap: speaker.backfillCap ?? 60,
+            presets: Array.isArray(value.presets) ? value.presets : [],
+            library: Array.isArray(value.library) ? value.library : [],
+            libraryFile: typeof value.libraryFile === 'string' ? value.libraryFile : '',
+          })
+          setSpeakerDraft({
+            threshold: speaker.threshold ?? 0.6,
+            fullRelabel: speaker.fullRelabel !== false,
+            backfillCap: speaker.backfillCap ?? 60,
+          })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      /** Store the speaker settings; the host retires the recogniser when the threshold changes. */
+      const saveSpeakerSettings = React.useCallback(async () => {
+        setError('')
+        setVoiceNote('')
+        try {
+          const reply = await post('/speaker/settings', speakerDraft)
+          setVoiceNote(reply.restarted === true ? t('speakerRestarted') : t('cloudSaved'))
+          await loadSpeakerSettings()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [loadSpeakerSettings, speakerDraft, t])
+
+      /** Forget one voice, or everyone. */
+      const forgetVoice = React.useCallback(async (name) => {
+        setError('')
+        setVoiceNote('')
+        try {
+          if (name === '') await post('/voices/clear', {})
+          else await post('/voices/remove', { name })
+          await loadSpeakerSettings()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [loadSpeakerSettings])
+
+      /** Store the cloud settings. An empty key field leaves the stored key untouched. */
+      const saveCloud = React.useCallback(async () => {
+        setError('')
+        setCloudNote('')
+        setCloudBusy(true)
+        try {
+          const asr = {
+            provider: cloudDraft.provider,
+            baseUrl: cloudDraft.baseUrl,
+            model: cloudDraft.model,
+            language: cloudDraft.language,
+          }
+          if (cloudDraft.apiKey !== '') asr.apiKey = cloudDraft.apiKey
+          await post('/cloud', { consent: cloudDraft.consent, mode: cloudDraft.mode, asr })
+          setCloudNote(t('cloudSaved'))
+          await loadCloud()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setCloudBusy(false)
+        }
+      }, [cloudDraft, loadCloud, t])
+
+      /** Ask the host to try the configured service once — a tenth of a second of silence. */
+      const runCloudTest = React.useCallback(async () => {
+        setError('')
+        setCloudNote('')
+        setCloudBusy(true)
+        try {
+          const reply = await post('/cloud/test', {})
+          const asr = reply.asr ?? {}
+          setCloudNote(`${t('cloudTest')}：${asr.ok === true ? t('cloudOk') : t('cloudFailed')} ${asr.message ?? ''}`)
+          await loadCloud()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setCloudBusy(false)
+        }
+      }, [loadCloud, t])
+
+      React.useEffect(() => {
+        // Cloud recognition lives on 模型 now, but its saved state is shared: read it
+        // whenever either page opens so both show the same answer.
+        if (hubTab === 'settings' || hubTab === 'models') void loadCloud()
+        if (hubTab !== 'settings') return
+        void loadSpeakerSettings()
+        void loadTranscript()
+      }, [hubTab, loadCloud, loadSpeakerSettings, loadTranscript])
+
+      /** Read the model catalog and what is on disk. */
+      const loadModels = React.useCallback(async () => {
+        try {
+          const value = await get('/models')
+          setModels({
+            models: Array.isArray(value.models) ? value.models : [],
+            active: value.active ?? {},
+            problem: typeof value.problem === 'string' ? value.problem : '',
+            directory: typeof value.directory === 'string' ? value.directory : '',
+            install: value.install ?? null,
+          })
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        }
+      }, [])
+
+      React.useEffect(() => {
+        if (hubTab === 'models') void loadModels()
+      }, [hubTab, loadModels])
+
+      // A model download runs for minutes, so the page polls while one is in flight — the
+      // percentage it shows is the host's own byte count, not an animation.
+      React.useEffect(() => {
+        if (models.install?.phase !== 'downloading') return undefined
+        const timer = setInterval(() => { void loadModels() }, 1000)
+        return () => clearInterval(timer)
+      }, [models.install?.phase, loadModels])
+
+      /**
+       * Download one model through the host, which verifies size and sha256 as it writes.
+       * @param id - model id.
+       */
+      const installModelNow = React.useCallback(async (id) => {
+        setError('')
+        setSettingsNote('')
+        setModelBusy(id)
+        try {
+          const reply = await post('/models/install', { id })
+          setSettingsNote(reply.error === undefined ? `${t('modelInstalled')}: ${id}` : String(reply.error))
+          if (reply.error !== undefined) setError(String(reply.error))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setModelBusy('')
+          await loadModels()
+        }
+      }, [loadModels, t])
+
+      /**
+       * Install a model from a file the person already has — an offline machine, a private
+       * mirror, or a model they trained. The bytes decide: a catalog sha256 must match.
+       * @param id - model id.
+       * @param name - which file of that model.
+       * @param file - the chosen file.
+       */
+      const importModelNow = React.useCallback(async (id, name, file) => {
+        if (file === undefined || file === null) return
+        setError('')
+        setSettingsNote('')
+        setModelBusy(id)
+        try {
+          const response = await fetch(`${PREFIX}/models/import?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: file,
+          })
+          const text = await response.text()
+          let value = {}
+          try { value = text === '' ? {} : JSON.parse(text) } catch { value = {} }
+          if (!response.ok) {
+            setError(typeof value.error === 'string' ? value.error : `${response.status}`)
+          } else {
+            setSettingsNote(`${t('modelImported')}: ${name}`)
+          }
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setModelBusy('')
+          await loadModels()
+        }
+      }, [loadModels, t])
+
+      /** Choose which model a capability runs ('' goes back to the built-in default). */
+      const activateModelNow = React.useCallback(async (kind, id) => {
+        setError('')
+        setSettingsNote('')
+        setModelBusy(id)
+        try {
+          const reply = await post('/models/activate', { kind, id })
+          if (reply.error !== undefined) setError(String(reply.error))
+          else setSettingsNote(t('modelActivated'))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setModelBusy('')
+          await loadModels()
+        }
+      }, [loadModels, t])
+
+      /** Remove a model's files from this machine (built-ins can only be switched away from). */
+      const removeModelNow = React.useCallback(async (id) => {
+        setError('')
+        setSettingsNote('')
+        setModelBusy(id)
+        try {
+          const reply = await post('/models/remove', { id })
+          if (reply.error !== undefined) setError(String(reply.error))
+          else setSettingsNote(`${t('modelRemoved')}: ${reply.removed ?? 0}`)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setModelBusy('')
+          await loadModels()
+        }
+      }, [loadModels, t])
+
+      /**
+       * One row on the 模型 page. The row owns its state text and actions; the page owns
+       * the network calls, so a download's progress stays in one place.
+       * @param model - catalog entry from `/models`.
+       * @returns the row element.
+       */
+      const renderModelRow = (model) => h(ModelRow, {
+        key: model.id,
+        model,
+        used: models.active[model.kind] === model.id,
+        busy: modelBusy === model.id,
+        downloading: models.install?.phase === 'downloading',
+        retry: models.install?.phase === 'failed' && models.install.id === model.id,
+        t,
+        onActivate: (modelId, modelKind) => { void activateModelNow(modelKind, modelId) },
+        onInstall: (modelId) => { void installModelNow(modelId) },
+        onImport: (entry) => {
+          // The file name decides which file of the model this is, so the person is told
+          // what to pick; the host refuses anything that does not match.
+          modelTarget.current = { id: entry.id, name: entry.files[0]?.name ?? '' }
+          modelField.current?.click()
+        },
+        onRemove: (modelId) => { void removeModelNow(modelId) },
+      })
+
+      /** Kinds this page has no heading for still get listed, under 其它. */
+      const otherModels = models.models.filter((model) => !MODEL_KIND_ORDER.some(([kind]) => kind === model.kind))
+
+      // Which recogniser is in effect right now, read from the saved settings rather than the
+      // draft: a person who has not pressed 保存 must not be told the cloud is already on.
+      const cloudModeSaved = CLOUD_MODE_VALUES.includes(cloud.mode) ? cloud.mode : 'local'
+      const cloudModeInEffect = cloudModeSaved === 'local'
+        ? t('cloudModeNowLocal')
+        : cloudModeSaved === 'cloud-only'
+          ? t('cloudModeNowStrict')
+          : cloud.state?.fallback === true ? t('cloudModeNowFallback') : t('cloudModeNowCloud')
 
       /**
        * Bring one exported archive in as a meeting of this machine. The bytes go up as they
@@ -5385,6 +6864,65 @@ registerProcessor('meeting-capture', MeetingCapture)
       }, [props, t])
 
 
+      /** The records the kind chip keeps, grouped by the chosen calendar bucket (§5.2). */
+      const visibleRecords = records.filter((row) => hubKind === '__all__' || row.kind === hubKind)
+      const recordGroups = []
+      for (const row of visibleRecords) {
+        const bucket = periodBucketOf(row.startedAt, hubGroup)
+        const group = recordGroups.find((entry) => entry.bucket === bucket)
+        if (group === undefined) recordGroups.push({ bucket, rows: [row] })
+        else group.rows.push(row)
+      }
+
+      /**
+       * One meeting row: fixed columns — when, what, what it holds, what can be done with
+       * it — so the rows line up down the page instead of drifting with the name's length.
+       */
+      const recordRow = (row) => h('div', {
+        key: row.meetingId,
+        style: styles.hubRecord,
+      }, [
+        h('span', { key: 'when', style: styles.hubRecordWhen }, new Date(row.startedAt).toLocaleString()),
+        h('div', { key: 'main', style: styles.hubRecordMain }, [
+          h(Btn, {
+            key: 'open',
+            type: 'button',
+            style: styles.linkButton,
+            onClick: () => { void openTranscript(row) },
+          }, row.title === '' ? t('meetingNameNone') : row.title),
+          h('span', { key: 'meta', style: styles.hint }, [
+            // The type is a badge, not another word in the line: the filter chips and the
+            // list then use the same vocabulary.
+            row.kind === '' ? null : h('span', { key: 'kind', style: styles.chip }, t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral')),
+            row.period === '' ? null : h('span', { key: 'period', style: styles.stamp }, row.period),
+            ` · ${t('panelTabTranscript')} ${row.counts.segments}`,
+            ` · ${t('points')} ${row.counts.points}`,
+            ` · ${t('tasks')} ${row.counts.tasks}`,
+            // The check-off count the design asks for: an assignment list without its
+            // completion says nothing about whether the work is being done.
+            row.counts.tasks === 0 ? null : ` · ${t('hubTasksDone')} ${row.counts.done ?? 0}/${row.counts.tasks}`,
+            row.counts.documents === 0 ? null : ` · ${t('panelTabMinutes')} ${row.counts.documents}`,
+          ]),
+          row.excerpt === '' ? null : h('span', { key: 'excerpt', style: styles.hubRecordExcerpt }, row.excerpt.length > 60 ? `${row.excerpt.slice(0, 60)}…` : row.excerpt),
+        ]),
+        h('div', { key: 'actions', style: styles.hubRecordActions }, [
+          h(Btn, {
+            key: 'send',
+            type: 'button',
+            style: styles.smallButton,
+            title: t('hubSendHint'),
+            onClick: () => { void sendToNewConversation({ meetingId: row.meetingId }) },
+          }, t('hubSend')),
+          row.sessionId === '' ? null : h(Btn, {
+            key: 'session',
+            type: 'button',
+            style: styles.smallButton,
+            title: t('hubOpenMeetingHint'),
+            onClick: () => { void openMeeting(row) },
+          }, t('hubOpenSession')),
+        ]),
+      ])
+
       return h(Boundary, null, h('section', { style: styles.hub }, [
         h('h1', { key: 'title', style: styles.hubTitle }, t('hubTitle')),
         h('p', { key: 'intro', style: styles.subtitle }, t('hubIntro')),
@@ -5404,6 +6942,132 @@ registerProcessor('meeting-capture', MeetingCapture)
         // Every tab body scrolls on its own: the page keeps its heading, status and tab row,
         // and whatever the tab holds moves under them.
         h('div', { key: 'hubbody', style: styles.hubBody }, [
+        hubTab === 'models' ? h('div', { key: 'models', className: 'mr-card' }, [
+          h('div', { key: 'head', style: styles.row }, [
+            h('span', { key: 'label', style: styles.label }, t('hubTabModels')),
+            h(Btn, { key: 'refresh', type: 'button', style: styles.button, onClick: () => { void loadModels() } }, t('hubRefresh')),
+          ]),
+          h('span', { key: 'hint', style: styles.hint }, t('modelsHint')),
+          // A file someone edited by hand is reported, never silently ignored.
+          models.problem === '' ? null : h('p', { key: 'problem', style: styles.error }, models.problem),
+          models.install?.phase === 'downloading'
+            ? h('p', { key: 'progress', style: styles.note }, `${t('modelDownloading')} ${models.install.file} · ${models.install.total > 0 ? Math.min(100, Math.floor(models.install.received * 100 / models.install.total)) : 0}%`)
+            : null,
+          // Local models first: they are the default, and the recording never leaves the
+          // machine. Grouping by purpose keeps "which speech model" and "which voice model"
+          // from reading as one flat list of downloads.
+          h('span', { key: 'localhead', style: styles.label }, t('modelsLocalTitle')),
+          h('span', { key: 'localhint', style: styles.hint }, t('modelsLocalHint')),
+          h('div', { key: 'list', style: styles.list }, [
+            ...MODEL_KIND_ORDER.flatMap(([kind, labelKey]) => {
+              const rows = models.models.filter((model) => model.kind === kind)
+              if (rows.length === 0) return []
+              return [
+                h('span', { key: `kind-${kind}`, style: styles.stamp }, t(labelKey)),
+                ...rows.map(renderModelRow),
+              ]
+            }),
+            ...(otherModels.length === 0 ? [] : [
+              h('span', { key: 'kind-other', style: styles.stamp }, t('modelKindOther')),
+              ...otherModels.map(renderModelRow),
+            ]),
+          ]),
+          h('span', { key: 'dir', style: styles.hint }, `${t('modelDirectory')}：${models.directory}`),
+          // Cloud sits on the same page: choosing a recognition model is one decision, and
+          // the local/cloud split is the first thing to make visible about it.
+          h('span', { key: 'cloudhead', style: styles.label }, t('modelsCloudTitle')),
+          h('span', { key: 'cloudhint', style: styles.hint }, t('modelsCloudHint')),
+          // The switch comes before the fields: somebody deciding whether to use the cloud
+          // should not have to fill in an address first.
+          h('div', { key: 'cloudmode', style: styles.row }, [
+            h('span', { key: 'label', style: styles.status }, t('cloudMode')),
+            h(Picker, {
+              key: 'select',
+              style: styles.inlineInput,
+              value: cloudDraft.mode,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, mode: event.target.value })),
+            }, CLOUD_MODE_VALUES.map((value) => h('option', { key: value, value }, t(CLOUD_MODE_KEYS[value])))),
+          ]),
+          h('span', { key: 'cloudmodehint', style: styles.hint }, t(CLOUD_MODE_HINTS[cloudDraft.mode] ?? 'cloudModeLocalHint')),
+          // What is actually happening now: the saved mode, never the unsaved draft.
+          h('span', { key: 'cloudmodenow', style: styles.note }, `${t('cloudModeNow')}：${cloudModeInEffect}`),
+          h('div', { key: 'cloudconsent', style: styles.row }, [
+            h(Field, {
+              key: 'consent',
+              type: 'checkbox',
+              checked: cloudDraft.consent,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, consent: event.target.checked })),
+            }),
+            h('span', { key: 'label', style: styles.status }, t('cloudConsent')),
+          ]),
+          h('div', { key: 'cloudprovider', style: styles.row }, [
+            h('span', { key: 'label', style: styles.status }, t('cloudProvider')),
+            h(Picker, {
+              key: 'select',
+              style: styles.inlineInput,
+              value: cloudDraft.provider,
+              onChange: (event) => setCloudDraft((draft) => ({ ...draft, provider: event.target.value })),
+            }, CLOUD_PROVIDER_VALUES.map((value) => h('option', { key: value, value }, t(CLOUD_PROVIDER_KEYS[value])))),
+          ]),
+          h(Field, {
+            key: 'cloudbase',
+            style: styles.textarea,
+            placeholder: 'https://api.example.com/v1',
+            value: cloudDraft.baseUrl,
+            spellCheck: false,
+            onChange: (event) => setCloudDraft((draft) => ({ ...draft, baseUrl: event.target.value })),
+          }),
+          h(Field, {
+            key: 'cloudmodel',
+            style: styles.textarea,
+            placeholder: 'model（如 whisper-1）',
+            value: cloudDraft.model,
+            spellCheck: false,
+            onChange: (event) => setCloudDraft((draft) => ({ ...draft, model: event.target.value })),
+          }),
+          h(Field, {
+            key: 'cloudlanguage',
+            style: styles.textarea,
+            placeholder: 'language（如 zh，可留空）',
+            value: cloudDraft.language,
+            spellCheck: false,
+            onChange: (event) => setCloudDraft((draft) => ({ ...draft, language: event.target.value })),
+          }),
+          h(Field, {
+            key: 'cloudkey',
+            type: 'password',
+            style: styles.textarea,
+            placeholder: cloud.asr?.keySet === true ? t('secretKept') : 'API Key',
+            value: cloudDraft.apiKey,
+            spellCheck: false,
+            onChange: (event) => setCloudDraft((draft) => ({ ...draft, apiKey: event.target.value })),
+          }),
+          // Saying exactly where the audio would go is the point of asking: "cloud" on its
+          // own is not something a person can judge.
+          h('span', { key: 'cloudwhere', style: styles.hint }, cloud.asr?.host === undefined || cloud.asr.host === ''
+            ? t('cloudNowhere')
+            : `${t('cloudWhere')}：${cloud.asr.host} · ${t('cloudRetention')}`),
+          cloud.state?.fallback === true
+            ? h('span', { key: 'cloudfallback', style: styles.error }, `${t('cloudFallback')}：${cloud.state.message}`)
+            : null,
+          h('div', { key: 'cloudactions', style: styles.row }, [
+            h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveCloud() } }, t('cloudSave')),
+            h(Btn, { key: 'test', type: 'button', style: styles.button, disabled: cloudBusy, onClick: () => { void runCloudTest() } }, t('cloudTest')),
+            cloudNote === '' ? null : h('span', { key: 'note', style: styles.status }, cloudNote),
+          ]),
+          h('input', {
+            key: 'modelfile',
+            type: 'file',
+            ref: modelField,
+            style: { display: 'none' },
+            onChange: (event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              const target = modelTarget.current
+              void importModelNow(target.id, target.name, file)
+            },
+          }),
+        ]) : null,
         hubTab === 'terms' ? h('div', { key: 'terms' }, [
           h('label', { key: 'label', style: styles.label, htmlFor: 'meeting-room-hub-terms' }, t('terms')),
           h('span', { key: 'hint', style: styles.hint }, t('termsHint')),
@@ -5420,7 +7084,18 @@ registerProcessor('meeting-capture', MeetingCapture)
           h('div', { key: 'head', style: styles.row }, [
             h('span', { key: 'label', style: styles.label }, t('robotSettings')),
           ]),
+          // One tab per configuration function: a single long card made every setting look
+          // equally important and hid the one a person came for.
+          h('div', { key: 'settingstabs', style: styles.row, role: 'tablist', 'aria-label': t('settingsTabs') }, SETTINGS_TABS.map(([id, label]) => h(Btn, {
+            key: id,
+            type: 'button',
+            role: 'tab',
+            'aria-selected': settingsTab === id,
+            style: settingsTab === id ? styles.buttonActive : styles.button,
+            onClick: () => setSettingsTab(id),
+          }, t(label)))),
           h('div', { key: 'body', style: styles.list }, [
+            settingsTab !== 'push' ? null : h('div', { key: 'settings-push', style: styles.list }, [
             // The delivery choice comes first: it decides whether the fields below matter.
             h('div', { key: 'mode', style: styles.row }, [
               h('span', { key: 'label', style: styles.status }, t('pushMode')),
@@ -5477,6 +7152,189 @@ registerProcessor('meeting-capture', MeetingCapture)
             h('div', { key: 'actions', style: styles.row }, [
               h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSettings() } }, t('robotSave')),
               settingsNote === '' ? null : h('span', { key: 'note', style: styles.status }, settingsNote),
+            ]),
+            ]),
+            settingsTab !== 'weights' ? null : h('div', { key: 'settings-weights', style: styles.list }, [
+            // Monthly score weights (§2.4, P4). They are stored as fractions but edited as
+            // percentages, and the three must add up before anything is written.
+            h('span', { key: 'weightstitle', style: styles.label }, t('scoreWeightTitle')),
+            h('span', { key: 'weightshint', style: styles.hint }, t('scoreWeightHint')),
+            h('div', { key: 'weights', style: styles.row }, [
+              ...['quality', 'completion', 'learn'].map((key) => h('label', { key, style: styles.row }, [
+                h('span', { key: 'label', style: styles.status }, t(key === 'quality' ? 'scoreQuality' : key === 'completion' ? 'scoreCompletion' : 'scoreLearn')),
+                h(Field, {
+                  key: 'value',
+                  type: 'number',
+                  min: 0,
+                  max: 100,
+                  step: 1,
+                  style: styles.inlineInput,
+                  value: String(weightsDraft[key] ?? 0),
+                  onChange: (event) => setWeightsDraft((draft) => ({ ...draft, [key]: Number(event.target.value) })),
+                }),
+                h('span', { key: 'pct', style: styles.status }, '%'),
+              ])),
+              h('span', {
+                key: 'sum',
+                style: (weightsDraft.quality + weightsDraft.completion + weightsDraft.learn) === 100 ? styles.status : styles.error,
+              }, `${t('scoreWeightSum')} ${weightsDraft.quality + weightsDraft.completion + weightsDraft.learn}%`),
+            ]),
+            h('div', { key: 'weightsactions', style: styles.row }, [
+              h(Btn, { key: 'saveweights', type: 'button', style: styles.button, onClick: () => { void saveWeights() } }, t('scoreWeightSave')),
+              weightsNote === '' ? null : h('span', { key: 'note', style: styles.status }, weightsNote),
+            ]),
+            ]),
+            settingsTab !== 'templates' ? null : h('div', { key: 'settings-templates', style: styles.list }, [
+            // Per-type distillation wording (§9 P4): the prompt behind each one-click button
+            // can be replaced without touching the code. An empty box uses the built-in text.
+            h('span', { key: 'templatestitle', style: styles.label }, t('templateTitle')),
+            h('span', { key: 'templateshint', style: styles.hint }, t('templateHint')),
+            ...['briefing', 'review', 'weekly', 'monthly'].map((kind) => h('label', { key: kind, style: styles.fieldBlock }, [
+              h('span', { key: 'label', style: styles.status }, t(KIND_LABEL_KEYS[kind])),
+              h('textarea', {
+                key: 'text',
+                style: styles.templateArea,
+                value: templateDraft[kind] ?? '',
+                placeholder: t(DISTILL_PROMPT_KEYS[kind]),
+                spellCheck: false,
+                onChange: (event) => setTemplateDraft((draft) => ({ ...draft, [kind]: event.target.value })),
+              }),
+            ])),
+            h('div', { key: 'templateactions', style: styles.row }, [
+              h(Btn, { key: 'savetemplates', type: 'button', style: styles.button, onClick: () => { void saveTemplates() } }, t('templateSave')),
+              templatesNote === '' ? null : h('span', { key: 'note', style: styles.status }, templatesNote),
+            ]),
+            ]),
+            settingsTab !== 'speaker' ? null : h('div', { key: 'settings-speaker', style: styles.list }, [
+            // Speaker recognition: how voices are told apart, and the library that remembers them.
+            h('span', { key: 'speakertitle', style: styles.label }, t('speakerTitle')),
+            h('div', { key: 'presets', style: styles.row }, [
+              h('span', { key: 'label', style: styles.status }, t('speakerThreshold')),
+              ...speakerSettings.presets.map((preset) => h(Btn, {
+                key: preset.id,
+                type: 'button',
+                style: speakerDraft.threshold === preset.threshold ? styles.buttonActive : styles.button,
+                title: preset.note,
+                onClick: () => setSpeakerDraft((draft) => ({ ...draft, threshold: preset.threshold })),
+              }, `${preset.threshold}`)),
+              h(Field, {
+                key: 'threshold',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(speakerDraft.threshold),
+                onChange: (event) => setSpeakerDraft((draft) => ({ ...draft, threshold: Number(event.target.value) })),
+              }),
+            ]),
+            h('div', { key: 'full', style: styles.row }, [
+              h(Field, {
+                key: 'fullrelabel',
+                type: 'checkbox',
+                checked: speakerDraft.fullRelabel,
+                onChange: (event) => setSpeakerDraft((draft) => ({ ...draft, fullRelabel: event.target.checked })),
+              }),
+              h('span', { key: 'label', style: styles.status }, t('speakerFullRelabel')),
+              speakerDraft.fullRelabel ? null : h(Field, {
+                key: 'cap',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(speakerDraft.backfillCap),
+                onChange: (event) => setSpeakerDraft((draft) => ({ ...draft, backfillCap: Number(event.target.value) })),
+              }),
+            ]),
+            h('span', { key: 'speakerhint', style: styles.hint }, t('speakerSettingsHint')),
+            h('div', { key: 'voicelist', style: styles.list }, speakerSettings.library.length === 0
+              ? [h('span', { key: 'none', style: styles.hint }, t('voiceLibraryEmpty'))]
+              : [
+                h('span', { key: 'label', style: styles.label }, `${t('voiceLibrary')} (${speakerSettings.library.length})`),
+                ...speakerSettings.library.map((voice) => h('div', { key: voice.name, style: styles.row }, [
+                  h('span', { key: 'name', style: styles.status }, `${voice.name} · ${voice.count}`),
+                  h(Btn, {
+                    key: 'forget',
+                    type: 'button',
+                    style: styles.smallButton,
+                    onClick: () => { void forgetVoice(voice.name) },
+                  }, t('voiceForget')),
+                ])),
+                h(Btn, {
+                  key: 'clear',
+                  type: 'button',
+                  style: styles.smallButton,
+                  onClick: () => { void forgetVoice('') },
+                }, t('voiceClear')),
+              ]),
+            h('span', { key: 'voicefile', style: styles.hint }, `${t('voiceLibraryFile')}：${speakerSettings.libraryFile}`),
+            h('div', { key: 'speakeractions', style: styles.row }, [
+              h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveSpeakerSettings() } }, t('speakerSave')),
+              voiceNote === '' ? null : h('span', { key: 'note', style: styles.status }, voiceNote),
+            ]),
+            ]),
+            settingsTab !== 'transcript' ? null : h('div', { key: 'settings-transcript', style: styles.list }, [
+            // Transcript: how it reads, and where a cue is cut.
+            h('span', { key: 'transcripttitle', style: styles.label }, t('transcriptTitle')),
+            h('div', { key: 'normalize', style: styles.row }, [
+              h(Field, {
+                key: 'on',
+                type: 'checkbox',
+                checked: transcriptDraft?.normalize !== false,
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), normalize: event.target.checked })),
+              }),
+              h('span', { key: 'label', style: styles.status }, t('transcriptNormalize')),
+            ]),
+            h('span', { key: 'normalizehint', style: styles.hint }, t('transcriptNormalizeHint')),
+            // The switch decides whether the cue is shaped for a local recogniser or sent whole
+            // to the cloud, so it has to say which one this installation will actually use.
+            h('div', { key: 'cues', style: styles.row }, [
+              h('span', { key: 'min', style: styles.status }, t('transcriptMinCue')),
+              h(Field, {
+                key: 'minvalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.minChunkSeconds ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), minChunkSeconds: Number(event.target.value) })),
+              }),
+              h('span', { key: 'max', style: styles.status }, t('transcriptMaxCue')),
+              h(Field, {
+                key: 'maxvalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.maxChunkSeconds ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), maxChunkSeconds: Number(event.target.value) })),
+              }),
+            ]),
+            h('div', { key: 'lines', style: styles.row }, [
+              h('span', { key: 'linechars', style: styles.status }, t('transcriptMaxLine')),
+              h(Field, {
+                key: 'linevalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.maxLineChars ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), maxLineChars: Number(event.target.value) })),
+              }),
+            ]),
+            h('div', { key: 'vad', style: styles.row }, [
+              h('span', { key: 'hold', style: styles.status }, t('transcriptSilenceHold')),
+              h(Field, {
+                key: 'holdvalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.silenceHoldSeconds ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), silenceHoldSeconds: Number(event.target.value) })),
+              }),
+              h('span', { key: 'rms', style: styles.status }, t('transcriptSilenceRms')),
+              h(Field, {
+                key: 'rmsvalue',
+                type: 'number',
+                style: styles.inlineInput,
+                value: String(transcriptDraft?.silenceRms ?? ''),
+                onChange: (event) => setTranscriptDraft((draft) => ({ ...(draft ?? transcript), silenceRms: Number(event.target.value) })),
+              }),
+            ]),
+            h('span', { key: 'cuehint', style: styles.hint }, t('transcriptCueHint')),
+            h('span', { key: 'rulecount', style: styles.hint }, `${t('transcriptRules')}：${(transcriptDraft?.normalizeRules ?? []).length}/${transcriptRules.length}`),
+            h('div', { key: 'transcriptactions', style: styles.row }, [
+              h(Btn, { key: 'save', type: 'button', style: styles.button, onClick: () => { void saveTranscript() } }, t('transcriptSave')),
+              transcriptNote === '' ? null : h('span', { key: 'note', style: styles.status }, transcriptNote),
+            ]),
             ]),
           ]),
         ]) : null,
@@ -5608,53 +7466,51 @@ registerProcessor('meeting-capture', MeetingCapture)
               },
             }),
           ]),
-          records.length === 0
-            ? h('p', { key: 'empty', style: styles.empty }, t('hubEmpty'))
+          // Where the last meeting left off: opening the record page should answer "what did
+          // we last talk about?" before the person scrolls the list.
+          records.length === 0 ? null : h('span', { key: 'lasttopic', style: styles.hint },
+            `${t('hubLastTopic')}：${records[0].title === '' ? t('meetingNameNone') : records[0].title}`
+            + `${records[0].excerpt === '' ? '' : ` · ${records[0].excerpt.length > 50 ? `${records[0].excerpt.slice(0, 50)}…` : records[0].excerpt}`}`),
+          // Kind filter chips and the day/week/month grouping (§5.2): the same history,
+          // asked for by type and by the calendar unit that type is judged on.
+          h('div', { key: 'filters', style: styles.row }, [
+            h('div', { key: 'kinds', className: 'mr-chips' }, ['__all__', ...KIND_VALUES].map((value) => h(Btn, {
+              key: value === '' ? 'general' : value,
+              type: 'button',
+              style: hubKind === value ? styles.buttonActive : styles.button,
+              onClick: () => setHubKind(value),
+            }, t(value === '__all__' ? 'hubAll' : KIND_LABEL_KEYS[value])))),
+            h(Picker, {
+              key: 'group',
+              style: styles.inlineInput,
+              value: hubGroup,
+              title: t('hubGroupBy'),
+              onChange: (event) => setHubGroup(event.target.value),
+            }, [['day', 'hubGroupDay'], ['week', 'hubGroupWeek'], ['month', 'hubGroupMonth']].map(([value, key]) => h('option', {
+              key: value,
+              value,
+            }, t(key)))),
+          ]),
+          visibleRecords.length === 0
+            ? h('p', { key: 'empty', style: styles.empty }, records.length === 0 ? t('hubEmpty') : t('hubFilterEmpty'))
             // One row per MEETING, not per exported file: the meeting is the record, and its
             // files are artifacts of it (FEATURES §5.4's rule, applied to this page too).
-            : h('div', { key: 'list', className: 'mr-list' }, records.map((row) => h('div', {
-              key: row.meetingId,
-              style: styles.hubRecord,
+            : h('div', { key: 'list', className: 'mr-list' }, recordGroups.map((group) => h('div', {
+              key: group.bucket,
+              style: styles.list,
             }, [
-              // Fixed columns — when, what, what it holds, what can be done with it — so the
-              // rows line up down the page instead of drifting with the length of a name.
-              h('span', { key: 'when', style: styles.hubRecordWhen }, new Date(row.startedAt).toLocaleString()),
-              h('div', { key: 'main', style: styles.hubRecordMain }, [
-                h(Btn, {
-                  key: 'open',
-                  type: 'button',
-                  style: styles.linkButton,
-                  onClick: () => { void openTranscript(row) },
-                }, row.title === '' ? t('meetingNameNone') : row.title),
-                h('span', { key: 'meta', style: styles.hint }, [
-                  row.kind === '' ? t('kindGeneral') : t(KIND_LABEL_KEYS[row.kind] ?? 'kindGeneral'),
-                  row.period === '' ? null : ` · ${row.period}`,
-                  ` · ${t('panelTabTranscript')} ${row.counts.segments}`,
-                  ` · ${t('points')} ${row.counts.points}`,
-                  ` · ${t('tasks')} ${row.counts.tasks}`,
-                  row.counts.documents === 0 ? null : ` · ${t('panelTabMinutes')} ${row.counts.documents}`,
-                ].filter((part) => part !== null).join('')),
-                row.excerpt === '' ? null : h('span', { key: 'excerpt', style: styles.hubRecordExcerpt }, row.excerpt.length > 60 ? `${row.excerpt.slice(0, 60)}…` : row.excerpt),
-              ]),
-              h('div', { key: 'actions', style: styles.hubRecordActions }, [
-                h(Btn, {
-                  key: 'send',
-                  type: 'button',
-                  style: styles.smallButton,
-                  title: t('hubSendHint'),
-                  onClick: () => { void sendToNewConversation({ meetingId: row.meetingId }) },
-                }, t('hubSend')),
-                row.sessionId === '' ? null : h(Btn, {
-                  key: 'session',
-                  type: 'button',
-                  style: styles.smallButton,
-                  // Switch to that conversation AND open this meeting in the panel beside it:
-                  // the record's own meeting is what the person clicked for.
-                  title: t('hubOpenMeetingHint'),
-                  onClick: () => { void openMeeting(row) },
-                }, t('hubOpenSession')),
-              ]),
+              h('div', { key: 'bucket', style: styles.groupHead }, group.bucket),
+              ...group.rows.map(recordRow),
             ]))),
+          // More than one page: say how many are left and let the person ask for them.
+          records.length < recordsTotal ? h('div', { key: 'more', style: styles.row }, [
+            h(Btn, {
+              key: 'load',
+              type: 'button',
+              style: styles.button,
+              onClick: () => { void refresh(records.length) },
+            }, `${t('hubLoadMore')} (${recordsTotal - records.length})`),
+          ]) : null,
         ]) : null,
         hubTab === 'records' && preview !== null ? h('div', { key: 'preview', className: 'mr-card' }, [
           h('div', { key: 'head', style: styles.row }, [
@@ -5750,7 +7606,7 @@ registerProcessor('meeting-capture', MeetingCapture)
       ])])
     }
     return {
-      inject: ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'layout', 'sessions'],
+      inject: ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'layout', 'sessions', 'uiWorkspace'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'meeting-room: dictionaries')
         const t = ctx.locale.bind(NS)
@@ -5898,6 +7754,15 @@ registerProcessor('meeting-capture', MeetingCapture)
           id: TAB_ID,
           kind: TAB_KIND,
           title: () => t('title'),
+          // The start page's guide: one card, first in the list, that opens this panel and
+          // starts recording (see GuideStartCard). Clicking a guide card opens its kind, so
+          // the card itself only has to arm the begin request.
+          guide: [{
+            id: 'start',
+            order: 5,
+            title: () => t('guideTitle'),
+            description: () => t('guideDescription'),
+          }],
         }), 'meeting-room: tab type')
 
         ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
@@ -5921,11 +7786,81 @@ registerProcessor('meeting-capture', MeetingCapture)
               }
             },
             openVoiceInputBundle: () => { if (readRailCollapsed() === true) ctx.layout.toggleSidebar(); const nav = ctx.get('pluginNavigation'); if (nav) nav.openBundle('@deepseek-ai/dsh-experimental-voice-input-bundle'); else ctx.layout.selectPanel('plugins') },
+            /**
+             * Put a Session's conversation in the main panel. Recording belongs to that
+             * Session, so the person must be able to see the Agent working in it; the right
+             * column keeps the meeting record beside it.
+             * @param id - the Session that owns this meeting.
+             */
+            revealConversation: (id) => {
+              if (typeof id !== 'string' || id === '') return
+              try {
+                ctx.uiWorkspace.openSession(id)
+                ctx.layout.selectPanel(null)
+              } catch (failure) {
+                console.warn('meeting-room: could not reveal the meeting conversation', failure)
+              }
+            },
           }),
         }, MeetingPanel))
         ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab.title', key: TAB_ID,
         }, MeetingTabTitle))
+        // One card, not the standard icon button: the whole point is that a single click
+        // begins the meeting, so the click arms the panel and opens its tab.
+        ctx.slots.inject('sidebar.right.tab.guide.entry', () => ctx.slots.register({
+          name: 'sidebar.right.tab.guide.entry', key: TAB_ID, locale: NS,
+          inject: () => ({
+            begin: (workspaceId) => {
+              // Already recording: the panel belongs to the running meeting, so just bring
+              // its tab forward instead of starting a second conversation.
+              if (recorder.active !== null) {
+                try {
+                  ctx.sidebarRight.openTab(TAB_KIND)
+                } catch (failure) {
+                  console.warn('meeting-room: the guide could not open the meeting tab', failure)
+                }
+                return
+              }
+              // A fresh conversation for every meeting: its transcript and the Agent's work
+              // stay in one session instead of mixing with whatever was open before.
+              guideBegin.pending = true
+              guideBegin.opened = false
+              // Without this window a request that never reached a session would fire later.
+              guideBegin.deadline = Date.now() + 15_000
+              void (async () => {
+                try {
+                  if (typeof workspaceId === 'string' && workspaceId !== '') {
+                    // The shell's own "new conversation in this workspace" path: it creates
+                    // the blank Session, hands us its id, and reveals it in the main panel —
+                    // the same call the sidebar's new-session button makes.
+                    await ctx.uiWorkspace.openWorkspace(workspaceId, (created) => {
+                      guideBegin.target = typeof created === 'string' ? created : ''
+                    })
+                  } else {
+                    ctx.uiWorkspace.startSession()
+                  }
+                } catch (failure) {
+                  console.warn('meeting-room: the guide could not open a new conversation', failure)
+                  guideBegin.pending = false
+                  return
+                }
+                // The meeting tab belongs to a session, so it can only be opened after the
+                // switch. Retry briefly: the column rebuilds after the main surface changes.
+                for (const delay of [60, 250, 800, 1600, 3000]) {
+                  window.setTimeout(() => {
+                    if (guideBegin.pending !== true) return
+                    try {
+                      ctx.sidebarRight.openTab(TAB_KIND)
+                    } catch (failure) {
+                      console.warn('meeting-room: the guide could not open the meeting tab', failure)
+                    }
+                  }, delay)
+                }
+              })()
+            },
+          }),
+        }, GuideStartCard))
         ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
           name: 'conversation.session.header.actions',
           id: 'meeting-room.open',

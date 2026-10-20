@@ -7,7 +7,7 @@
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { readdir, stat } from 'node:fs/promises'
+import { mkdir, readdir, rename, stat } from 'node:fs/promises'
 
 /** Accepted request body ceiling; one 8-second 16 kHz mono PCM16 cue is ~256 KB. */
 const MAX_BODY_BYTES = 8 * 1024 * 1024
@@ -48,8 +48,13 @@ export function readBody(req, maxBytes = MAX_BODY_BYTES) {
     req.on('data', (chunk) => {
       size += chunk.length
       if (size > maxBytes) {
-        reject(new Error('request body too large'))
-        req.destroy()
+        const error = new Error('request body too large')
+        error.statusCode = 413
+        // Draining instead of destroying keeps the socket alive long enough to deliver the
+        // error: a destroyed request turns a clear 413 into a bare connection reset.
+        chunks.length = 0
+        req.resume()
+        reject(error)
         return
       }
       chunks.push(chunk)
@@ -135,13 +140,48 @@ export function stampOf(at) {
 }
 
 /**
- * Resolve the directory exports are written to: `$DSH_HOME/meetings`, the same root the
- * meeting records, the speaker models and the handwriting models resolve against.
+ * Resolve the directory exports are written to: `$DSH_HOME/meeting-room/exports`. Keeping
+ * them under the plugin's own root is what makes DESIGN §3.2's promise true — the records,
+ * the recordings and every artifact can be backed up or removed as one directory.
  * @returns an absolute directory path.
  */
 export function exportDirectory() {
   const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
-  return join(home, 'meetings')
+  return join(home, 'meeting-room', 'exports')
+}
+
+/**
+ * Move artifacts written by older versions out of `$DSH_HOME/meetings` into the current
+ * export directory. Recordings are referenced by bare file name, so moving the file keeps
+ * every reference valid; an existing target is never overwritten.
+ * @returns how many files were moved.
+ */
+export async function migrateLegacyExports() {
+  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  const legacy = join(home, 'meetings')
+  const next = exportDirectory()
+  let names = []
+  try {
+    names = await readdir(legacy)
+  } catch {
+    return 0
+  }
+  let moved = 0
+  for (const name of names) {
+    try {
+      const source = join(legacy, name)
+      const info = await stat(source)
+      if (!info.isFile()) continue
+      const target = join(next, name)
+      if (await stat(target).then(() => true).catch(() => false)) continue
+      await mkdir(next, { recursive: true })
+      await rename(source, target)
+      moved += 1
+    } catch {
+      // A locked or unreadable file stays put; the next start tries again.
+    }
+  }
+  return moved
 }
 
 /**
